@@ -1,32 +1,22 @@
-import { useEffect, useRef, useState } from 'react'
-import { Terminal as TerminalIcon, Plus, X, Maximize2, Minimize2 } from 'lucide-react'
+import { useEffect, useRef } from 'react'
+import { Terminal as TerminalIcon, Plus, X, Maximize2, Minimize2, Circle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-// Note: xterm.js will be initialized once dependencies are installed
-// This is a placeholder implementation
+import { useTerminalStore } from '@/stores/terminal'
+import { useTerminal } from '@/hooks/useTerminal'
+import '@xterm/xterm/css/xterm.css'
 
 export function Terminal() {
-  const [tabs, setTabs] = useState<{ id: string; title: string }[]>([
-    { id: '1', title: 'Terminal 1' },
-  ])
-  const [activeTab, setActiveTab] = useState('1')
-  const [fullscreen, setFullscreen] = useState(false)
-  const terminalRef = useRef<HTMLDivElement>(null)
+  const { tabs, activeTabId, fullscreen, addTab, removeTab, setActiveTab, setFullscreen } =
+    useTerminalStore()
 
-  const addTab = () => {
-    const id = Date.now().toString()
-    setTabs([...tabs, { id, title: `Terminal ${tabs.length + 1}` }])
-    setActiveTab(id)
-  }
-
-  const closeTab = (id: string) => {
-    if (tabs.length === 1) return
-    const newTabs = tabs.filter((t) => t.id !== id)
-    setTabs(newTabs)
-    if (activeTab === id) {
-      setActiveTab(newTabs[newTabs.length - 1].id)
+  // Initialize with first tab if empty
+  useEffect(() => {
+    if (tabs.length === 0) {
+      addTab()
     }
-  }
+  }, [tabs.length, addTab])
+
+  const activeTab = tabs.find((t) => t.id === activeTabId)
 
   return (
     <div
@@ -42,22 +32,28 @@ export function Terminal() {
             <div
               key={tab.id}
               className={cn(
-                'flex items-center gap-2 px-4 py-2 border-r border-border cursor-pointer',
-                activeTab === tab.id
+                'flex items-center gap-2 px-4 py-2 border-r border-border cursor-pointer transition-colors',
+                activeTabId === tab.id
                   ? 'bg-background text-text-primary'
-                  : 'text-text-muted hover:text-text-secondary'
+                  : 'text-text-muted hover:text-text-secondary hover:bg-surface-hover'
               )}
               onClick={() => setActiveTab(tab.id)}
             >
               <TerminalIcon className="w-4 h-4" />
-              <span className="text-sm">{tab.title}</span>
+              <span className="text-sm whitespace-nowrap">{tab.title}</span>
+              <Circle
+                className={cn(
+                  'w-2 h-2',
+                  tab.isConnected ? 'fill-accent-green text-accent-green' : 'fill-text-muted text-text-muted'
+                )}
+              />
               {tabs.length > 1 && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    closeTab(tab.id)
+                    removeTab(tab.id)
                   }}
-                  className="ml-2 p-0.5 rounded hover:bg-surface-hover"
+                  className="ml-1 p-0.5 rounded hover:bg-surface-hover"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -65,8 +61,9 @@ export function Terminal() {
             </div>
           ))}
           <button
-            onClick={addTab}
-            className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-hover"
+            onClick={() => addTab()}
+            className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
+            title="New terminal"
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -74,35 +71,60 @@ export function Terminal() {
 
         <button
           onClick={() => setFullscreen(!fullscreen)}
-          className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-hover"
+          className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
+          title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
         >
-          {fullscreen ? (
-            <Minimize2 className="w-4 h-4" />
-          ) : (
-            <Maximize2 className="w-4 h-4" />
-          )}
+          {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
         </button>
       </div>
 
-      {/* Terminal area */}
-      <div
-        ref={terminalRef}
-        className="flex-1 bg-background p-4 font-mono text-sm overflow-auto"
-      >
-        <div className="text-accent-green mb-2">
-          Claude Command Center Terminal
-        </div>
-        <div className="text-text-muted mb-4">
-          xterm.js will be initialized after npm install
-        </div>
-        <div className="flex items-center gap-2 text-text-primary">
-          <span className="text-accent-purple">deploy@kali</span>
-          <span className="text-text-muted">:</span>
-          <span className="text-accent-blue">~</span>
-          <span className="text-text-muted">$</span>
-          <span className="animate-pulse">▌</span>
-        </div>
+      {/* Terminal panels */}
+      <div className="flex-1 relative bg-background overflow-hidden">
+        {tabs.map((tab) => (
+          <TerminalPanel
+            key={tab.id}
+            tabId={tab.id}
+            visible={tab.id === activeTabId}
+          />
+        ))}
       </div>
+    </div>
+  )
+}
+
+interface TerminalPanelProps {
+  tabId: string
+  visible: boolean
+}
+
+function TerminalPanel({ tabId, visible }: TerminalPanelProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const { fit, focus, isConnected } = useTerminal({ tabId, containerRef })
+
+  // Fit and focus when becoming visible
+  useEffect(() => {
+    if (visible) {
+      // Small delay to ensure container is rendered
+      const timer = setTimeout(() => {
+        fit()
+        focus()
+      }, 50)
+      return () => clearTimeout(timer)
+    }
+  }, [visible, fit, focus])
+
+  return (
+    <div
+      className={cn(
+        'absolute inset-0 p-1',
+        visible ? 'block' : 'hidden'
+      )}
+    >
+      <div
+        ref={containerRef}
+        className="w-full h-full"
+        onClick={() => focus()}
+      />
     </div>
   )
 }

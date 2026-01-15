@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { execSync, spawn } from 'child_process'
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import type {
@@ -49,8 +49,31 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('mcp:toggle', async (_event, name: string, enabled: boolean): Promise<boolean> => {
-    // TODO: Implement MCP toggle
-    console.log(`Toggle MCP ${name} to ${enabled}`)
+    const settingsPath = join(CLAUDE_DIR, 'settings.json')
+    try {
+      if (!existsSync(settingsPath)) return false
+
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+      if (!settings.mcpServers?.[name]) return false
+
+      // Toggle disabled state
+      settings.mcpServers[name].disabled = !enabled
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+
+      return true
+    } catch (error) {
+      console.error('Failed to toggle MCP server:', error)
+      return false
+    }
+  })
+
+  ipcMain.handle('mcp:getServer', async (_event, name: string): Promise<MCPServer | null> => {
+    const servers = getMCPServers()
+    return servers.find((s) => s.name === name) || null
+  })
+
+  ipcMain.handle('mcp:reload', async (): Promise<boolean> => {
+    // Claude Code auto-reloads settings, but we can signal a refresh
     return true
   })
 

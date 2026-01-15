@@ -151,6 +151,7 @@ export type IPCChannels = {
   'mcp:list': () => Promise<MCPServer[]>
   'mcp:toggle': (name: string, enabled: boolean) => Promise<boolean>
   'mcp:reload': () => Promise<boolean>
+  'mcp:getServer': (name: string) => Promise<MCPServer | null>
 
   // Memory
   'memory:learnings': (query?: string, limit?: number) => Promise<Learning[]>

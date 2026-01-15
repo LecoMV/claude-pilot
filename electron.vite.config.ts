@@ -40,7 +40,8 @@ export default defineConfig({
         '@stores': resolve(__dirname, 'src/renderer/stores'),
         '@hooks': resolve(__dirname, 'src/renderer/hooks'),
         '@lib': resolve(__dirname, 'src/renderer/lib'),
-        '@types': resolve(__dirname, 'src/renderer/types')
+        '@types': resolve(__dirname, 'src/renderer/types'),
+        '@shared': resolve(__dirname, 'src/shared')
       }
     }
   }

@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc/handlers'
+import { terminalManager, registerTerminalHandlers } from './services/terminal'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -53,8 +54,14 @@ app.whenReady().then(() => {
 
   // Register IPC handlers
   registerIpcHandlers()
+  registerTerminalHandlers()
 
   createWindow()
+
+  // Set main window for terminal manager after creation
+  if (mainWindow) {
+    terminalManager.setMainWindow(mainWindow)
+  }
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -62,6 +69,9 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  // Clean up terminal sessions
+  terminalManager.closeAll()
+
   if (process.platform !== 'darwin') {
     app.quit()
   }

@@ -12,6 +12,7 @@ export default {
         surface: '#2a2a3d',
         'surface-hover': '#313147',
         border: '#3d3d5c',
+        'border-hover': '#4d4d6c',
 
         // Text
         'text-primary': '#cdd6f4',

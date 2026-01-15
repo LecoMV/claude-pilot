@@ -2,7 +2,7 @@
   "name": "claude-command-center",
   "version": "0.1.0",
   "description": "All-in-one command center for Claude Code management, monitoring, and orchestration",
-  "main": "dist/main/index.js",
+  "main": "out/main/index.js",
   "author": "Alex Mayhew",
   "license": "MIT",
   "private": true,
