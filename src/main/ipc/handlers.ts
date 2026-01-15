@@ -14,6 +14,8 @@ import type {
   TokenUsage,
   CompactionSettings,
   SessionSummary,
+  SystemdService,
+  PodmanContainer,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -139,6 +141,23 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('context:setAutoCompact', async (_event, enabled: boolean): Promise<boolean> => {
     return setAutoCompact(enabled)
+  })
+
+  // Services handlers
+  ipcMain.handle('services:systemd', async (): Promise<SystemdService[]> => {
+    return getSystemdServices()
+  })
+
+  ipcMain.handle('services:podman', async (): Promise<PodmanContainer[]> => {
+    return getPodmanContainers()
+  })
+
+  ipcMain.handle('services:systemdAction', async (_event, name: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
+    return systemdAction(name, action)
+  })
+
+  ipcMain.handle('services:podmanAction', async (_event, id: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
+    return podmanAction(id, action)
   })
 }
 
@@ -685,5 +704,130 @@ function getRecentSessions(): SessionSummary[] {
   } catch (error) {
     console.error('Failed to read sessions:', error)
     return []
+  }
+}
+
+// Services functions
+function getSystemdServices(): SystemdService[] {
+  const services: SystemdService[] = []
+  const importantServices = [
+    'postgresql',
+    'docker',
+    'ssh',
+    'nginx',
+    'redis',
+    'memcached',
+    'cron',
+  ]
+
+  try {
+    // Get list of services
+    const result = execSync(
+      'systemctl list-units --type=service --all --no-pager --plain | head -50',
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+
+    const lines = result.trim().split('\n').slice(1) // Skip header
+
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/)
+      if (parts.length < 4) continue
+
+      const name = parts[0].replace('.service', '')
+      const load = parts[1]
+      const active = parts[2]
+      const sub = parts[3]
+      const description = parts.slice(4).join(' ')
+
+      // Only include important or running services
+      if (!importantServices.some((s) => name.includes(s)) && active !== 'active') {
+        continue
+      }
+
+      let status: SystemdService['status'] = 'inactive'
+      if (active === 'active') status = 'running'
+      else if (active === 'failed') status = 'failed'
+      else if (active === 'inactive') status = 'stopped'
+
+      services.push({
+        name,
+        description: description || name,
+        status,
+        enabled: load === 'loaded',
+        activeState: active,
+        subState: sub,
+      })
+    }
+  } catch (error) {
+    console.error('Failed to get systemd services:', error)
+  }
+
+  return services.slice(0, 20)
+}
+
+function getPodmanContainers(): PodmanContainer[] {
+  const containers: PodmanContainer[] = []
+
+  try {
+    const result = execSync(
+      'podman ps -a --format json 2>/dev/null',
+      { encoding: 'utf-8', timeout: 10000 }
+    )
+
+    if (!result.trim()) return containers
+
+    const data = JSON.parse(result)
+
+    for (const c of data) {
+      let status: PodmanContainer['status'] = 'stopped'
+      const state = (c.State || '').toLowerCase()
+      if (state === 'running') status = 'running'
+      else if (state === 'paused') status = 'paused'
+      else if (state === 'exited') status = 'exited'
+
+      const ports: string[] = []
+      if (c.Ports) {
+        for (const p of c.Ports) {
+          if (p.hostPort && p.containerPort) {
+            ports.push(`${p.hostPort}:${p.containerPort}`)
+          }
+        }
+      }
+
+      containers.push({
+        id: c.Id || c.ID || '',
+        name: (c.Names && c.Names[0]) || c.Name || '',
+        image: c.Image || '',
+        status,
+        created: c.Created || c.CreatedAt || '',
+        ports,
+        state: c.State || '',
+        health: c.Status || undefined,
+      })
+    }
+  } catch (error) {
+    console.error('Failed to get podman containers:', error)
+  }
+
+  return containers
+}
+
+function systemdAction(name: string, action: 'start' | 'stop' | 'restart'): boolean {
+  try {
+    execSync(`sudo systemctl ${action} ${name}`, { encoding: 'utf-8', timeout: 30000 })
+    return true
+  } catch (error) {
+    console.error(`Failed to ${action} service ${name}:`, error)
+    return false
+  }
+}
+
+function podmanAction(id: string, action: 'start' | 'stop' | 'restart'): boolean {
+  try {
+    execSync(`podman ${action} ${id}`, { encoding: 'utf-8', timeout: 30000 })
+    return true
+  } catch (error) {
+    console.error(`Failed to ${action} container ${id}:`, error)
+    return false
   }
 }

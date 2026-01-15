@@ -136,6 +136,30 @@ export interface VectorMemory {
   score?: number
 }
 
+// Services types
+export interface SystemdService {
+  name: string
+  description: string
+  status: 'running' | 'stopped' | 'failed' | 'inactive'
+  enabled: boolean
+  activeState: string
+  subState: string
+  pid?: number
+  memory?: string
+  cpu?: string
+}
+
+export interface PodmanContainer {
+  id: string
+  name: string
+  image: string
+  status: 'running' | 'stopped' | 'paused' | 'exited'
+  created: string
+  ports: string[]
+  state: string
+  health?: string
+}
+
 // Context types
 export interface TokenUsage {
   current: number
@@ -223,6 +247,12 @@ export type IPCChannels = {
   'context:sessions': () => Promise<SessionSummary[]>
   'context:compact': () => Promise<boolean>
   'context:setAutoCompact': (enabled: boolean) => Promise<boolean>
+
+  // Services
+  'services:systemd': () => Promise<SystemdService[]>
+  'services:podman': () => Promise<PodmanContainer[]>
+  'services:systemdAction': (name: string, action: 'start' | 'stop' | 'restart') => Promise<boolean>
+  'services:podmanAction': (id: string, action: 'start' | 'stop' | 'restart') => Promise<boolean>
 }
 
 // Window API exposed to renderer
