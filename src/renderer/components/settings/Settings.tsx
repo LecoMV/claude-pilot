@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Settings as SettingsIcon,
   Palette,
@@ -8,14 +8,58 @@ import {
   Shield,
   Save,
   RotateCcw,
+  Check,
+  Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useSettingsStore, type AppSettings } from '@/stores/settings'
 
 type SettingsSection = 'appearance' | 'terminal' | 'memory' | 'notifications' | 'security'
 
 export function Settings() {
+  const { settings, loading, saving, loaded, loadSettings, saveSettings, setSettings, resetSettings } =
+    useSettingsStore()
   const [activeSection, setActiveSection] = useState<SettingsSection>('appearance')
+  const [localSettings, setLocalSettings] = useState<AppSettings>(settings)
   const [hasChanges, setHasChanges] = useState(false)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Load settings on mount
+  useEffect(() => {
+    if (!loaded) {
+      loadSettings()
+    }
+  }, [loaded, loadSettings])
+
+  // Sync local settings when store settings change
+  useEffect(() => {
+    setLocalSettings(settings)
+    setHasChanges(false)
+  }, [settings])
+
+  // Detect changes
+  useEffect(() => {
+    const changed = JSON.stringify(localSettings) !== JSON.stringify(settings)
+    setHasChanges(changed)
+  }, [localSettings, settings])
+
+  const handleChange = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    setLocalSettings((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const handleSave = async () => {
+    setSettings(localSettings)
+    const success = await saveSettings()
+    if (success) {
+      setSaveSuccess(true)
+      setTimeout(() => setSaveSuccess(false), 2000)
+    }
+  }
+
+  const handleReset = () => {
+    setLocalSettings(settings)
+    setHasChanges(false)
+  }
 
   const sections: { id: SettingsSection; icon: typeof SettingsIcon; label: string }[] = [
     { id: 'appearance', icon: Palette, label: 'Appearance' },
@@ -24,6 +68,14 @@ export function Settings() {
     { id: 'notifications', icon: Bell, label: 'Notifications' },
     { id: 'security', icon: Shield, label: 'Security' },
   ]
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-accent-purple" />
+      </div>
+    )
+  }
 
   return (
     <div className="flex gap-6 animate-in">
@@ -55,40 +107,46 @@ export function Settings() {
             <h2 className="font-semibold text-text-primary">
               {sections.find((s) => s.id === activeSection)?.label}
             </h2>
-            {hasChanges && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setHasChanges(false)}
-                  className="btn btn-secondary btn-sm"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  Reset
-                </button>
-                <button
-                  onClick={() => setHasChanges(false)}
-                  className="btn btn-primary btn-sm"
-                >
-                  <Save className="w-4 h-4" />
-                  Save
-                </button>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              {saveSuccess && (
+                <span className="text-sm text-accent-green flex items-center gap-1">
+                  <Check className="w-4 h-4" />
+                  Saved
+                </span>
+              )}
+              {hasChanges && (
+                <>
+                  <button onClick={handleReset} className="btn btn-secondary btn-sm">
+                    <RotateCcw className="w-4 h-4" />
+                    Reset
+                  </button>
+                  <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">
+                    {saving ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save
+                  </button>
+                </>
+              )}
+            </div>
           </div>
           <div className="card-body">
             {activeSection === 'appearance' && (
-              <AppearanceSettings onChange={() => setHasChanges(true)} />
+              <AppearanceSettings settings={localSettings} onChange={handleChange} />
             )}
             {activeSection === 'terminal' && (
-              <TerminalSettings onChange={() => setHasChanges(true)} />
+              <TerminalSettings settings={localSettings} onChange={handleChange} />
             )}
             {activeSection === 'memory' && (
-              <MemorySettings onChange={() => setHasChanges(true)} />
+              <MemorySettings settings={localSettings} onChange={handleChange} />
             )}
             {activeSection === 'notifications' && (
-              <NotificationSettings onChange={() => setHasChanges(true)} />
+              <NotificationSettings settings={localSettings} onChange={handleChange} />
             )}
             {activeSection === 'security' && (
-              <SecuritySettings onChange={() => setHasChanges(true)} />
+              <SecuritySettings settings={localSettings} onChange={handleChange} />
             )}
           </div>
         </div>
@@ -98,18 +156,19 @@ export function Settings() {
 }
 
 interface SettingsProps {
-  onChange: () => void
+  settings: AppSettings
+  onChange: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void
 }
 
-function AppearanceSettings({ onChange }: SettingsProps) {
+function AppearanceSettings({ settings, onChange }: SettingsProps) {
   return (
     <div className="space-y-6">
       <SettingGroup title="Theme">
         <SettingRow label="Color Scheme" description="Choose your preferred color scheme">
           <select
             className="input w-40"
-            onChange={onChange}
-            defaultValue="dark"
+            value={settings.theme}
+            onChange={(e) => onChange('theme', e.target.value as AppSettings['theme'])}
           >
             <option value="dark">Dark</option>
             <option value="light">Light (Coming Soon)</option>
@@ -118,16 +177,25 @@ function AppearanceSettings({ onChange }: SettingsProps) {
         </SettingRow>
         <SettingRow label="Accent Color" description="Primary accent color">
           <div className="flex items-center gap-2">
-            {['purple', 'blue', 'green', 'teal'].map((color) => (
+            {(['purple', 'blue', 'green', 'teal'] as const).map((color) => (
               <button
                 key={color}
-                onClick={onChange}
+                onClick={() => onChange('accentColor', color)}
                 className={cn(
-                  'w-6 h-6 rounded-full',
-                  color === 'purple' && 'bg-accent-purple ring-2 ring-offset-2 ring-offset-background ring-accent-purple',
+                  'w-6 h-6 rounded-full transition-all',
+                  settings.accentColor === color && 'ring-2 ring-offset-2 ring-offset-background',
+                  color === 'purple' && 'bg-accent-purple',
                   color === 'blue' && 'bg-accent-blue',
                   color === 'green' && 'bg-accent-green',
-                  color === 'teal' && 'bg-accent-teal'
+                  color === 'teal' && 'bg-accent-teal',
+                  settings.accentColor === color &&
+                    (color === 'purple'
+                      ? 'ring-accent-purple'
+                      : color === 'blue'
+                        ? 'ring-accent-blue'
+                        : color === 'green'
+                          ? 'ring-accent-green'
+                          : 'ring-accent-teal')
                 )}
               />
             ))}
@@ -137,7 +205,11 @@ function AppearanceSettings({ onChange }: SettingsProps) {
 
       <SettingGroup title="Layout">
         <SettingRow label="Sidebar Default" description="Sidebar state on startup">
-          <select className="input w-40" onChange={onChange} defaultValue="expanded">
+          <select
+            className="input w-40"
+            value={settings.sidebarCollapsed ? 'collapsed' : 'expanded'}
+            onChange={(e) => onChange('sidebarCollapsed', e.target.value === 'collapsed')}
+          >
             <option value="expanded">Expanded</option>
             <option value="collapsed">Collapsed</option>
           </select>
@@ -147,12 +219,16 @@ function AppearanceSettings({ onChange }: SettingsProps) {
   )
 }
 
-function TerminalSettings({ onChange }: SettingsProps) {
+function TerminalSettings({ settings, onChange }: SettingsProps) {
   return (
     <div className="space-y-6">
       <SettingGroup title="Font">
         <SettingRow label="Font Family" description="Terminal font">
-          <select className="input w-48" onChange={onChange} defaultValue="jetbrains">
+          <select
+            className="input w-48"
+            value={settings.terminalFont}
+            onChange={(e) => onChange('terminalFont', e.target.value as AppSettings['terminalFont'])}
+          >
             <option value="jetbrains">JetBrains Mono</option>
             <option value="fira">Fira Code</option>
             <option value="cascadia">Cascadia Code</option>
@@ -162,10 +238,10 @@ function TerminalSettings({ onChange }: SettingsProps) {
           <input
             type="number"
             className="input w-24"
-            defaultValue={14}
+            value={settings.terminalFontSize}
             min={10}
             max={24}
-            onChange={onChange}
+            onChange={(e) => onChange('terminalFontSize', parseInt(e.target.value) || 14)}
           />
         </SettingRow>
       </SettingGroup>
@@ -175,10 +251,10 @@ function TerminalSettings({ onChange }: SettingsProps) {
           <input
             type="number"
             className="input w-32"
-            defaultValue={10000}
+            value={settings.terminalScrollback}
             min={1000}
             max={100000}
-            onChange={onChange}
+            onChange={(e) => onChange('terminalScrollback', parseInt(e.target.value) || 10000)}
           />
         </SettingRow>
       </SettingGroup>
@@ -186,7 +262,7 @@ function TerminalSettings({ onChange }: SettingsProps) {
   )
 }
 
-function MemorySettings({ onChange }: SettingsProps) {
+function MemorySettings({ settings, onChange }: SettingsProps) {
   return (
     <div className="space-y-6">
       <SettingGroup title="PostgreSQL">
@@ -194,16 +270,16 @@ function MemorySettings({ onChange }: SettingsProps) {
           <input
             type="text"
             className="input w-48"
-            defaultValue="localhost"
-            onChange={onChange}
+            value={settings.postgresHost}
+            onChange={(e) => onChange('postgresHost', e.target.value)}
           />
         </SettingRow>
         <SettingRow label="Port" description="Database port">
           <input
             type="number"
             className="input w-24"
-            defaultValue={5433}
-            onChange={onChange}
+            value={settings.postgresPort}
+            onChange={(e) => onChange('postgresPort', parseInt(e.target.value) || 5433)}
           />
         </SettingRow>
       </SettingGroup>
@@ -213,16 +289,16 @@ function MemorySettings({ onChange }: SettingsProps) {
           <input
             type="text"
             className="input w-48"
-            defaultValue="localhost"
-            onChange={onChange}
+            value={settings.memgraphHost}
+            onChange={(e) => onChange('memgraphHost', e.target.value)}
           />
         </SettingRow>
         <SettingRow label="Port" description="Graph database port">
           <input
             type="number"
             className="input w-24"
-            defaultValue={7687}
-            onChange={onChange}
+            value={settings.memgraphPort}
+            onChange={(e) => onChange('memgraphPort', parseInt(e.target.value) || 7687)}
           />
         </SettingRow>
       </SettingGroup>
@@ -230,30 +306,42 @@ function MemorySettings({ onChange }: SettingsProps) {
   )
 }
 
-function NotificationSettings({ onChange }: SettingsProps) {
+function NotificationSettings({ settings, onChange }: SettingsProps) {
   return (
     <div className="space-y-6">
       <SettingGroup title="Notifications">
         <SettingRow label="System Notifications" description="Show desktop notifications">
-          <Toggle defaultChecked onChange={onChange} />
+          <Toggle
+            checked={settings.systemNotifications}
+            onChange={(checked) => onChange('systemNotifications', checked)}
+          />
         </SettingRow>
         <SettingRow label="Sound" description="Play sound for notifications">
-          <Toggle defaultChecked={false} onChange={onChange} />
+          <Toggle
+            checked={settings.soundEnabled}
+            onChange={(checked) => onChange('soundEnabled', checked)}
+          />
         </SettingRow>
       </SettingGroup>
     </div>
   )
 }
 
-function SecuritySettings({ onChange }: SettingsProps) {
+function SecuritySettings({ settings, onChange }: SettingsProps) {
   return (
     <div className="space-y-6">
       <SettingGroup title="Security">
         <SettingRow label="Auto-lock" description="Lock app after inactivity">
-          <Toggle defaultChecked={false} onChange={onChange} />
+          <Toggle
+            checked={settings.autoLock}
+            onChange={(checked) => onChange('autoLock', checked)}
+          />
         </SettingRow>
         <SettingRow label="Clear on Exit" description="Clear sensitive data on app exit">
-          <Toggle defaultChecked onChange={onChange} />
+          <Toggle
+            checked={settings.clearOnExit}
+            onChange={(checked) => onChange('clearOnExit', checked)}
+          />
         </SettingRow>
       </SettingGroup>
     </div>
@@ -293,21 +381,14 @@ function SettingRow({ label, description, children }: SettingRowProps) {
 }
 
 interface ToggleProps {
-  defaultChecked?: boolean
-  onChange?: () => void
+  checked: boolean
+  onChange: (checked: boolean) => void
 }
 
-function Toggle({ defaultChecked = false, onChange }: ToggleProps) {
-  const [checked, setChecked] = useState(defaultChecked)
-
-  const handleToggle = () => {
-    setChecked(!checked)
-    onChange?.()
-  }
-
+function Toggle({ checked, onChange }: ToggleProps) {
   return (
     <button
-      onClick={handleToggle}
+      onClick={() => onChange(!checked)}
       className={cn(
         'w-11 h-6 rounded-full transition-colors relative',
         checked ? 'bg-accent-purple' : 'bg-border'

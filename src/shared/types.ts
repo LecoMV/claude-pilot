@@ -289,6 +289,33 @@ export interface ToolCall {
   output?: string
 }
 
+// App Settings
+export interface AppSettings {
+  // Appearance
+  theme: 'dark' | 'light' | 'auto'
+  accentColor: 'purple' | 'blue' | 'green' | 'teal'
+  sidebarCollapsed: boolean
+
+  // Terminal
+  terminalFont: 'jetbrains' | 'fira' | 'cascadia'
+  terminalFontSize: number
+  terminalScrollback: number
+
+  // Memory
+  postgresHost: string
+  postgresPort: number
+  memgraphHost: string
+  memgraphPort: number
+
+  // Notifications
+  systemNotifications: boolean
+  soundEnabled: boolean
+
+  // Security
+  autoLock: boolean
+  clearOnExit: boolean
+}
+
 // IPC Channel definitions
 export type IPCChannels = {
   // System
@@ -313,7 +340,10 @@ export type IPCChannels = {
     memgraph: { nodes: number; edges: number }
     qdrant: { vectors: number }
   }>
-  'memory:graph': (query: string) => Promise<KnowledgeNode[]>
+  'memory:graph': (query?: string, limit?: number) => Promise<{
+    nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>
+    edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>
+  }>
   'memory:vectors': (query: string, limit?: number) => Promise<VectorMemory[]>
 
   // Terminal
@@ -368,6 +398,10 @@ export type IPCChannels = {
 
   // Chat
   'chat:send': (projectPath: string, message: string, messageId: string) => Promise<boolean>
+
+  // Settings
+  'settings:get': () => Promise<AppSettings>
+  'settings:save': (settings: AppSettings) => Promise<boolean>
 }
 
 // Window API exposed to renderer

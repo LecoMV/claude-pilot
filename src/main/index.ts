@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { registerIpcHandlers } from './ipc/handlers'
+import { registerIpcHandlers, logStreamManager } from './ipc/handlers'
 import { terminalManager, registerTerminalHandlers } from './services/terminal'
 import { setupGlobalErrorHandlers, configureErrorHandler, handleError } from './utils/error-handler'
 
@@ -59,9 +59,10 @@ app.whenReady().then(() => {
 
   createWindow()
 
-  // Set main window for terminal manager after creation
+  // Set main window for terminal manager and log stream manager after creation
   if (mainWindow) {
     terminalManager.setMainWindow(mainWindow)
+    logStreamManager.setMainWindow(mainWindow)
   }
 
   app.on('activate', function () {
@@ -70,8 +71,9 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  // Clean up terminal sessions
+  // Clean up terminal sessions and log streaming
   terminalManager.closeAll()
+  logStreamManager.stop()
 
   if (process.platform !== 'darwin') {
     app.quit()

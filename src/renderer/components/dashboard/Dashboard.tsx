@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { formatBytes, cn } from '@/lib/utils'
 import { useSystemStatus } from '@/hooks/useSystemStatus'
+import { MetricsChart } from './MetricsChart'
 import type { SystemStatus } from '@shared/types'
 
 export function Dashboard() {
@@ -122,6 +123,12 @@ export function Dashboard() {
             color="teal"
           />
         </div>
+      </section>
+
+      {/* Time-series metrics chart */}
+      <section>
+        <h2 className="text-lg font-semibold text-text-primary mb-4">Performance History</h2>
+        <MetricsChart />
       </section>
 
       {/* Memory systems detail */}

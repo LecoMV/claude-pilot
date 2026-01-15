@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMemoryStore, type MemorySource } from '@/stores/memory'
+import { GraphViewer } from './GraphViewer'
 import type { Learning } from '@shared/types'
 
 export function MemoryBrowser() {
@@ -178,7 +179,10 @@ export function MemoryBrowser() {
             <span className="text-sm text-text-muted">{learnings.length} results</span>
           )}
         </div>
-        <div className="card-body min-h-[300px] max-h-[500px] overflow-y-auto">
+        <div className={cn(
+          "card-body overflow-y-auto",
+          activeSource === 'memgraph' ? 'min-h-[400px] h-[500px]' : 'min-h-[300px] max-h-[500px]'
+        )}>
           {activeSource === 'postgresql' ? (
             learnings.length > 0 ? (
               <div className="space-y-2">
@@ -199,11 +203,13 @@ export function MemoryBrowser() {
                 description="Try adjusting your search query or browse all learnings"
               />
             )
+          ) : activeSource === 'memgraph' ? (
+            <GraphViewer />
           ) : (
             <EmptyState
-              icon={activeSource === 'memgraph' ? Layers : Brain}
+              icon={Brain}
               title={`${getSourceName(activeSource)} Browser`}
-              description={`${getSourceName(activeSource)} querying coming soon. Use CLI for now.`}
+              description={`${getSourceName(activeSource)} semantic search coming soon. Use CLI for now.`}
             />
           )}
         </div>

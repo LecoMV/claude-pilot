@@ -1,6 +1,6 @@
-import { ipcMain, type WebContents } from 'electron'
-import { execSync, spawn } from 'child_process'
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'
+import { ipcMain, BrowserWindow, type WebContents } from 'electron'
+import { execSync, spawn, ChildProcess } from 'child_process'
+import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import type {
@@ -24,10 +24,158 @@ import type {
   AgentType,
   SwarmInfo,
   HiveMindInfo,
+  AppSettings,
 } from '../../shared/types'
 
 const HOME = homedir()
 const CLAUDE_DIR = join(HOME, '.claude')
+
+// Log stream manager for real-time log streaming
+class LogStreamManager {
+  private mainWindow: BrowserWindow | null = null
+  private journalProcess: ChildProcess | null = null
+  private fileWatchers: Map<string, FSWatcher> = new Map()
+  private active = false
+
+  setMainWindow(window: BrowserWindow): void {
+    this.mainWindow = window
+  }
+
+  start(sources: string[]): boolean {
+    if (this.active) return true
+    this.active = true
+
+    // Start journalctl streaming for system logs
+    if (sources.includes('system') || sources.includes('all')) {
+      this.startJournalStream()
+    }
+
+    // Watch Claude session files for changes
+    if (sources.includes('claude') || sources.includes('all')) {
+      this.watchClaudeLogs()
+    }
+
+    return true
+  }
+
+  stop(): boolean {
+    this.active = false
+
+    // Stop journalctl process
+    if (this.journalProcess) {
+      this.journalProcess.kill()
+      this.journalProcess = null
+    }
+
+    // Stop file watchers
+    for (const watcher of this.fileWatchers.values()) {
+      watcher.close()
+    }
+    this.fileWatchers.clear()
+
+    return true
+  }
+
+  private startJournalStream(): void {
+    try {
+      // Stream journalctl in follow mode
+      this.journalProcess = spawn('journalctl', ['-f', '-n', '0', '-o', 'json'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+
+      this.journalProcess.stdout?.on('data', (data: Buffer) => {
+        const lines = data.toString().split('\n').filter((l) => l.trim())
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line)
+            const logEntry: LogEntry = {
+              id: `journal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              timestamp: entry.__REALTIME_TIMESTAMP
+                ? parseInt(entry.__REALTIME_TIMESTAMP) / 1000
+                : Date.now(),
+              source: 'system',
+              level: this.mapPriority(entry.PRIORITY),
+              message: entry.MESSAGE || '',
+              metadata: {
+                unit: entry._SYSTEMD_UNIT,
+                pid: entry._PID,
+              },
+            }
+            this.emitLog(logEntry)
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+      })
+
+      this.journalProcess.on('error', (err) => {
+        console.error('Journal stream error:', err)
+      })
+    } catch (error) {
+      console.error('Failed to start journal stream:', error)
+    }
+  }
+
+  private watchClaudeLogs(): void {
+    const projectsDir = join(CLAUDE_DIR, 'projects')
+    if (!existsSync(projectsDir)) return
+
+    try {
+      // Watch the projects directory for new session files
+      const watcher = watch(projectsDir, { recursive: true }, (eventType, filename) => {
+        if (filename && filename.endsWith('.jsonl') && eventType === 'change') {
+          this.readLatestLogEntry(join(projectsDir, filename))
+        }
+      })
+      this.fileWatchers.set('projects', watcher)
+    } catch (error) {
+      console.error('Failed to watch Claude logs:', error)
+    }
+  }
+
+  private readLatestLogEntry(filepath: string): void {
+    try {
+      const content = readFileSync(filepath, 'utf-8')
+      const lines = content.trim().split('\n')
+      if (lines.length === 0) return
+
+      const lastLine = lines[lines.length - 1]
+      const entry = JSON.parse(lastLine)
+
+      const logEntry: LogEntry = {
+        id: `claude-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now(),
+        source: 'claude',
+        level: entry.type === 'error' ? 'error' : 'info',
+        message: entry.content || entry.message || JSON.stringify(entry).slice(0, 200),
+        metadata: {
+          type: entry.type,
+          role: entry.role,
+          model: entry.model,
+        },
+      }
+      this.emitLog(logEntry)
+    } catch {
+      // Skip files that can't be read
+    }
+  }
+
+  private mapPriority(priority: string | number): 'debug' | 'info' | 'warn' | 'error' {
+    const p = typeof priority === 'string' ? parseInt(priority) : priority
+    if (p <= 3) return 'error'
+    if (p <= 4) return 'warn'
+    if (p <= 6) return 'info'
+    return 'debug'
+  }
+
+  private emitLog(entry: LogEntry): void {
+    if (this.mainWindow && this.active) {
+      this.mainWindow.webContents.send('logs:stream', entry)
+    }
+  }
+}
+
+export const logStreamManager = new LogStreamManager()
 
 export function registerIpcHandlers(): void {
   // System handlers
@@ -103,6 +251,13 @@ export function registerIpcHandlers(): void {
     qdrant: { vectors: number }
   }> => {
     return getMemoryStats()
+  })
+
+  ipcMain.handle('memory:graph', async (_event, query?: string, limit = 100): Promise<{
+    nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>
+    edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>
+  }> => {
+    return queryMemgraphGraph(query, limit)
   })
 
   // Profile handlers
@@ -242,6 +397,15 @@ export function registerIpcHandlers(): void {
   // Chat handlers
   ipcMain.handle('chat:send', async (event, projectPath: string, message: string, messageId: string): Promise<boolean> => {
     return sendChatMessage(event.sender, projectPath, message, messageId)
+  })
+
+  // Settings handlers
+  ipcMain.handle('settings:get', async (): Promise<AppSettings> => {
+    return getAppSettings()
+  })
+
+  ipcMain.handle('settings:save', async (_event, settings: AppSettings): Promise<boolean> => {
+    return saveAppSettings(settings)
   })
 }
 
@@ -491,6 +655,110 @@ async function getMemoryStats(): Promise<{
   return stats
 }
 
+async function queryMemgraphGraph(
+  query?: string,
+  limit = 100
+): Promise<{
+  nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>
+  edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>
+}> {
+  const result = {
+    nodes: [] as Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>,
+    edges: [] as Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>,
+  }
+
+  try {
+    // Build Cypher query - if no query provided, get sample of graph
+    let cypherQuery: string
+    if (query && query.trim()) {
+      // Use provided Cypher query
+      cypherQuery = query
+    } else {
+      // Default: get sample nodes and their relationships
+      cypherQuery = `
+        MATCH (n)
+        WITH n LIMIT ${limit}
+        OPTIONAL MATCH (n)-[r]->(m)
+        WHERE m IS NOT NULL
+        RETURN
+          id(n) as sourceId, labels(n)[0] as sourceLabel, n as sourceProps,
+          id(m) as targetId, labels(m)[0] as targetLabel, m as targetProps,
+          id(r) as relId, type(r) as relType, r as relProps
+        LIMIT ${limit * 2}
+      `
+    }
+
+    // Execute query via mgconsole
+    const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ')
+    const cmdResult = execSync(
+      `echo "${escapedQuery}" | podman exec -i memgraph mgconsole --output-format=json 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 10000 }
+    )
+
+    if (!cmdResult.trim()) return result
+
+    // Parse the JSON output
+    const lines = cmdResult.trim().split('\n')
+    const seenNodes = new Set<string>()
+    const seenEdges = new Set<string>()
+
+    for (const line of lines) {
+      try {
+        const row = JSON.parse(line)
+
+        // Add source node
+        if (row.sourceId !== undefined && row.sourceId !== null) {
+          const nodeId = String(row.sourceId)
+          if (!seenNodes.has(nodeId)) {
+            seenNodes.add(nodeId)
+            result.nodes.push({
+              id: nodeId,
+              label: row.sourceProps?.name || row.sourceProps?.title || row.sourceLabel || nodeId,
+              type: row.sourceLabel || 'Unknown',
+              properties: row.sourceProps || {},
+            })
+          }
+        }
+
+        // Add target node
+        if (row.targetId !== undefined && row.targetId !== null) {
+          const nodeId = String(row.targetId)
+          if (!seenNodes.has(nodeId)) {
+            seenNodes.add(nodeId)
+            result.nodes.push({
+              id: nodeId,
+              label: row.targetProps?.name || row.targetProps?.title || row.targetLabel || nodeId,
+              type: row.targetLabel || 'Unknown',
+              properties: row.targetProps || {},
+            })
+          }
+        }
+
+        // Add edge
+        if (row.relId !== undefined && row.relId !== null && row.sourceId !== undefined && row.targetId !== undefined) {
+          const edgeId = String(row.relId)
+          if (!seenEdges.has(edgeId)) {
+            seenEdges.add(edgeId)
+            result.edges.push({
+              id: edgeId,
+              source: String(row.sourceId),
+              target: String(row.targetId),
+              type: row.relType || 'RELATED',
+              properties: row.relProps || {},
+            })
+          }
+        }
+      } catch {
+        // Skip invalid JSON lines
+      }
+    }
+  } catch (error) {
+    console.error('Failed to query Memgraph:', error)
+  }
+
+  return result
+}
+
 // Profile functions
 function getProfileSettings(): ProfileSettings {
   const settingsPath = join(CLAUDE_DIR, 'settings.json')
@@ -566,7 +834,19 @@ function saveClaudeMd(content: string): boolean {
 
 function getRules(): ClaudeRule[] {
   const rulesDir = join(CLAUDE_DIR, 'rules')
+  const settingsPath = join(CLAUDE_DIR, 'settings.json')
   const rules: ClaudeRule[] = []
+
+  // Read disabled rules from settings
+  let disabledRules: string[] = []
+  try {
+    if (existsSync(settingsPath)) {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+      disabledRules = settings.disabledRules || []
+    }
+  } catch {
+    // Ignore settings read errors
+  }
 
   try {
     if (!existsSync(rulesDir)) {
@@ -579,20 +859,21 @@ function getRules(): ClaudeRule[] {
 
       const rulePath = join(rulesDir, entry.name)
       const ruleName = entry.name.replace('.md', '')
+      const isEnabled = !disabledRules.includes(ruleName)
 
       try {
         const content = readFileSync(rulePath, 'utf-8')
         rules.push({
           name: ruleName,
           path: rulePath,
-          enabled: true, // Rules are enabled by default if they exist
+          enabled: isEnabled,
           content,
         })
       } catch {
         rules.push({
           name: ruleName,
           path: rulePath,
-          enabled: true,
+          enabled: isEnabled,
         })
       }
     }
@@ -604,10 +885,49 @@ function getRules(): ClaudeRule[] {
 }
 
 function toggleRule(name: string, enabled: boolean): boolean {
-  // For now, rules are always enabled if the file exists
-  // A more complex implementation would track enabled/disabled state in settings.json
-  console.log(`Toggle rule ${name} to ${enabled}`)
-  return true
+  const settingsPath = join(CLAUDE_DIR, 'settings.json')
+  const rulesDir = join(CLAUDE_DIR, 'rules')
+  const rulePath = join(rulesDir, `${name}.md`)
+
+  try {
+    // Check if rule file exists
+    if (!existsSync(rulePath)) {
+      console.error(`Rule file not found: ${rulePath}`)
+      return false
+    }
+
+    // Read or create settings
+    let settings: Record<string, unknown> = {}
+    if (existsSync(settingsPath)) {
+      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    }
+
+    // Initialize disabledRules array if it doesn't exist
+    if (!settings.disabledRules) {
+      settings.disabledRules = []
+    }
+    const disabledRules = settings.disabledRules as string[]
+
+    if (enabled) {
+      // Remove from disabled list
+      const index = disabledRules.indexOf(name)
+      if (index >= 0) {
+        disabledRules.splice(index, 1)
+      }
+    } else {
+      // Add to disabled list
+      if (!disabledRules.includes(name)) {
+        disabledRules.push(name)
+      }
+    }
+
+    settings.disabledRules = disabledRules
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+    return true
+  } catch (error) {
+    console.error('Failed to toggle rule:', error)
+    return false
+  }
 }
 
 // Context functions
@@ -694,9 +1014,40 @@ function setAutoCompact(enabled: boolean): boolean {
 }
 
 function triggerCompaction(): boolean {
-  // This would trigger claude's compaction - for now just log
-  console.log('Compaction triggered')
-  return true
+  try {
+    // Trigger Claude's context compaction via the claude CLI
+    // The /compact command is used to manually compact the conversation context
+    // We use --print to run non-interactively and capture output
+    const result = spawn('claude', ['--print', '-p', '/compact'], {
+      shell: true,
+      stdio: 'pipe',
+    })
+
+    result.stdout?.on('data', (data: Buffer) => {
+      console.log('Compaction output:', data.toString())
+    })
+
+    result.stderr?.on('data', (data: Buffer) => {
+      console.error('Compaction stderr:', data.toString())
+    })
+
+    result.on('error', (error) => {
+      console.error('Compaction process error:', error)
+    })
+
+    result.on('close', (code) => {
+      if (code === 0) {
+        console.log('Compaction completed successfully')
+      } else {
+        console.error(`Compaction exited with code ${code}`)
+      }
+    })
+
+    return true
+  } catch (error) {
+    console.error('Failed to trigger compaction:', error)
+    return false
+  }
 }
 
 function getRecentSessions(): SessionSummary[] {
@@ -1047,19 +1398,12 @@ function getRecentLogs(limit = 200): LogEntry[] {
     .slice(-limit)
 }
 
-// Streaming log state
-let logStreamActive = false
-
-function startLogStream(_sources: string[]): boolean {
-  // In a real implementation, this would set up real-time log tailing
-  // For now, we'll simulate with the recent logs fetcher
-  logStreamActive = true
-  return true
+function startLogStream(sources: string[]): boolean {
+  return logStreamManager.start(sources)
 }
 
 function stopLogStream(): boolean {
-  logStreamActive = false
-  return true
+  return logStreamManager.stop()
 }
 
 // Ollama functions
@@ -1418,6 +1762,55 @@ function sendChatMessage(sender: WebContents, projectPath: string, message: stri
       messageId,
       error: 'Failed to start Claude process',
     })
+    return false
+  }
+}
+
+// App settings file path
+const APP_SETTINGS_PATH = join(HOME, '.config', 'claude-command-center', 'settings.json')
+
+const defaultAppSettings: AppSettings = {
+  theme: 'dark',
+  accentColor: 'purple',
+  sidebarCollapsed: false,
+  terminalFont: 'jetbrains',
+  terminalFontSize: 14,
+  terminalScrollback: 10000,
+  postgresHost: 'localhost',
+  postgresPort: 5433,
+  memgraphHost: 'localhost',
+  memgraphPort: 7687,
+  systemNotifications: true,
+  soundEnabled: false,
+  autoLock: false,
+  clearOnExit: true,
+}
+
+function getAppSettings(): AppSettings {
+  try {
+    if (existsSync(APP_SETTINGS_PATH)) {
+      const content = readFileSync(APP_SETTINGS_PATH, 'utf-8')
+      const saved = JSON.parse(content)
+      return { ...defaultAppSettings, ...saved }
+    }
+  } catch (error) {
+    console.error('Failed to load app settings:', error)
+  }
+  return { ...defaultAppSettings }
+}
+
+function saveAppSettings(settings: AppSettings): boolean {
+  try {
+    // Ensure config directory exists
+    const configDir = join(HOME, '.config', 'claude-command-center')
+    if (!existsSync(configDir)) {
+      mkdirSync(configDir, { recursive: true })
+    }
+
+    writeFileSync(APP_SETTINGS_PATH, JSON.stringify(settings, null, 2))
+    return true
+  } catch (error) {
+    console.error('Failed to save app settings:', error)
     return false
   }
 }
