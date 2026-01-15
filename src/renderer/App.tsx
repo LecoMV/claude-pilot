@@ -12,8 +12,9 @@ import { Terminal } from './components/terminal/Terminal'
 import { Settings } from './components/settings/Settings'
 import { LogsViewer } from './components/logs/LogsViewer'
 import { OllamaManager } from './components/ollama/OllamaManager'
+import { AgentCanvas } from './components/agents/AgentCanvas'
 
-type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'terminal' | 'settings'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
@@ -39,6 +40,8 @@ export default function App() {
         return <LogsViewer />
       case 'ollama':
         return <OllamaManager />
+      case 'agents':
+        return <AgentCanvas />
       case 'terminal':
         return <Terminal />
       case 'settings':
@@ -84,6 +87,7 @@ function getViewTitle(view: View): string {
     services: 'System Services',
     logs: 'System Logs',
     ollama: 'Ollama Models',
+    agents: 'Agent Orchestration',
     terminal: 'Terminal',
     settings: 'Settings',
   }

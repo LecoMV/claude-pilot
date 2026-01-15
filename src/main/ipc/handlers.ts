@@ -20,6 +20,10 @@ import type {
   OllamaModel,
   OllamaRunningModel,
   OllamaStatus,
+  Agent,
+  AgentType,
+  SwarmInfo,
+  HiveMindInfo,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -204,6 +208,35 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('ollama:stop', async (_event, model: string): Promise<boolean> => {
     return stopOllamaModel(model)
+  })
+
+  // Agent handlers
+  ipcMain.handle('agents:list', async (): Promise<Agent[]> => {
+    return getAgentList()
+  })
+
+  ipcMain.handle('agents:spawn', async (_event, type: AgentType, name: string): Promise<Agent | null> => {
+    return spawnAgent(type, name)
+  })
+
+  ipcMain.handle('agents:terminate', async (_event, id: string): Promise<boolean> => {
+    return terminateAgent(id)
+  })
+
+  ipcMain.handle('agents:swarmStatus', async (): Promise<SwarmInfo | null> => {
+    return getSwarmStatus()
+  })
+
+  ipcMain.handle('agents:hiveMindStatus', async (): Promise<HiveMindInfo | null> => {
+    return getHiveMindStatus()
+  })
+
+  ipcMain.handle('agents:initSwarm', async (_event, topology: string): Promise<boolean> => {
+    return initSwarm(topology)
+  })
+
+  ipcMain.handle('agents:shutdownSwarm', async (): Promise<boolean> => {
+    return shutdownSwarm()
   })
 }
 
@@ -1160,4 +1193,165 @@ function stopOllamaModel(model: string): boolean {
     console.error('Failed to stop model:', error)
     return false
   }
+}
+
+// Agent functions - using Claude Flow MCP
+const CLAUDE_FLOW_API = 'http://localhost:3456'
+
+// In-memory agent state (would normally come from Claude Flow)
+let agentState: {
+  agents: Agent[]
+  swarm: SwarmInfo | null
+  hiveMind: HiveMindInfo | null
+} = {
+  agents: [],
+  swarm: null,
+  hiveMind: null,
+}
+
+function generateAgentId(): string {
+  return `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+function getAgentList(): Agent[] {
+  // Try to get from Claude Flow MCP
+  try {
+    const result = execSync(`curl -s ${CLAUDE_FLOW_API}/api/agents`, {
+      encoding: 'utf-8',
+      timeout: 3000,
+    })
+    const data = JSON.parse(result)
+    if (data.agents) {
+      agentState.agents = data.agents
+      return data.agents
+    }
+  } catch {
+    // Fall back to in-memory state
+  }
+  return agentState.agents
+}
+
+function spawnAgent(type: AgentType, name: string): Agent | null {
+  // Try to spawn via Claude Flow MCP
+  try {
+    const body = JSON.stringify({ agentType: type, agentId: name })
+    const result = execSync(
+      `curl -s -X POST ${CLAUDE_FLOW_API}/api/agents/spawn -H "Content-Type: application/json" -d '${body}'`,
+      { encoding: 'utf-8', timeout: 10000 }
+    )
+    const data = JSON.parse(result)
+    if (data.agent) {
+      return data.agent
+    }
+  } catch {
+    // Fall back to local simulation
+  }
+
+  // Simulate agent spawn locally
+  const agent: Agent = {
+    id: generateAgentId(),
+    name,
+    type,
+    status: 'idle',
+    taskCount: 0,
+    health: 1.0,
+  }
+  agentState.agents.push(agent)
+  return agent
+}
+
+function terminateAgent(id: string): boolean {
+  // Try to terminate via Claude Flow MCP
+  try {
+    execSync(
+      `curl -s -X POST ${CLAUDE_FLOW_API}/api/agents/${id}/terminate`,
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+    agentState.agents = agentState.agents.filter((a) => a.id !== id)
+    return true
+  } catch {
+    // Fall back to local simulation
+  }
+
+  const index = agentState.agents.findIndex((a) => a.id === id)
+  if (index >= 0) {
+    agentState.agents.splice(index, 1)
+    return true
+  }
+  return false
+}
+
+function getSwarmStatus(): SwarmInfo | null {
+  try {
+    const result = execSync(`curl -s ${CLAUDE_FLOW_API}/api/swarm/status`, {
+      encoding: 'utf-8',
+      timeout: 3000,
+    })
+    const data = JSON.parse(result)
+    if (data.swarm) {
+      agentState.swarm = data.swarm
+      return data.swarm
+    }
+  } catch {
+    // Fall back to in-memory state
+  }
+  return agentState.swarm
+}
+
+function getHiveMindStatus(): HiveMindInfo | null {
+  try {
+    const result = execSync(`curl -s ${CLAUDE_FLOW_API}/api/hive-mind/status`, {
+      encoding: 'utf-8',
+      timeout: 3000,
+    })
+    const data = JSON.parse(result)
+    if (data.hiveMind) {
+      agentState.hiveMind = data.hiveMind
+      return data.hiveMind
+    }
+  } catch {
+    // Fall back to in-memory state
+  }
+  return agentState.hiveMind
+}
+
+function initSwarm(topology: string): boolean {
+  try {
+    const body = JSON.stringify({ topology })
+    execSync(
+      `curl -s -X POST ${CLAUDE_FLOW_API}/api/swarm/init -H "Content-Type: application/json" -d '${body}'`,
+      { encoding: 'utf-8', timeout: 10000 }
+    )
+    agentState.swarm = {
+      id: `swarm-${Date.now()}`,
+      topology,
+      agents: agentState.agents.map((a) => a.id),
+      status: 'active',
+      createdAt: Date.now(),
+    }
+    return true
+  } catch {
+    // Simulate locally
+    agentState.swarm = {
+      id: `swarm-${Date.now()}`,
+      topology,
+      agents: agentState.agents.map((a) => a.id),
+      status: 'active',
+      createdAt: Date.now(),
+    }
+    return true
+  }
+}
+
+function shutdownSwarm(): boolean {
+  try {
+    execSync(`curl -s -X POST ${CLAUDE_FLOW_API}/api/swarm/shutdown`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    })
+  } catch {
+    // Continue with local shutdown
+  }
+  agentState.swarm = null
+  return true
 }

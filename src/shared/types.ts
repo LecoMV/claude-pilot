@@ -240,6 +240,36 @@ export interface OllamaStatus {
   version?: string
 }
 
+// Agent types
+export type AgentStatus = 'idle' | 'active' | 'busy' | 'error' | 'terminated'
+export type AgentType = 'coder' | 'researcher' | 'tester' | 'architect' | 'coordinator' | 'security'
+
+export interface Agent {
+  id: string
+  name: string
+  type: AgentType
+  status: AgentStatus
+  taskCount: number
+  health: number
+  domain?: string
+  config?: Record<string, unknown>
+}
+
+export interface SwarmInfo {
+  id: string
+  topology: string
+  agents: string[]
+  status: 'active' | 'idle' | 'shutdown'
+  createdAt: number
+}
+
+export interface HiveMindInfo {
+  queenId?: string
+  workers: string[]
+  topology: string
+  status: 'active' | 'idle' | 'shutdown'
+}
+
 // IPC Channel definitions
 export type IPCChannels = {
   // System
@@ -307,6 +337,15 @@ export type IPCChannels = {
   'ollama:delete': (model: string) => Promise<boolean>
   'ollama:run': (model: string) => Promise<boolean>
   'ollama:stop': (model: string) => Promise<boolean>
+
+  // Agents
+  'agents:list': () => Promise<Agent[]>
+  'agents:spawn': (type: AgentType, name: string) => Promise<Agent | null>
+  'agents:terminate': (id: string) => Promise<boolean>
+  'agents:swarmStatus': () => Promise<SwarmInfo | null>
+  'agents:hiveMindStatus': () => Promise<HiveMindInfo | null>
+  'agents:initSwarm': (topology: string) => Promise<boolean>
+  'agents:shutdownSwarm': () => Promise<boolean>
 }
 
 // Window API exposed to renderer
