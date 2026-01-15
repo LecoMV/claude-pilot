@@ -6,10 +6,11 @@ import { Projects } from './components/projects/Projects'
 import { MCPManager } from './components/mcp/MCPManager'
 import { MemoryBrowser } from './components/memory/MemoryBrowser'
 import { ProfileManager } from './components/profiles/ProfileManager'
+import { ContextDashboard } from './components/context/ContextDashboard'
 import { Terminal } from './components/terminal/Terminal'
 import { Settings } from './components/settings/Settings'
 
-type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'terminal' | 'settings'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
@@ -27,6 +28,8 @@ export default function App() {
         return <MemoryBrowser />
       case 'profiles':
         return <ProfileManager />
+      case 'context':
+        return <ContextDashboard />
       case 'terminal':
         return <Terminal />
       case 'settings':
@@ -68,6 +71,7 @@ function getViewTitle(view: View): string {
     mcp: 'MCP Servers',
     memory: 'Memory Browser',
     profiles: 'Profiles & Settings',
+    context: 'Context Management',
     terminal: 'Terminal',
     settings: 'Settings',
   }

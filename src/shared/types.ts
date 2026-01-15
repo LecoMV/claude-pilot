@@ -136,6 +136,31 @@ export interface VectorMemory {
   score?: number
 }
 
+// Context types
+export interface TokenUsage {
+  current: number
+  max: number
+  percentage: number
+  lastCompaction?: number
+}
+
+export interface CompactionSettings {
+  autoCompact: boolean
+  threshold: number
+}
+
+export interface SessionSummary {
+  id: string
+  projectPath: string
+  projectName: string
+  startTime: number
+  endTime?: number
+  messageCount: number
+  tokenCount: number
+  toolCalls: number
+  model?: string
+}
+
 // Profile types
 export interface ProfileSettings {
   model?: string
@@ -191,6 +216,13 @@ export type IPCChannels = {
   'profile:saveClaudemd': (content: string) => Promise<boolean>
   'profile:rules': () => Promise<ClaudeRule[]>
   'profile:toggleRule': (name: string, enabled: boolean) => Promise<boolean>
+
+  // Context
+  'context:tokenUsage': () => Promise<TokenUsage>
+  'context:compactionSettings': () => Promise<CompactionSettings>
+  'context:sessions': () => Promise<SessionSummary[]>
+  'context:compact': () => Promise<boolean>
+  'context:setAutoCompact': (enabled: boolean) => Promise<boolean>
 }
 
 // Window API exposed to renderer

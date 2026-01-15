@@ -8,10 +8,11 @@ import {
   ChevronLeft,
   ChevronRight,
   User,
+  Gauge,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'terminal' | 'settings'
 
 interface SidebarProps {
   currentView: View
@@ -26,6 +27,7 @@ const navItems: { id: View; icon: typeof LayoutDashboard; label: string }[] = [
   { id: 'mcp', icon: Server, label: 'MCP Servers' },
   { id: 'memory', icon: Brain, label: 'Memory' },
   { id: 'profiles', icon: User, label: 'Profiles' },
+  { id: 'context', icon: Gauge, label: 'Context' },
   { id: 'terminal', icon: Terminal, label: 'Terminal' },
   { id: 'settings', icon: Settings, label: 'Settings' },
 ]

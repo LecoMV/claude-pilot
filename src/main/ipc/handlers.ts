@@ -11,6 +11,9 @@ import type {
   Learning,
   ProfileSettings,
   ClaudeRule,
+  TokenUsage,
+  CompactionSettings,
+  SessionSummary,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -115,6 +118,27 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('profile:toggleRule', async (_event, name: string, enabled: boolean) => {
     return toggleRule(name, enabled)
+  })
+
+  // Context handlers
+  ipcMain.handle('context:tokenUsage', async (): Promise<TokenUsage> => {
+    return getTokenUsage()
+  })
+
+  ipcMain.handle('context:compactionSettings', async (): Promise<CompactionSettings> => {
+    return getCompactionSettings()
+  })
+
+  ipcMain.handle('context:sessions', async (): Promise<SessionSummary[]> => {
+    return getRecentSessions()
+  })
+
+  ipcMain.handle('context:compact', async (): Promise<boolean> => {
+    return triggerCompaction()
+  })
+
+  ipcMain.handle('context:setAutoCompact', async (_event, enabled: boolean): Promise<boolean> => {
+    return setAutoCompact(enabled)
   })
 }
 
@@ -481,4 +505,185 @@ function toggleRule(name: string, enabled: boolean): boolean {
   // A more complex implementation would track enabled/disabled state in settings.json
   console.log(`Toggle rule ${name} to ${enabled}`)
   return true
+}
+
+// Context functions
+function getTokenUsage(): TokenUsage {
+  // Estimate token usage from recent checkpoints
+  const checkpointsDir = join(CLAUDE_DIR, 'checkpoints')
+  let current = 0
+  const max = 200000 // Default max context
+
+  try {
+    if (existsSync(checkpointsDir)) {
+      const files = readdirSync(checkpointsDir).filter((f) => f.endsWith('.json'))
+      if (files.length > 0) {
+        // Get most recent checkpoint
+        const sorted = files.sort().reverse()
+        const latestPath = join(checkpointsDir, sorted[0])
+        const checkpoint = JSON.parse(readFileSync(latestPath, 'utf-8'))
+        current = checkpoint.tokenCount || checkpoint.tokens || 0
+      }
+    }
+  } catch (error) {
+    console.error('Failed to read checkpoints:', error)
+  }
+
+  // Also check compaction checkpoints
+  const compactionDir = join(CLAUDE_DIR, 'compaction-checkpoints')
+  let lastCompaction: number | undefined
+
+  try {
+    if (existsSync(compactionDir)) {
+      const files = readdirSync(compactionDir).filter((f) => f.endsWith('.json'))
+      if (files.length > 0) {
+        const sorted = files.sort().reverse()
+        const match = sorted[0].match(/checkpoint-(\d+)-(\d+)\.json/)
+        if (match) {
+          const dateStr = `${match[1].slice(0, 4)}-${match[1].slice(4, 6)}-${match[1].slice(6, 8)}`
+          const timeStr = `${match[2].slice(0, 2)}:${match[2].slice(2, 4)}:${match[2].slice(4, 6)}`
+          lastCompaction = new Date(`${dateStr}T${timeStr}`).getTime()
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to read compaction checkpoints:', error)
+  }
+
+  return {
+    current,
+    max,
+    percentage: (current / max) * 100,
+    lastCompaction,
+  }
+}
+
+function getCompactionSettings(): CompactionSettings {
+  const settingsPath = join(CLAUDE_DIR, 'settings.json')
+  try {
+    if (existsSync(settingsPath)) {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+      return {
+        autoCompact: settings.autoCompact ?? true,
+        threshold: settings.compactThreshold || 80,
+      }
+    }
+  } catch (error) {
+    console.error('Failed to read compaction settings:', error)
+  }
+  return { autoCompact: true, threshold: 80 }
+}
+
+function setAutoCompact(enabled: boolean): boolean {
+  const settingsPath = join(CLAUDE_DIR, 'settings.json')
+  try {
+    let settings: Record<string, unknown> = {}
+    if (existsSync(settingsPath)) {
+      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    }
+    settings.autoCompact = enabled
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+    return true
+  } catch (error) {
+    console.error('Failed to save auto-compact setting:', error)
+    return false
+  }
+}
+
+function triggerCompaction(): boolean {
+  // This would trigger claude's compaction - for now just log
+  console.log('Compaction triggered')
+  return true
+}
+
+function getRecentSessions(): SessionSummary[] {
+  const sessions: SessionSummary[] = []
+  const projectsDir = join(CLAUDE_DIR, 'projects')
+
+  if (!existsSync(projectsDir)) {
+    return sessions
+  }
+
+  try {
+    const entries = readdirSync(projectsDir, { withFileTypes: true })
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+
+      const projectDir = join(projectsDir, entry.name)
+      const decodedPath = entry.name.replace(/-/g, '/')
+      const realPath = decodedPath.startsWith('/') ? decodedPath : join(HOME, decodedPath)
+      const projectName = realPath.split('/').pop() || entry.name
+
+      // Find session files
+      const sessionFiles = readdirSync(projectDir).filter((f) => f.endsWith('.jsonl'))
+
+      for (const sessionFile of sessionFiles) {
+        const sessionPath = join(projectDir, sessionFile)
+        const sessionId = sessionFile.replace('.jsonl', '')
+
+        try {
+          const content = readFileSync(sessionPath, 'utf-8')
+          const lines = content.trim().split('\n').filter((l) => l.trim())
+
+          if (lines.length === 0) continue
+
+          let messageCount = 0
+          let toolCalls = 0
+          let tokenCount = 0
+          let model: string | undefined
+          let startTime = 0
+          let endTime = 0
+
+          for (const line of lines) {
+            try {
+              const entry = JSON.parse(line)
+              if (entry.type === 'message' || entry.role) {
+                messageCount++
+                if (entry.timestamp) {
+                  const ts = new Date(entry.timestamp).getTime()
+                  if (!startTime || ts < startTime) startTime = ts
+                  if (ts > endTime) endTime = ts
+                }
+                if (entry.model) model = entry.model
+                if (entry.usage?.input_tokens) tokenCount += entry.usage.input_tokens
+                if (entry.usage?.output_tokens) tokenCount += entry.usage.output_tokens
+              }
+              if (entry.type === 'tool_use' || entry.tool_calls) {
+                toolCalls++
+              }
+            } catch {
+              // Skip invalid JSON lines
+            }
+          }
+
+          // Only add sessions with actual data
+          if (messageCount > 0) {
+            sessions.push({
+              id: sessionId,
+              projectPath: realPath,
+              projectName,
+              startTime: startTime || Date.now(),
+              endTime: endTime || undefined,
+              messageCount,
+              tokenCount,
+              toolCalls,
+              model,
+            })
+          }
+        } catch (error) {
+          // Skip sessions that can't be read
+        }
+      }
+    }
+
+    // Sort by start time descending
+    sessions.sort((a, b) => b.startTime - a.startTime)
+
+    // Return only the 20 most recent
+    return sessions.slice(0, 20)
+  } catch (error) {
+    console.error('Failed to read sessions:', error)
+    return []
+  }
 }
