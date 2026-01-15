@@ -11,8 +11,9 @@ import { ServicesManager } from './components/services/ServicesManager'
 import { Terminal } from './components/terminal/Terminal'
 import { Settings } from './components/settings/Settings'
 import { LogsViewer } from './components/logs/LogsViewer'
+import { OllamaManager } from './components/ollama/OllamaManager'
 
-type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'terminal' | 'settings'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
@@ -36,6 +37,8 @@ export default function App() {
         return <ServicesManager />
       case 'logs':
         return <LogsViewer />
+      case 'ollama':
+        return <OllamaManager />
       case 'terminal':
         return <Terminal />
       case 'settings':
@@ -80,6 +83,7 @@ function getViewTitle(view: View): string {
     context: 'Context Management',
     services: 'System Services',
     logs: 'System Logs',
+    ollama: 'Ollama Models',
     terminal: 'Terminal',
     settings: 'Settings',
   }

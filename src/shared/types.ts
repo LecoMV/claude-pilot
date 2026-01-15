@@ -213,6 +213,33 @@ export interface LogEntry {
   metadata?: Record<string, unknown>
 }
 
+// Ollama types
+export interface OllamaModel {
+  name: string
+  size: number
+  digest: string
+  modifiedAt: string
+  details?: {
+    format?: string
+    family?: string
+    parameterSize?: string
+    quantizationLevel?: string
+  }
+}
+
+export interface OllamaRunningModel {
+  name: string
+  model: string
+  size: number
+  digest: string
+  expiresAt: string
+}
+
+export interface OllamaStatus {
+  online: boolean
+  version?: string
+}
+
 // IPC Channel definitions
 export type IPCChannels = {
   // System
@@ -271,6 +298,15 @@ export type IPCChannels = {
   'logs:recent': (limit?: number) => Promise<LogEntry[]>
   'logs:stream': (sources: string[]) => Promise<boolean>
   'logs:stopStream': () => Promise<boolean>
+
+  // Ollama
+  'ollama:status': () => Promise<OllamaStatus>
+  'ollama:list': () => Promise<OllamaModel[]>
+  'ollama:running': () => Promise<OllamaRunningModel[]>
+  'ollama:pull': (model: string) => Promise<boolean>
+  'ollama:delete': (model: string) => Promise<boolean>
+  'ollama:run': (model: string) => Promise<boolean>
+  'ollama:stop': (model: string) => Promise<boolean>
 }
 
 // Window API exposed to renderer

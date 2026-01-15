@@ -11,10 +11,11 @@ import {
   Gauge,
   Container,
   ScrollText,
+  Bot,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'terminal' | 'settings'
 
 interface SidebarProps {
   currentView: View
@@ -32,6 +33,7 @@ const navItems: { id: View; icon: typeof LayoutDashboard; label: string }[] = [
   { id: 'context', icon: Gauge, label: 'Context' },
   { id: 'services', icon: Container, label: 'Services' },
   { id: 'logs', icon: ScrollText, label: 'Logs' },
+  { id: 'ollama', icon: Bot, label: 'Ollama' },
   { id: 'terminal', icon: Terminal, label: 'Terminal' },
   { id: 'settings', icon: Settings, label: 'Settings' },
 ]

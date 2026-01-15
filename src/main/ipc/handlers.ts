@@ -17,6 +17,9 @@ import type {
   SystemdService,
   PodmanContainer,
   LogEntry,
+  OllamaModel,
+  OllamaRunningModel,
+  OllamaStatus,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -172,6 +175,35 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('logs:stopStream', async (): Promise<boolean> => {
     return stopLogStream()
+  })
+
+  // Ollama handlers
+  ipcMain.handle('ollama:status', async (): Promise<OllamaStatus> => {
+    return getOllamaStatus()
+  })
+
+  ipcMain.handle('ollama:list', async (): Promise<OllamaModel[]> => {
+    return getOllamaModels()
+  })
+
+  ipcMain.handle('ollama:running', async (): Promise<OllamaRunningModel[]> => {
+    return getRunningModels()
+  })
+
+  ipcMain.handle('ollama:pull', async (_event, model: string): Promise<boolean> => {
+    return pullOllamaModel(model)
+  })
+
+  ipcMain.handle('ollama:delete', async (_event, model: string): Promise<boolean> => {
+    return deleteOllamaModel(model)
+  })
+
+  ipcMain.handle('ollama:run', async (_event, model: string): Promise<boolean> => {
+    return runOllamaModel(model)
+  })
+
+  ipcMain.handle('ollama:stop', async (_event, model: string): Promise<boolean> => {
+    return stopOllamaModel(model)
   })
 }
 
@@ -990,4 +1022,142 @@ function startLogStream(_sources: string[]): boolean {
 function stopLogStream(): boolean {
   logStreamActive = false
   return true
+}
+
+// Ollama functions
+const OLLAMA_API = 'http://localhost:11434'
+
+function getOllamaStatus(): OllamaStatus {
+  try {
+    const result = execSync(`curl -s ${OLLAMA_API}/api/version`, {
+      encoding: 'utf-8',
+      timeout: 3000,
+    })
+    const data = JSON.parse(result)
+    return { online: true, version: data.version }
+  } catch {
+    return { online: false }
+  }
+}
+
+function getOllamaModels(): OllamaModel[] {
+  try {
+    const result = execSync(`curl -s ${OLLAMA_API}/api/tags`, {
+      encoding: 'utf-8',
+      timeout: 10000,
+    })
+    const data = JSON.parse(result)
+    if (!data.models) return []
+
+    return data.models.map((m: {
+      name: string
+      size: number
+      digest: string
+      modified_at: string
+      details?: {
+        format?: string
+        family?: string
+        parameter_size?: string
+        quantization_level?: string
+      }
+    }) => ({
+      name: m.name,
+      size: m.size,
+      digest: m.digest,
+      modifiedAt: m.modified_at,
+      details: m.details ? {
+        format: m.details.format,
+        family: m.details.family,
+        parameterSize: m.details.parameter_size,
+        quantizationLevel: m.details.quantization_level,
+      } : undefined,
+    }))
+  } catch {
+    return []
+  }
+}
+
+function getRunningModels(): OllamaRunningModel[] {
+  try {
+    const result = execSync(`curl -s ${OLLAMA_API}/api/ps`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    })
+    const data = JSON.parse(result)
+    if (!data.models) return []
+
+    return data.models.map((m: {
+      name: string
+      model: string
+      size: number
+      digest: string
+      expires_at: string
+    }) => ({
+      name: m.name,
+      model: m.model,
+      size: m.size,
+      digest: m.digest,
+      expiresAt: m.expires_at,
+    }))
+  } catch {
+    return []
+  }
+}
+
+function pullOllamaModel(model: string): boolean {
+  try {
+    // Start pull in background (will stream progress)
+    execSync(`ollama pull ${model}`, {
+      encoding: 'utf-8',
+      timeout: 600000, // 10 minutes max
+      stdio: 'pipe',
+    })
+    return true
+  } catch (error) {
+    console.error('Failed to pull model:', error)
+    return false
+  }
+}
+
+function deleteOllamaModel(model: string): boolean {
+  try {
+    execSync(`ollama rm ${model}`, {
+      encoding: 'utf-8',
+      timeout: 30000,
+    })
+    return true
+  } catch (error) {
+    console.error('Failed to delete model:', error)
+    return false
+  }
+}
+
+function runOllamaModel(model: string): boolean {
+  try {
+    // Run model in background (just loads it into memory)
+    const body = JSON.stringify({ model, keep_alive: '10m' })
+    execSync(`curl -s -X POST ${OLLAMA_API}/api/generate -d '${body}'`, {
+      encoding: 'utf-8',
+      timeout: 60000,
+    })
+    return true
+  } catch (error) {
+    console.error('Failed to run model:', error)
+    return false
+  }
+}
+
+function stopOllamaModel(model: string): boolean {
+  try {
+    // Stop model by setting keep_alive to 0
+    const body = JSON.stringify({ model, keep_alive: 0 })
+    execSync(`curl -s -X POST ${OLLAMA_API}/api/generate -d '${body}'`, {
+      encoding: 'utf-8',
+      timeout: 30000,
+    })
+    return true
+  } catch (error) {
+    console.error('Failed to stop model:', error)
+    return false
+  }
 }
