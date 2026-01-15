@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Testing
+coverage/
+
+# Electron
+*.dmg
+*.exe
+*.AppImage
+
+# Cache
+.cache/
+.parcel-cache/
+
+# Temporary
+tmp/
+temp/

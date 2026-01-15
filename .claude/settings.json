@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(node:*)",
+      "Bash(electron:*)",
+      "Bash(git:*)",
+      "Bash(bd:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(cat:*)",
+      "Bash(tail:*)",
+      "Read(*)",
+      "Write(src/**)",
+      "Write(public/**)",
+      "Write(scripts/**)",
+      "Write(.context/**)",
+      "Edit(src/**)",
+      "Edit(*.json)",
+      "Edit(*.ts)",
+      "Edit(*.tsx)",
+      "Edit(*.css)",
+      "Edit(*.md)"
+    ],
+    "deny": []
+  }
+}

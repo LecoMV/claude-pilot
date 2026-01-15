@@ -1,0 +1,28 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.web.json",
+  "include": [
+    "src/renderer/**/*",
+    "src/shared/**/*"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "target": "ESNext",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/renderer/*"],
+      "@components/*": ["src/renderer/components/*"],
+      "@stores/*": ["src/renderer/stores/*"],
+      "@hooks/*": ["src/renderer/hooks/*"],
+      "@lib/*": ["src/renderer/lib/*"],
+      "@types/*": ["src/renderer/types/*"],
+      "@shared/*": ["src/shared/*"]
+    }
+  }
+}
