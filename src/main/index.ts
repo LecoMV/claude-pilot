@@ -5,6 +5,19 @@ import { registerIpcHandlers, logStreamManager } from './ipc/handlers'
 import { terminalManager, registerTerminalHandlers } from './services/terminal'
 import { setupGlobalErrorHandlers, configureErrorHandler, handleError } from './utils/error-handler'
 
+// GPU and rendering configuration for Linux compatibility
+// Based on official Electron documentation and issue research:
+// - https://github.com/electron/electron/issues/17180 (disableHardwareAcceleration doesn't prevent GPU process)
+// - https://github.com/electron/electron/issues/32074 (GPU process launch failed)
+// NOTE: --in-process-gpu is required to prevent GPU process spawning entirely
+// NOTE: Do NOT add --no-zygote or --single-process (causes SIGTRAP crashes)
+app.disableHardwareAcceleration()
+app.commandLine.appendSwitch('disable-gpu')
+app.commandLine.appendSwitch('disable-gpu-compositing')
+app.commandLine.appendSwitch('disable-dev-shm-usage')
+app.commandLine.appendSwitch('in-process-gpu')
+app.commandLine.appendSwitch('disable-gpu-sandbox')
+
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
@@ -19,7 +32,7 @@ function createWindow(): void {
     trafficLightPosition: { x: 16, y: 16 },
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -38,6 +51,8 @@ function createWindow(): void {
   // Load the renderer
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    // Open DevTools in development for debugging
+    mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }

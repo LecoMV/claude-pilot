@@ -14,10 +14,11 @@ import {
   Bot,
   Network,
   MessageSquare,
+  History,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'sessions' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'settings'
 
 interface SidebarProps {
   currentView: View
@@ -29,6 +30,7 @@ interface SidebarProps {
 const navItems: { id: View; icon: typeof LayoutDashboard; label: string }[] = [
   { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { id: 'projects', icon: FolderKanban, label: 'Projects' },
+  { id: 'sessions', icon: History, label: 'Sessions' },
   { id: 'mcp', icon: Server, label: 'MCP Servers' },
   { id: 'memory', icon: Brain, label: 'Memory' },
   { id: 'profiles', icon: User, label: 'Profiles' },

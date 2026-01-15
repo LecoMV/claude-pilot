@@ -10,6 +10,7 @@ import {
   Clock,
   RefreshCw,
   Zap,
+  Bot,
 } from 'lucide-react'
 import { formatBytes, cn } from '@/lib/utils'
 import { useSystemStatus } from '@/hooks/useSystemStatus'
@@ -67,7 +68,7 @@ export function Dashboard() {
 
       {/* Status overview */}
       <section>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <StatusCard
             icon={Activity}
             title="Claude Code"
@@ -79,6 +80,12 @@ export function Dashboard() {
             title="MCP Servers"
             status={status?.mcp.totalActive ? 'online' : 'offline'}
             detail={`${status?.mcp.totalActive || 0} active, ${status?.mcp.totalDisabled || 0} disabled`}
+          />
+          <StatusCard
+            icon={Bot}
+            title="Ollama"
+            status={status?.ollama?.online ? 'online' : 'offline'}
+            detail={status?.ollama?.online ? `${status.ollama.modelCount} models` : 'Not running'}
           />
           <StatusCard
             icon={Database}

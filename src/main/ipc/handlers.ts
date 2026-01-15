@@ -25,6 +25,9 @@ import type {
   SwarmInfo,
   HiveMindInfo,
   AppSettings,
+  ExternalSession,
+  SessionStats,
+  SessionMessage,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -184,6 +187,7 @@ export function registerIpcHandlers(): void {
       claude: await getClaudeStatus(),
       mcp: await getMCPStatus(),
       memory: await getMemoryStatus(),
+      ollama: await getOllamaServiceStatus(),
       resources: await getResourceUsage(),
     }
   })
@@ -212,18 +216,30 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('mcp:toggle', async (_event, name: string, enabled: boolean): Promise<boolean> => {
-    const settingsPath = join(CLAUDE_DIR, 'settings.json')
     try {
-      if (!existsSync(settingsPath)) return false
+      // Try mcp.json first (primary MCP config location)
+      const mcpJsonPath = join(CLAUDE_DIR, 'mcp.json')
+      if (existsSync(mcpJsonPath)) {
+        const mcpConfig = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'))
+        if (mcpConfig.mcpServers?.[name]) {
+          mcpConfig.mcpServers[name].disabled = !enabled
+          writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2))
+          return true
+        }
+      }
 
-      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-      if (!settings.mcpServers?.[name]) return false
+      // Fallback to settings.json
+      const settingsPath = join(CLAUDE_DIR, 'settings.json')
+      if (existsSync(settingsPath)) {
+        const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+        if (settings.mcpServers?.[name]) {
+          settings.mcpServers[name].disabled = !enabled
+          writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+          return true
+        }
+      }
 
-      // Toggle disabled state
-      settings.mcpServers[name].disabled = !enabled
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
-
-      return true
+      return false
     } catch (error) {
       console.error('Failed to toggle MCP server:', error)
       return false
@@ -438,10 +454,11 @@ async function getMemoryStatus() {
     // PostgreSQL offline
   }
 
-  // Check Memgraph
+  // Check Memgraph via direct TCP port check (port 7687 - Bolt protocol)
+  // Using network check instead of podman exec to avoid cgroup permission issues in Electron
   let memgraph = { online: false }
   try {
-    execSync('podman exec memgraph mgconsole -c "RETURN 1"', { encoding: 'utf-8', timeout: 5000 })
+    execSync('nc -z localhost 7687', { encoding: 'utf-8', timeout: 3000 })
     memgraph = { online: true }
   } catch {
     // Memgraph offline
@@ -459,6 +476,36 @@ async function getMemoryStatus() {
   }
 
   return { postgresql, memgraph, qdrant }
+}
+
+async function getOllamaServiceStatus() {
+  try {
+    const result = execSync('curl -s http://localhost:11434/api/tags', { encoding: 'utf-8', timeout: 3000 })
+    const data = JSON.parse(result)
+    const models = data.models || []
+
+    // Check for running models
+    let runningModels = 0
+    try {
+      const psResult = execSync('curl -s http://localhost:11434/api/ps', { encoding: 'utf-8', timeout: 3000 })
+      const psData = JSON.parse(psResult)
+      runningModels = psData.models?.length || 0
+    } catch {
+      // Ignore - just means no models running
+    }
+
+    return {
+      online: true,
+      modelCount: models.length,
+      runningModels,
+    }
+  } catch {
+    return {
+      online: false,
+      modelCount: 0,
+      runningModels: 0,
+    }
+  }
 }
 
 async function getResourceUsage(): Promise<ResourceUsage> {
@@ -541,22 +588,39 @@ function getClaudeProjects(): ClaudeProject[] {
 
 function getMCPServers(): MCPServer[] {
   const servers: MCPServer[] = []
+  const seenNames = new Set<string>()
 
-  // Read from Claude settings
+  // Helper to add servers from a config object
+  const addServersFromConfig = (mcpServers: Record<string, unknown>) => {
+    for (const [name, config] of Object.entries(mcpServers)) {
+      if (seenNames.has(name)) continue
+      seenNames.add(name)
+      const serverConfig = config as MCPServer['config']
+      servers.push({
+        name,
+        status: serverConfig.disabled ? 'offline' : 'online',
+        config: serverConfig,
+      })
+    }
+  }
+
+  // 1. Read from dedicated mcp.json (primary source for Claude Code)
+  const mcpJsonPath = join(CLAUDE_DIR, 'mcp.json')
+  if (existsSync(mcpJsonPath)) {
+    try {
+      const mcpConfig = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'))
+      addServersFromConfig(mcpConfig.mcpServers || {})
+    } catch {
+      // Ignore parse errors
+    }
+  }
+
+  // 2. Read from settings.json mcpServers (fallback/override)
   const settingsPath = join(CLAUDE_DIR, 'settings.json')
   if (existsSync(settingsPath)) {
     try {
       const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-      const mcpServers = settings.mcpServers || {}
-
-      for (const [name, config] of Object.entries(mcpServers)) {
-        const serverConfig = config as MCPServer['config']
-        servers.push({
-          name,
-          status: serverConfig.disabled ? 'offline' : 'online',
-          config: serverConfig,
-        })
-      }
+      addServersFromConfig(settings.mcpServers || {})
     } catch {
       // Ignore parse errors
     }
@@ -567,15 +631,29 @@ function getMCPServers(): MCPServer[] {
 
 async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
   try {
-    // Use psql to query PostgreSQL
-    const whereClause = query
-      ? `WHERE content ILIKE '%${query.replace(/'/g, "''")}%' OR topic ILIKE '%${query.replace(/'/g, "''")}%' OR category ILIKE '%${query.replace(/'/g, "''")}%'`
-      : ''
+    // Sanitize and validate limit to prevent injection
+    const safeLimit = Math.min(Math.max(1, Math.floor(Number(limit) || 50)), 1000)
 
-    const sql = `SELECT id, category, topic, content, created_at FROM learnings ${whereClause} ORDER BY created_at DESC LIMIT ${limit}`
+    // Use parameterized query with safe escaping to prevent SQL injection
+    let sql: string
 
+    if (query && query.trim()) {
+      // Sanitize query: remove null bytes, limit length, escape for shell
+      const sanitizedQuery = query
+        .replace(/\0/g, '') // Remove null bytes
+        .slice(0, 500) // Limit query length
+        .replace(/'/g, "''") // Escape single quotes for SQL
+        .replace(/\\/g, '\\\\') // Escape backslashes
+
+      // Use dollar-quoting for safer string handling in PostgreSQL
+      sql = `SELECT id, category, topic, content, created_at FROM learnings WHERE content ILIKE $$%${sanitizedQuery}%$$ OR topic ILIKE $$%${sanitizedQuery}%$$ OR category ILIKE $$%${sanitizedQuery}%$$ ORDER BY created_at DESC LIMIT ${safeLimit}`
+    } else {
+      sql = `SELECT id, category, topic, content, created_at FROM learnings ORDER BY created_at DESC LIMIT ${safeLimit}`
+    }
+
+    // Execute query - use single quotes for shell, escape properly
     const result = execSync(
-      `PGPASSWORD="" psql -h localhost -p 5433 -U postgres -d claude_memory -t -A -F '|' -c "${sql}"`,
+      `PGPASSWORD="" psql -h localhost -p 5433 -U postgres -d claude_memory -t -A -F '|' -c '${sql.replace(/'/g, "'\\''")}'`,
       { encoding: 'utf-8', timeout: 5000 }
     )
 
@@ -1814,3 +1892,293 @@ function saveAppSettings(settings: AppSettings): boolean {
     return false
   }
 }
+
+// =============================================================================
+// External Session Management
+// =============================================================================
+
+// Session watcher for real-time monitoring
+class SessionWatchManager {
+  private mainWindow: BrowserWindow | null = null
+  private watcher: FSWatcher | null = null
+  private sessionCache: Map<string, { mtime: number; session: ExternalSession }> = new Map()
+  private active = false
+
+  setMainWindow(window: BrowserWindow): void {
+    this.mainWindow = window
+  }
+
+  start(): boolean {
+    if (this.active) return true
+    this.active = true
+
+    const projectsDir = join(CLAUDE_DIR, 'projects')
+    if (!existsSync(projectsDir)) return false
+
+    try {
+      this.watcher = watch(projectsDir, { recursive: true }, (eventType, filename) => {
+        if (filename && filename.endsWith('.jsonl') && !filename.includes('subagents')) {
+          const filePath = join(projectsDir, filename)
+          this.handleSessionUpdate(filePath)
+        }
+      })
+      return true
+    } catch (error) {
+      console.error('Failed to start session watcher:', error)
+      return false
+    }
+  }
+
+  stop(): boolean {
+    this.active = false
+    if (this.watcher) {
+      this.watcher.close()
+      this.watcher = null
+    }
+    return true
+  }
+
+  private async handleSessionUpdate(filePath: string): Promise<void> {
+    try {
+      const session = await parseSessionFile(filePath)
+      if (session && this.mainWindow) {
+        this.mainWindow.webContents.send('session:updated', session)
+      }
+    } catch {
+      // Ignore parse errors
+    }
+  }
+}
+
+const sessionWatchManager = new SessionWatchManager()
+
+// Parse a single JSONL session file
+async function parseSessionFile(filePath: string): Promise<ExternalSession | null> {
+  try {
+    if (!existsSync(filePath)) return null
+
+    const content = readFileSync(filePath, 'utf-8')
+    const lines = content.trim().split('\n').filter((l) => l.trim())
+    if (lines.length === 0) return null
+
+    // Parse first and last entries for metadata
+    let firstEntry: Record<string, unknown> | null = null
+    let lastEntry: Record<string, unknown> | null = null
+    const stats: SessionStats = {
+      messageCount: 0,
+      userMessages: 0,
+      assistantMessages: 0,
+      toolCalls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    }
+
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as Record<string, unknown>
+        if (!firstEntry) firstEntry = entry
+        lastEntry = entry
+
+        // Count messages and tokens
+        const type = entry.type as string
+        if (type === 'user') {
+          stats.userMessages++
+          stats.messageCount++
+        } else if (type === 'assistant') {
+          stats.assistantMessages++
+          stats.messageCount++
+        } else if (type === 'tool-result') {
+          stats.toolCalls++
+        }
+
+        // Extract token usage
+        const message = entry.message as Record<string, unknown> | undefined
+        if (message?.usage) {
+          const usage = message.usage as Record<string, number>
+          stats.inputTokens += usage.input_tokens || 0
+          stats.outputTokens += usage.output_tokens || 0
+          stats.cachedTokens += usage.cache_read_input_tokens || 0
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    if (!firstEntry) return null
+
+    // Extract project path from file path
+    const projectsDir = join(CLAUDE_DIR, 'projects')
+    const relativePath = filePath.replace(projectsDir + '/', '')
+    const projectDir = relativePath.split('/')[0]
+    const projectPath = projectDir.replace(/-/g, '/').replace(/^\//, '')
+    const projectName = projectPath.split('/').pop() || projectDir
+
+    // Extract session ID from filename
+    const fileName = filePath.split('/').pop() || ''
+    const sessionId = fileName.replace('.jsonl', '')
+
+    // Check if session is active (file modified in last 5 minutes)
+    const { statSync } = require('fs')
+    const stat = statSync(filePath)
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
+    const isActive = stat.mtimeMs > fiveMinutesAgo
+
+    // Calculate estimated cost (rough approximation)
+    // Claude 3.5 Sonnet: ~$3/MTok input, ~$15/MTok output
+    stats.estimatedCost =
+      (stats.inputTokens * 0.000003) +
+      (stats.outputTokens * 0.000015)
+
+    const session: ExternalSession = {
+      id: sessionId,
+      slug: firstEntry.slug as string | undefined,
+      projectPath,
+      projectName,
+      filePath,
+      startTime: firstEntry.timestamp
+        ? new Date(firstEntry.timestamp as string).getTime()
+        : stat.birthtimeMs,
+      lastActivity: lastEntry?.timestamp
+        ? new Date(lastEntry.timestamp as string).getTime()
+        : stat.mtimeMs,
+      isActive,
+      model: (firstEntry.message as Record<string, unknown>)?.model as string | undefined,
+      version: firstEntry.version as string | undefined,
+      gitBranch: firstEntry.gitBranch as string | undefined,
+      stats,
+    }
+
+    return session
+  } catch (error) {
+    console.error('Failed to parse session file:', error)
+    return null
+  }
+}
+
+// Discover all external sessions
+async function discoverExternalSessions(): Promise<ExternalSession[]> {
+  const sessions: ExternalSession[] = []
+  const projectsDir = join(CLAUDE_DIR, 'projects')
+
+  if (!existsSync(projectsDir)) return sessions
+
+  try {
+    // Find all JSONL files (excluding subagents)
+    const findResult = execSync(
+      `find "${projectsDir}" -name "*.jsonl" -type f -not -path "*/subagents/*" 2>/dev/null | head -100`,
+      { encoding: 'utf-8', timeout: 10000 }
+    )
+
+    const files = findResult.trim().split('\n').filter((f) => f.trim())
+
+    // Parse each session file
+    for (const filePath of files) {
+      const session = await parseSessionFile(filePath)
+      if (session) {
+        sessions.push(session)
+      }
+    }
+
+    // Sort by last activity (most recent first)
+    sessions.sort((a, b) => b.lastActivity - a.lastActivity)
+
+    return sessions
+  } catch (error) {
+    console.error('Failed to discover sessions:', error)
+    return sessions
+  }
+}
+
+// Get messages from a session
+async function getSessionMessages(sessionId: string, limit = 100): Promise<SessionMessage[]> {
+  const projectsDir = join(CLAUDE_DIR, 'projects')
+  const messages: SessionMessage[] = []
+
+  try {
+    // Find the session file
+    const findResult = execSync(
+      `find "${projectsDir}" -name "${sessionId}.jsonl" -type f 2>/dev/null | head -1`,
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+
+    const filePath = findResult.trim()
+    if (!filePath || !existsSync(filePath)) return messages
+
+    const content = readFileSync(filePath, 'utf-8')
+    const lines = content.trim().split('\n').filter((l) => l.trim())
+
+    // Parse messages (take last N lines)
+    const startIndex = Math.max(0, lines.length - limit)
+    for (let i = startIndex; i < lines.length; i++) {
+      try {
+        const entry = JSON.parse(lines[i]) as Record<string, unknown>
+        const type = entry.type as SessionMessage['type']
+
+        if (!['user', 'assistant', 'tool-result'].includes(type)) continue
+
+        const message = entry.message as Record<string, unknown> | undefined
+
+        const sessionMessage: SessionMessage = {
+          uuid: entry.uuid as string,
+          parentUuid: entry.parentUuid as string | undefined,
+          type,
+          timestamp: entry.timestamp
+            ? new Date(entry.timestamp as string).getTime()
+            : Date.now(),
+          content: (message?.content as string) || (entry.content as string),
+          model: message?.model as string | undefined,
+          usage: message?.usage as SessionMessage['usage'],
+        }
+
+        // Handle tool results
+        if (type === 'tool-result') {
+          sessionMessage.toolName = entry.toolName as string
+          sessionMessage.toolInput = entry.toolInput as Record<string, unknown>
+          sessionMessage.toolOutput = entry.result as string
+        }
+
+        messages.push(sessionMessage)
+      } catch {
+        // Skip malformed entries
+      }
+    }
+
+    return messages
+  } catch (error) {
+    console.error('Failed to get session messages:', error)
+    return messages
+  }
+}
+
+// Get active sessions (modified in last 5 minutes)
+async function getActiveSessions(): Promise<ExternalSession[]> {
+  const sessions = await discoverExternalSessions()
+  return sessions.filter((s) => s.isActive)
+}
+
+// IPC Handlers for External Sessions
+ipcMain.handle('sessions:discover', async () => {
+  return discoverExternalSessions()
+})
+
+ipcMain.handle('sessions:get', async (_event, sessionId: string) => {
+  const sessions = await discoverExternalSessions()
+  return sessions.find((s) => s.id === sessionId) || null
+})
+
+ipcMain.handle('sessions:getMessages', async (_event, sessionId: string, limit?: number) => {
+  return getSessionMessages(sessionId, limit)
+})
+
+ipcMain.handle('sessions:watch', async (_event, enable: boolean) => {
+  if (enable) {
+    return sessionWatchManager.start()
+  } else {
+    return sessionWatchManager.stop()
+  }
+})
+
+ipcMain.handle('sessions:getActive', async () => {
+  return getActiveSessions()
+})

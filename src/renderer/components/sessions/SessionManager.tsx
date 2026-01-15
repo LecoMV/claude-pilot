@@ -1,0 +1,468 @@
+import { useEffect, useMemo } from 'react'
+import {
+  Activity,
+  Clock,
+  FileText,
+  FolderOpen,
+  Hash,
+  MessageSquare,
+  RefreshCw,
+  Search,
+  Zap,
+  DollarSign,
+  Eye,
+  Radio,
+  GitBranch,
+  ChevronRight,
+} from 'lucide-react'
+import { useSessionsStore, selectFilteredSessions } from '../../stores/sessions'
+import type { ExternalSession, SessionMessage } from '../../../shared/types'
+
+export function SessionManager() {
+  const {
+    sessions,
+    activeSessions,
+    selectedSession,
+    selectedMessages,
+    isLoading,
+    isWatching,
+    searchQuery,
+    filter,
+    sortBy,
+    fetchSessions,
+    fetchActiveSessions,
+    selectSession,
+    toggleWatching,
+    setSearchQuery,
+    setFilter,
+    setSortBy,
+    updateSession,
+  } = useSessionsStore()
+
+  const filteredSessions = useMemo(
+    () => selectFilteredSessions(useSessionsStore.getState()),
+    [sessions, searchQuery, filter, sortBy]
+  )
+
+  // Fetch sessions on mount
+  useEffect(() => {
+    fetchSessions()
+    fetchActiveSessions()
+
+    // Listen for session updates
+    const unsubscribe = window.electron.on('session:updated', (session: ExternalSession) => {
+      updateSession(session)
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [])
+
+  // Refresh active sessions periodically when watching
+  useEffect(() => {
+    if (!isWatching) return
+
+    const interval = setInterval(() => {
+      fetchActiveSessions()
+    }, 30000)
+
+    return () => clearInterval(interval)
+  }, [isWatching])
+
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp)
+    const now = new Date()
+    const diff = now.getTime() - timestamp
+
+    if (diff < 60000) return 'Just now'
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+    return date.toLocaleDateString()
+  }
+
+  const formatTokens = (tokens: number) => {
+    if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`
+    if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`
+    return tokens.toString()
+  }
+
+  const formatCost = (cost: number | undefined) => {
+    if (!cost) return '$0.00'
+    return `$${cost.toFixed(2)}`
+  }
+
+  return (
+    <div className="flex h-full">
+      {/* Session List */}
+      <div className="w-96 border-r border-border flex flex-col">
+        {/* Header */}
+        <div className="p-4 border-b border-border">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-text-primary">Sessions</h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleWatching}
+                className={`p-2 rounded-lg transition-colors ${
+                  isWatching
+                    ? 'bg-accent-green/20 text-accent-green'
+                    : 'bg-surface text-text-muted hover:text-text-primary'
+                }`}
+                title={isWatching ? 'Stop watching' : 'Watch for changes'}
+              >
+                <Radio className="w-4 h-4" />
+              </button>
+              <button
+                onClick={fetchSessions}
+                className="p-2 rounded-lg bg-surface text-text-muted hover:text-text-primary transition-colors"
+                disabled={isLoading}
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* Search */}
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+            <input
+              type="text"
+              placeholder="Search sessions..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent-purple/50"
+            />
+          </div>
+
+          {/* Filters */}
+          <div className="flex gap-2">
+            <select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value as 'all' | 'active' | 'recent')}
+              className="flex-1 px-3 py-1.5 bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent-purple/50"
+            >
+              <option value="all">All Sessions</option>
+              <option value="active">Active Now</option>
+              <option value="recent">Last 24h</option>
+            </select>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'lastActivity' | 'startTime' | 'tokens' | 'messages')}
+              className="flex-1 px-3 py-1.5 bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent-purple/50"
+            >
+              <option value="lastActivity">Last Activity</option>
+              <option value="startTime">Start Time</option>
+              <option value="tokens">Token Usage</option>
+              <option value="messages">Messages</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Active Sessions Banner */}
+        {activeSessions.length > 0 && (
+          <div className="px-4 py-2 bg-accent-green/10 border-b border-accent-green/30">
+            <div className="flex items-center gap-2 text-accent-green text-sm">
+              <Activity className="w-4 h-4" />
+              <span>{activeSessions.length} active session{activeSessions.length !== 1 ? 's' : ''}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Session List */}
+        <div className="flex-1 overflow-auto">
+          {filteredSessions.length === 0 ? (
+            <div className="p-8 text-center text-text-muted">
+              <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>No sessions found</p>
+            </div>
+          ) : (
+            filteredSessions.map((session) => (
+              <SessionCard
+                key={session.id}
+                session={session}
+                isSelected={selectedSession?.id === session.id}
+                onSelect={() => selectSession(session.id)}
+                formatDate={formatDate}
+                formatTokens={formatTokens}
+                formatCost={formatCost}
+              />
+            ))
+          )}
+        </div>
+
+        {/* Stats Footer */}
+        <div className="p-3 border-t border-border bg-surface/50 text-xs text-text-muted">
+          <div className="flex justify-between">
+            <span>{filteredSessions.length} sessions</span>
+            <span>
+              {formatTokens(filteredSessions.reduce((sum, s) => sum + s.stats.inputTokens + s.stats.outputTokens, 0))} total tokens
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Session Detail */}
+      <div className="flex-1 flex flex-col">
+        {selectedSession ? (
+          <SessionDetail
+            session={selectedSession}
+            messages={selectedMessages}
+            formatDate={formatDate}
+            formatTokens={formatTokens}
+            formatCost={formatCost}
+          />
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-text-muted">
+            <div className="text-center">
+              <Eye className="w-16 h-16 mx-auto mb-4 opacity-30" />
+              <p className="text-lg">Select a session to view details</p>
+              <p className="text-sm mt-2">Sessions from external Claude Code instances appear here</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Session Card Component
+interface SessionCardProps {
+  session: ExternalSession
+  isSelected: boolean
+  onSelect: () => void
+  formatDate: (ts: number) => string
+  formatTokens: (t: number) => string
+  formatCost: (c: number | undefined) => string
+}
+
+function SessionCard({ session, isSelected, onSelect, formatDate, formatTokens, formatCost }: SessionCardProps) {
+  return (
+    <button
+      onClick={onSelect}
+      className={`w-full p-3 text-left border-b border-border transition-colors ${
+        isSelected ? 'bg-accent-purple/10 border-l-2 border-l-accent-purple' : 'hover:bg-surface'
+      }`}
+    >
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center gap-2">
+          {session.isActive && (
+            <span className="w-2 h-2 rounded-full bg-accent-green animate-pulse" />
+          )}
+          <span className="font-medium text-text-primary truncate max-w-[200px]">
+            {session.slug || session.projectName}
+          </span>
+        </div>
+        <span className="text-xs text-text-muted">{formatDate(session.lastActivity)}</span>
+      </div>
+
+      <div className="flex items-center gap-2 text-xs text-text-muted mb-2">
+        <FolderOpen className="w-3 h-3" />
+        <span className="truncate">{session.projectName}</span>
+      </div>
+
+      <div className="flex items-center gap-3 text-xs">
+        <span className="flex items-center gap-1 text-text-muted">
+          <MessageSquare className="w-3 h-3" />
+          {session.stats.messageCount}
+        </span>
+        <span className="flex items-center gap-1 text-text-muted">
+          <Zap className="w-3 h-3" />
+          {formatTokens(session.stats.inputTokens + session.stats.outputTokens)}
+        </span>
+        <span className="flex items-center gap-1 text-accent-yellow">
+          <DollarSign className="w-3 h-3" />
+          {formatCost(session.stats.estimatedCost)}
+        </span>
+      </div>
+    </button>
+  )
+}
+
+// Session Detail Component
+interface SessionDetailProps {
+  session: ExternalSession
+  messages: SessionMessage[]
+  formatDate: (ts: number) => string
+  formatTokens: (t: number) => string
+  formatCost: (c: number | undefined) => string
+}
+
+function SessionDetail({ session, messages, formatDate, formatTokens, formatCost }: SessionDetailProps) {
+  return (
+    <>
+      {/* Header */}
+      <div className="p-4 border-b border-border">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-xl font-semibold text-text-primary flex items-center gap-2">
+              {session.isActive && (
+                <span className="w-3 h-3 rounded-full bg-accent-green animate-pulse" />
+              )}
+              {session.slug || session.projectName}
+            </h2>
+            <p className="text-sm text-text-muted flex items-center gap-2 mt-1">
+              <FolderOpen className="w-4 h-4" />
+              {session.projectPath}
+            </p>
+          </div>
+          <div className="text-right text-sm text-text-muted">
+            <p>Started {formatDate(session.startTime)}</p>
+            <p>Last activity {formatDate(session.lastActivity)}</p>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-6 gap-4">
+          <StatCard
+            icon={<MessageSquare className="w-4 h-4" />}
+            label="Messages"
+            value={session.stats.messageCount.toString()}
+          />
+          <StatCard
+            icon={<Hash className="w-4 h-4" />}
+            label="Tool Calls"
+            value={session.stats.toolCalls.toString()}
+          />
+          <StatCard
+            icon={<Zap className="w-4 h-4" />}
+            label="Input Tokens"
+            value={formatTokens(session.stats.inputTokens)}
+          />
+          <StatCard
+            icon={<Zap className="w-4 h-4" />}
+            label="Output Tokens"
+            value={formatTokens(session.stats.outputTokens)}
+          />
+          <StatCard
+            icon={<Clock className="w-4 h-4" />}
+            label="Cached"
+            value={formatTokens(session.stats.cachedTokens)}
+          />
+          <StatCard
+            icon={<DollarSign className="w-4 h-4" />}
+            label="Est. Cost"
+            value={formatCost(session.stats.estimatedCost)}
+            highlight
+          />
+        </div>
+
+        {/* Metadata */}
+        <div className="flex items-center gap-4 mt-3 text-xs text-text-muted">
+          {session.model && (
+            <span className="flex items-center gap-1">
+              <span className="font-medium">Model:</span> {session.model}
+            </span>
+          )}
+          {session.version && (
+            <span className="flex items-center gap-1">
+              <span className="font-medium">Claude Code:</span> v{session.version}
+            </span>
+          )}
+          {session.gitBranch && (
+            <span className="flex items-center gap-1">
+              <GitBranch className="w-3 h-3" />
+              {session.gitBranch}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-auto p-4">
+        <h3 className="text-sm font-medium text-text-muted mb-3">Recent Messages</h3>
+        {messages.length === 0 ? (
+          <p className="text-text-muted text-center py-8">No messages to display</p>
+        ) : (
+          <div className="space-y-3">
+            {messages.map((msg) => (
+              <MessageCard key={msg.uuid} message={msg} formatDate={formatDate} />
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+// Stat Card Component
+function StatCard({
+  icon,
+  label,
+  value,
+  highlight,
+}: {
+  icon: React.ReactNode
+  label: string
+  value: string
+  highlight?: boolean
+}) {
+  return (
+    <div className={`p-3 rounded-lg ${highlight ? 'bg-accent-yellow/10' : 'bg-surface'}`}>
+      <div className={`flex items-center gap-2 mb-1 ${highlight ? 'text-accent-yellow' : 'text-text-muted'}`}>
+        {icon}
+        <span className="text-xs">{label}</span>
+      </div>
+      <p className={`text-lg font-semibold ${highlight ? 'text-accent-yellow' : 'text-text-primary'}`}>
+        {value}
+      </p>
+    </div>
+  )
+}
+
+// Message Card Component
+function MessageCard({
+  message,
+  formatDate,
+}: {
+  message: SessionMessage
+  formatDate: (ts: number) => string
+}) {
+  const getTypeStyles = () => {
+    switch (message.type) {
+      case 'user':
+        return 'bg-accent-blue/10 border-accent-blue/30'
+      case 'assistant':
+        return 'bg-accent-purple/10 border-accent-purple/30'
+      case 'tool-result':
+        return 'bg-accent-green/10 border-accent-green/30'
+      default:
+        return 'bg-surface border-border'
+    }
+  }
+
+  const getTypeLabel = () => {
+    switch (message.type) {
+      case 'user':
+        return 'User'
+      case 'assistant':
+        return 'Assistant'
+      case 'tool-result':
+        return message.toolName || 'Tool'
+      default:
+        return message.type
+    }
+  }
+
+  return (
+    <div className={`p-3 rounded-lg border ${getTypeStyles()}`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-text-primary">{getTypeLabel()}</span>
+        <span className="text-xs text-text-muted">{formatDate(message.timestamp)}</span>
+      </div>
+      <p className="text-sm text-text-primary whitespace-pre-wrap line-clamp-4">
+        {message.content || message.toolOutput || '(no content)'}
+      </p>
+      {message.usage && (
+        <div className="mt-2 text-xs text-text-muted flex items-center gap-2">
+          <Zap className="w-3 h-3" />
+          {message.usage.input_tokens} in / {message.usage.output_tokens} out
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default SessionManager

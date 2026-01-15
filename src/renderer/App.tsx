@@ -3,6 +3,7 @@ import { Sidebar } from './components/layout/Sidebar'
 import { Header } from './components/layout/Header'
 import { Dashboard } from './components/dashboard/Dashboard'
 import { Projects } from './components/projects/Projects'
+import { SessionManager } from './components/sessions/SessionManager'
 import { MCPManager } from './components/mcp/MCPManager'
 import { MemoryBrowser } from './components/memory/MemoryBrowser'
 import { ProfileManager } from './components/profiles/ProfileManager'
@@ -18,7 +19,7 @@ import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { ErrorToast } from './components/common/ErrorNotifications'
 import { initializeErrorListener } from './stores/errors'
 
-type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'sessions' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'settings'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
@@ -36,6 +37,8 @@ export default function App() {
         return <Dashboard />
       case 'projects':
         return <Projects />
+      case 'sessions':
+        return <SessionManager />
       case 'mcp':
         return <MCPManager />
       case 'memory':
@@ -99,6 +102,7 @@ function getViewTitle(view: View): string {
   const titles: Record<View, string> = {
     dashboard: 'Dashboard',
     projects: 'Projects',
+    sessions: 'External Sessions',
     mcp: 'MCP Servers',
     memory: 'Memory Browser',
     profiles: 'Profiles & Settings',

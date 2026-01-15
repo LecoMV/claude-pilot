@@ -5,7 +5,14 @@ export interface SystemStatus {
   claude: ServiceStatus
   mcp: MCPStatus
   memory: MemoryStatus
+  ollama: OllamaServiceStatus
   resources: ResourceUsage
+}
+
+export interface OllamaServiceStatus {
+  online: boolean
+  modelCount: number
+  runningModels: number
 }
 
 export interface ServiceStatus {
@@ -183,6 +190,57 @@ export interface SessionSummary {
   tokenCount: number
   toolCalls: number
   model?: string
+}
+
+// External Session Management Types (for sessions launched outside the app)
+export interface ExternalSession {
+  id: string
+  slug?: string
+  projectPath: string
+  projectName: string
+  filePath: string
+  startTime: number
+  lastActivity: number
+  isActive: boolean
+  model?: string
+  version?: string
+  gitBranch?: string
+  stats: SessionStats
+}
+
+export interface SessionStats {
+  messageCount: number
+  userMessages: number
+  assistantMessages: number
+  toolCalls: number
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+  estimatedCost?: number
+}
+
+export interface SessionMessage {
+  uuid: string
+  parentUuid?: string
+  type: 'user' | 'assistant' | 'tool-result' | 'queue-operation' | 'file-history-snapshot'
+  timestamp: number
+  content?: string
+  model?: string
+  usage?: {
+    input_tokens: number
+    output_tokens: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+  }
+  toolName?: string
+  toolInput?: Record<string, unknown>
+  toolOutput?: string
+}
+
+export interface SessionEvent {
+  type: 'session-started' | 'session-updated' | 'session-ended'
+  sessionId: string
+  data?: Partial<ExternalSession>
 }
 
 // Profile types
@@ -402,6 +460,13 @@ export type IPCChannels = {
   // Settings
   'settings:get': () => Promise<AppSettings>
   'settings:save': (settings: AppSettings) => Promise<boolean>
+
+  // External Sessions (sessions launched outside the app)
+  'sessions:discover': () => Promise<ExternalSession[]>
+  'sessions:get': (sessionId: string) => Promise<ExternalSession | null>
+  'sessions:getMessages': (sessionId: string, limit?: number) => Promise<SessionMessage[]>
+  'sessions:watch': (enable: boolean) => Promise<boolean>
+  'sessions:getActive': () => Promise<ExternalSession[]>
 }
 
 // Window API exposed to renderer
