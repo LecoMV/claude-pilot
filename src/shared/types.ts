@@ -200,6 +200,19 @@ export interface ClaudeRule {
   content?: string
 }
 
+// Logs types
+export type LogSource = 'claude' | 'mcp' | 'system' | 'agent' | 'workflow' | 'all'
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+export interface LogEntry {
+  id: string
+  timestamp: number
+  source: LogSource
+  level: LogLevel
+  message: string
+  metadata?: Record<string, unknown>
+}
+
 // IPC Channel definitions
 export type IPCChannels = {
   // System
@@ -253,6 +266,11 @@ export type IPCChannels = {
   'services:podman': () => Promise<PodmanContainer[]>
   'services:systemdAction': (name: string, action: 'start' | 'stop' | 'restart') => Promise<boolean>
   'services:podmanAction': (id: string, action: 'start' | 'stop' | 'restart') => Promise<boolean>
+
+  // Logs
+  'logs:recent': (limit?: number) => Promise<LogEntry[]>
+  'logs:stream': (sources: string[]) => Promise<boolean>
+  'logs:stopStream': () => Promise<boolean>
 }
 
 // Window API exposed to renderer

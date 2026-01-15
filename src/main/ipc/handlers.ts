@@ -16,6 +16,7 @@ import type {
   SessionSummary,
   SystemdService,
   PodmanContainer,
+  LogEntry,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -158,6 +159,19 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('services:podmanAction', async (_event, id: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
     return podmanAction(id, action)
+  })
+
+  // Logs handlers
+  ipcMain.handle('logs:recent', async (_event, limit = 200): Promise<LogEntry[]> => {
+    return getRecentLogs(limit)
+  })
+
+  ipcMain.handle('logs:stream', async (_event, sources: string[]): Promise<boolean> => {
+    return startLogStream(sources)
+  })
+
+  ipcMain.handle('logs:stopStream', async (): Promise<boolean> => {
+    return stopLogStream()
   })
 }
 
@@ -830,4 +844,150 @@ function podmanAction(id: string, action: 'start' | 'stop' | 'restart'): boolean
     console.error(`Failed to ${action} container ${id}:`, error)
     return false
   }
+}
+
+// Logs functions
+type LogSource = 'claude' | 'mcp' | 'system' | 'agent' | 'workflow'
+type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+function generateLogId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function parseLogLevel(line: string): LogLevel {
+  const lower = line.toLowerCase()
+  if (lower.includes('error') || lower.includes('failed') || lower.includes('exception')) return 'error'
+  if (lower.includes('warn') || lower.includes('warning')) return 'warn'
+  if (lower.includes('debug')) return 'debug'
+  return 'info'
+}
+
+function getRecentLogs(limit = 200): LogEntry[] {
+  const logs: LogEntry[] = []
+
+  // Read from journalctl for system logs
+  try {
+    const sysLogs = execSync(
+      `journalctl --no-pager -n ${Math.floor(limit / 4)} -o short-iso 2>/dev/null | tail -${Math.floor(limit / 4)}`,
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+
+    for (const line of sysLogs.trim().split('\n').slice(-Math.floor(limit / 4))) {
+      if (!line.trim()) continue
+      // Parse journalctl format: 2024-01-15T12:34:56+00:00 hostname process[pid]: message
+      const match = line.match(/^(\S+)\s+\S+\s+(\S+)\[\d+\]:\s*(.*)$/)
+      if (match) {
+        const [, timestamp, , message] = match
+        logs.push({
+          id: generateLogId(),
+          timestamp: new Date(timestamp).getTime() || Date.now(),
+          source: 'system',
+          level: parseLogLevel(message),
+          message: message.slice(0, 500),
+        })
+      }
+    }
+  } catch {
+    // Ignore journalctl errors
+  }
+
+  // Read Claude Code logs from recent session transcripts
+  const projectsDir = join(CLAUDE_DIR, 'projects')
+  if (existsSync(projectsDir)) {
+    try {
+      const entries = readdirSync(projectsDir, { withFileTypes: true })
+      for (const entry of entries.slice(0, 3)) {
+        if (!entry.isDirectory()) continue
+        const projectDir = join(projectsDir, entry.name)
+        const sessionFiles = readdirSync(projectDir)
+          .filter((f) => f.endsWith('.jsonl'))
+          .slice(-2)
+
+        for (const sessionFile of sessionFiles) {
+          const sessionPath = join(projectDir, sessionFile)
+          try {
+            const content = readFileSync(sessionPath, 'utf-8')
+            const lines = content.trim().split('\n').slice(-20)
+
+            for (const line of lines) {
+              try {
+                const entry = JSON.parse(line)
+                if (entry.type === 'message' || entry.role) {
+                  logs.push({
+                    id: generateLogId(),
+                    timestamp: new Date(entry.timestamp || Date.now()).getTime(),
+                    source: 'claude',
+                    level: 'info',
+                    message: `[${entry.role || 'assistant'}] ${(entry.content || '').slice(0, 200)}...`,
+                    metadata: { sessionId: sessionFile.replace('.jsonl', ''), model: entry.model },
+                  })
+                }
+                if (entry.type === 'tool_use' || entry.tool) {
+                  logs.push({
+                    id: generateLogId(),
+                    timestamp: new Date(entry.timestamp || Date.now()).getTime(),
+                    source: 'agent',
+                    level: 'info',
+                    message: `Tool: ${entry.tool || entry.name || 'unknown'}`,
+                    metadata: entry.input || entry.args,
+                  })
+                }
+              } catch {
+                // Skip invalid JSON
+              }
+            }
+          } catch {
+            // Skip unreadable files
+          }
+        }
+      }
+    } catch {
+      // Ignore directory errors
+    }
+  }
+
+  // Read MCP server logs
+  try {
+    const mcpLogs = execSync(
+      'journalctl --user -u "mcp-*" --no-pager -n 20 -o short-iso 2>/dev/null',
+      { encoding: 'utf-8', timeout: 3000 }
+    )
+
+    for (const line of mcpLogs.trim().split('\n').slice(-20)) {
+      if (!line.trim()) continue
+      const match = line.match(/^(\S+)\s+\S+\s+(\S+).*:\s*(.*)$/)
+      if (match) {
+        const [, timestamp, unit, message] = match
+        logs.push({
+          id: generateLogId(),
+          timestamp: new Date(timestamp).getTime() || Date.now(),
+          source: 'mcp',
+          level: parseLogLevel(message),
+          message: `[${unit}] ${message.slice(0, 300)}`,
+        })
+      }
+    }
+  } catch {
+    // MCP logs not available
+  }
+
+  // Sort by timestamp and limit
+  return logs
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .slice(-limit)
+}
+
+// Streaming log state
+let logStreamActive = false
+
+function startLogStream(_sources: string[]): boolean {
+  // In a real implementation, this would set up real-time log tailing
+  // For now, we'll simulate with the recent logs fetcher
+  logStreamActive = true
+  return true
+}
+
+function stopLogStream(): boolean {
+  logStreamActive = false
+  return true
 }

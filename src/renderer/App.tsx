@@ -10,8 +10,9 @@ import { ContextDashboard } from './components/context/ContextDashboard'
 import { ServicesManager } from './components/services/ServicesManager'
 import { Terminal } from './components/terminal/Terminal'
 import { Settings } from './components/settings/Settings'
+import { LogsViewer } from './components/logs/LogsViewer'
 
-type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'terminal' | 'settings'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
@@ -33,6 +34,8 @@ export default function App() {
         return <ContextDashboard />
       case 'services':
         return <ServicesManager />
+      case 'logs':
+        return <LogsViewer />
       case 'terminal':
         return <Terminal />
       case 'settings':
@@ -76,6 +79,7 @@ function getViewTitle(view: View): string {
     profiles: 'Profiles & Settings',
     context: 'Context Management',
     services: 'System Services',
+    logs: 'System Logs',
     terminal: 'Terminal',
     settings: 'Settings',
   }
