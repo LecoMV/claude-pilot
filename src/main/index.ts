@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc/handlers'
 import { terminalManager, registerTerminalHandlers } from './services/terminal'
+import { setupGlobalErrorHandlers, configureErrorHandler, handleError } from './utils/error-handler'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -77,11 +78,14 @@ app.on('window-all-closed', () => {
   }
 })
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error)
+// Configure and setup enterprise-grade error handling
+configureErrorHandler({
+  logToFile: true,
+  showDialogForCritical: true,
 })
+setupGlobalErrorHandlers()
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason)
+// Listen for UI errors from renderer
+ipcMain.on('error:ui', (_event, data: { message: string; stack?: string; componentStack?: string }) => {
+  handleError(new Error(data.message), { component: 'renderer', operation: 'ui:render' })
 })

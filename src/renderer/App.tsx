@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Sidebar } from './components/layout/Sidebar'
 import { Header } from './components/layout/Header'
 import { Dashboard } from './components/dashboard/Dashboard'
@@ -14,12 +14,21 @@ import { LogsViewer } from './components/logs/LogsViewer'
 import { OllamaManager } from './components/ollama/OllamaManager'
 import { AgentCanvas } from './components/agents/AgentCanvas'
 import { ChatInterface } from './components/chat/ChatInterface'
+import { ErrorBoundary } from './components/common/ErrorBoundary'
+import { ErrorToast } from './components/common/ErrorNotifications'
+import { initializeErrorListener } from './stores/errors'
 
 type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'settings'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
+  // Initialize error listener on mount
+  useEffect(() => {
+    const unsubscribe = initializeErrorListener()
+    return () => unsubscribe()
+  }, [])
 
   const renderView = () => {
     switch (currentView) {
@@ -55,27 +64,34 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      {/* Sidebar */}
-      <Sidebar
-        currentView={currentView}
-        onViewChange={setCurrentView}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-      />
-
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Header
-          title={getViewTitle(currentView)}
-          onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+    <ErrorBoundary>
+      <div className="flex h-screen overflow-hidden">
+        {/* Sidebar */}
+        <Sidebar
+          currentView={currentView}
+          onViewChange={setCurrentView}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
 
-        <main className="flex-1 overflow-auto p-6 bg-background">
-          {renderView()}
-        </main>
+        {/* Main content */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <Header
+            title={getViewTitle(currentView)}
+            onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+          />
+
+          <main className="flex-1 overflow-auto p-6 bg-background">
+            <ErrorBoundary key={currentView}>
+              {renderView()}
+            </ErrorBoundary>
+          </main>
+        </div>
+
+        {/* Error notifications */}
+        <ErrorToast />
       </div>
-    </div>
+    </ErrorBoundary>
   )
 }
 

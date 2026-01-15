@@ -26,6 +26,8 @@ npm-debug.log*
 
 # Testing
 coverage/
+playwright-report/
+playwright-results/
 
 # Electron
 *.dmg
