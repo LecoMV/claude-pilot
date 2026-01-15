@@ -13,8 +13,9 @@ import { Settings } from './components/settings/Settings'
 import { LogsViewer } from './components/logs/LogsViewer'
 import { OllamaManager } from './components/ollama/OllamaManager'
 import { AgentCanvas } from './components/agents/AgentCanvas'
+import { ChatInterface } from './components/chat/ChatInterface'
 
-type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'settings'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
@@ -42,6 +43,8 @@ export default function App() {
         return <OllamaManager />
       case 'agents':
         return <AgentCanvas />
+      case 'chat':
+        return <ChatInterface />
       case 'terminal':
         return <Terminal />
       case 'settings':
@@ -88,6 +91,7 @@ function getViewTitle(view: View): string {
     logs: 'System Logs',
     ollama: 'Ollama Models',
     agents: 'Agent Orchestration',
+    chat: 'Claude Chat',
     terminal: 'Terminal',
     settings: 'Settings',
   }

@@ -270,6 +270,25 @@ export interface HiveMindInfo {
   status: 'active' | 'idle' | 'shutdown'
 }
 
+// Chat types
+export type MessageRole = 'user' | 'assistant' | 'system'
+
+export interface ChatMessage {
+  id: string
+  role: MessageRole
+  content: string
+  timestamp: number
+  toolCalls?: ToolCall[]
+  isStreaming?: boolean
+}
+
+export interface ToolCall {
+  id: string
+  name: string
+  input: Record<string, unknown>
+  output?: string
+}
+
 // IPC Channel definitions
 export type IPCChannels = {
   // System
@@ -346,6 +365,9 @@ export type IPCChannels = {
   'agents:hiveMindStatus': () => Promise<HiveMindInfo | null>
   'agents:initSwarm': (topology: string) => Promise<boolean>
   'agents:shutdownSwarm': () => Promise<boolean>
+
+  // Chat
+  'chat:send': (projectPath: string, message: string, messageId: string) => Promise<boolean>
 }
 
 // Window API exposed to renderer

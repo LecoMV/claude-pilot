@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, type WebContents } from 'electron'
 import { execSync, spawn } from 'child_process'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
@@ -237,6 +237,11 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('agents:shutdownSwarm', async (): Promise<boolean> => {
     return shutdownSwarm()
+  })
+
+  // Chat handlers
+  ipcMain.handle('chat:send', async (event, projectPath: string, message: string, messageId: string): Promise<boolean> => {
+    return sendChatMessage(event.sender, projectPath, message, messageId)
   })
 }
 
@@ -1354,4 +1359,65 @@ function shutdownSwarm(): boolean {
   }
   agentState.swarm = null
   return true
+}
+
+// Chat functions
+function sendChatMessage(sender: WebContents, projectPath: string, message: string, messageId: string): boolean {
+  try {
+    // Run claude command in background and stream output
+    const claude = spawn('claude', ['--print', '-p', message], {
+      cwd: projectPath,
+      shell: true,
+    })
+
+    let fullResponse = ''
+
+    claude.stdout.on('data', (data: Buffer) => {
+      const chunk = data.toString()
+      fullResponse += chunk
+      sender.send('chat:response', {
+        type: 'chunk',
+        messageId,
+        content: fullResponse,
+      })
+    })
+
+    claude.stderr.on('data', (data: Buffer) => {
+      console.error('Claude stderr:', data.toString())
+    })
+
+    claude.on('close', (code: number) => {
+      if (code === 0) {
+        sender.send('chat:response', {
+          type: 'done',
+          messageId,
+          content: fullResponse,
+        })
+      } else {
+        sender.send('chat:response', {
+          type: 'error',
+          messageId,
+          error: `Claude exited with code ${code}`,
+        })
+      }
+    })
+
+    claude.on('error', (error: Error) => {
+      sender.send('chat:response', {
+        type: 'error',
+        messageId,
+        error: error.message,
+      })
+    })
+
+    return true
+  } catch (error) {
+    console.error('Failed to send chat message:', error)
+    sender.send('chat:response', {
+      type: 'error',
+      messageId,
+      error: 'Failed to start Claude process',
+    })
+    return false
+  }
 }
