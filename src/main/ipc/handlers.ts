@@ -81,6 +81,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('memory:learnings', async (_event, query?: string, limit = 50): Promise<Learning[]> => {
     return queryLearnings(query, limit)
   })
+
+  ipcMain.handle('memory:stats', async (): Promise<{
+    postgresql: { count: number }
+    memgraph: { nodes: number; edges: number }
+    qdrant: { vectors: number }
+  }> => {
+    return getMemoryStats()
+  })
 }
 
 async function getClaudeStatus() {
@@ -240,7 +248,91 @@ function getMCPServers(): MCPServer[] {
 }
 
 async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
-  // TODO: Implement actual PostgreSQL query
-  // For now, return empty array
-  return []
+  try {
+    // Use psql to query PostgreSQL
+    const whereClause = query
+      ? `WHERE content ILIKE '%${query.replace(/'/g, "''")}%' OR topic ILIKE '%${query.replace(/'/g, "''")}%' OR category ILIKE '%${query.replace(/'/g, "''")}%'`
+      : ''
+
+    const sql = `SELECT id, category, topic, content, created_at FROM learnings ${whereClause} ORDER BY created_at DESC LIMIT ${limit}`
+
+    const result = execSync(
+      `PGPASSWORD="" psql -h localhost -p 5433 -U postgres -d claude_memory -t -A -F '|' -c "${sql}"`,
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+
+    if (!result.trim()) return []
+
+    return result
+      .trim()
+      .split('\n')
+      .filter((line) => line.trim())
+      .map((line) => {
+        const [id, category, topic, content, created_at] = line.split('|')
+        return {
+          id: parseInt(id, 10),
+          category: category || 'general',
+          content: content || '',
+          confidence: 1,
+          createdAt: created_at || new Date().toISOString(),
+          source: topic || undefined,
+        }
+      })
+  } catch (error) {
+    console.error('Failed to query learnings:', error)
+    return []
+  }
+}
+
+async function getMemoryStats(): Promise<{
+  postgresql: { count: number }
+  memgraph: { nodes: number; edges: number }
+  qdrant: { vectors: number }
+}> {
+  const stats = {
+    postgresql: { count: 0 },
+    memgraph: { nodes: 0, edges: 0 },
+    qdrant: { vectors: 0 },
+  }
+
+  // PostgreSQL count
+  try {
+    const pgResult = execSync(
+      'PGPASSWORD="" psql -h localhost -p 5433 -U postgres -d claude_memory -t -A -c "SELECT COUNT(*) FROM learnings"',
+      { encoding: 'utf-8', timeout: 3000 }
+    )
+    stats.postgresql.count = parseInt(pgResult.trim(), 10) || 0
+  } catch {
+    // Ignore
+  }
+
+  // Memgraph counts
+  try {
+    const nodeResult = execSync(
+      'echo "MATCH (n) RETURN count(n);" | podman exec -i memgraph mgconsole 2>/dev/null | tail -1',
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+    stats.memgraph.nodes = parseInt(nodeResult.trim(), 10) || 0
+
+    const edgeResult = execSync(
+      'echo "MATCH ()-[r]->() RETURN count(r);" | podman exec -i memgraph mgconsole 2>/dev/null | tail -1',
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+    stats.memgraph.edges = parseInt(edgeResult.trim(), 10) || 0
+  } catch {
+    // Ignore
+  }
+
+  // Qdrant count
+  try {
+    const qdrantResult = execSync(
+      'curl -s http://localhost:6333/collections/claude_memories | grep -o \'"points_count":[0-9]*\' | cut -d: -f2',
+      { encoding: 'utf-8', timeout: 3000 }
+    )
+    stats.qdrant.vectors = parseInt(qdrantResult.trim(), 10) || 0
+  } catch {
+    // Ignore
+  }
+
+  return stats
 }

@@ -155,6 +155,11 @@ export type IPCChannels = {
 
   // Memory
   'memory:learnings': (query?: string, limit?: number) => Promise<Learning[]>
+  'memory:stats': () => Promise<{
+    postgresql: { count: number }
+    memgraph: { nodes: number; edges: number }
+    qdrant: { vectors: number }
+  }>
   'memory:graph': (query: string) => Promise<KnowledgeNode[]>
   'memory:vectors': (query: string, limit?: number) => Promise<VectorMemory[]>
 
