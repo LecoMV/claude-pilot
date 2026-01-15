@@ -5,10 +5,11 @@ import { Dashboard } from './components/dashboard/Dashboard'
 import { Projects } from './components/projects/Projects'
 import { MCPManager } from './components/mcp/MCPManager'
 import { MemoryBrowser } from './components/memory/MemoryBrowser'
+import { ProfileManager } from './components/profiles/ProfileManager'
 import { Terminal } from './components/terminal/Terminal'
 import { Settings } from './components/settings/Settings'
 
-type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'mcp' | 'memory' | 'profiles' | 'terminal' | 'settings'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
@@ -24,6 +25,8 @@ export default function App() {
         return <MCPManager />
       case 'memory':
         return <MemoryBrowser />
+      case 'profiles':
+        return <ProfileManager />
       case 'terminal':
         return <Terminal />
       case 'settings':
@@ -64,6 +67,7 @@ function getViewTitle(view: View): string {
     projects: 'Projects',
     mcp: 'MCP Servers',
     memory: 'Memory Browser',
+    profiles: 'Profiles & Settings',
     terminal: 'Terminal',
     settings: 'Settings',
   }

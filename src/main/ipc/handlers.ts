@@ -9,6 +9,8 @@ import type {
   ClaudeProject,
   MCPServer,
   Learning,
+  ProfileSettings,
+  ClaudeRule,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -88,6 +90,31 @@ export function registerIpcHandlers(): void {
     qdrant: { vectors: number }
   }> => {
     return getMemoryStats()
+  })
+
+  // Profile handlers
+  ipcMain.handle('profile:settings', async () => {
+    return getProfileSettings()
+  })
+
+  ipcMain.handle('profile:saveSettings', async (_event, settings: ProfileSettings) => {
+    return saveProfileSettings(settings)
+  })
+
+  ipcMain.handle('profile:claudemd', async () => {
+    return getClaudeMd()
+  })
+
+  ipcMain.handle('profile:saveClaudemd', async (_event, content: string) => {
+    return saveClaudeMd(content)
+  })
+
+  ipcMain.handle('profile:rules', async () => {
+    return getRules()
+  })
+
+  ipcMain.handle('profile:toggleRule', async (_event, name: string, enabled: boolean) => {
+    return toggleRule(name, enabled)
   })
 }
 
@@ -335,4 +362,123 @@ async function getMemoryStats(): Promise<{
   }
 
   return stats
+}
+
+// Profile functions
+function getProfileSettings(): ProfileSettings {
+  const settingsPath = join(CLAUDE_DIR, 'settings.json')
+  try {
+    if (!existsSync(settingsPath)) {
+      return {}
+    }
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    return {
+      model: settings.model,
+      maxTokens: settings.max_tokens,
+      thinkingEnabled: settings.thinking?.type === 'enabled',
+      thinkingBudget: settings.thinking?.budget_tokens,
+    }
+  } catch (error) {
+    console.error('Failed to read profile settings:', error)
+    return {}
+  }
+}
+
+function saveProfileSettings(newSettings: ProfileSettings): boolean {
+  const settingsPath = join(CLAUDE_DIR, 'settings.json')
+  try {
+    let settings: Record<string, unknown> = {}
+    if (existsSync(settingsPath)) {
+      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    }
+
+    if (newSettings.model) {
+      settings.model = newSettings.model
+    }
+    if (newSettings.maxTokens) {
+      settings.max_tokens = newSettings.maxTokens
+    }
+    if (newSettings.thinkingEnabled !== undefined) {
+      settings.thinking = {
+        type: newSettings.thinkingEnabled ? 'enabled' : 'disabled',
+        budget_tokens: newSettings.thinkingBudget || 32000,
+      }
+    }
+
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+    return true
+  } catch (error) {
+    console.error('Failed to save profile settings:', error)
+    return false
+  }
+}
+
+function getClaudeMd(): string {
+  const claudeMdPath = join(CLAUDE_DIR, 'CLAUDE.md')
+  try {
+    if (!existsSync(claudeMdPath)) {
+      return ''
+    }
+    return readFileSync(claudeMdPath, 'utf-8')
+  } catch (error) {
+    console.error('Failed to read CLAUDE.md:', error)
+    return ''
+  }
+}
+
+function saveClaudeMd(content: string): boolean {
+  const claudeMdPath = join(CLAUDE_DIR, 'CLAUDE.md')
+  try {
+    writeFileSync(claudeMdPath, content)
+    return true
+  } catch (error) {
+    console.error('Failed to save CLAUDE.md:', error)
+    return false
+  }
+}
+
+function getRules(): ClaudeRule[] {
+  const rulesDir = join(CLAUDE_DIR, 'rules')
+  const rules: ClaudeRule[] = []
+
+  try {
+    if (!existsSync(rulesDir)) {
+      return rules
+    }
+
+    const entries = readdirSync(rulesDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue
+
+      const rulePath = join(rulesDir, entry.name)
+      const ruleName = entry.name.replace('.md', '')
+
+      try {
+        const content = readFileSync(rulePath, 'utf-8')
+        rules.push({
+          name: ruleName,
+          path: rulePath,
+          enabled: true, // Rules are enabled by default if they exist
+          content,
+        })
+      } catch {
+        rules.push({
+          name: ruleName,
+          path: rulePath,
+          enabled: true,
+        })
+      }
+    }
+  } catch (error) {
+    console.error('Failed to read rules:', error)
+  }
+
+  return rules
+}
+
+function toggleRule(name: string, enabled: boolean): boolean {
+  // For now, rules are always enabled if the file exists
+  // A more complex implementation would track enabled/disabled state in settings.json
+  console.log(`Toggle rule ${name} to ${enabled}`)
+  return true
 }

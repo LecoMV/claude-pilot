@@ -136,6 +136,21 @@ export interface VectorMemory {
   score?: number
 }
 
+// Profile types
+export interface ProfileSettings {
+  model?: string
+  maxTokens?: number
+  thinkingEnabled?: boolean
+  thinkingBudget?: number
+}
+
+export interface ClaudeRule {
+  name: string
+  path: string
+  enabled: boolean
+  content?: string
+}
+
 // IPC Channel definitions
 export type IPCChannels = {
   // System
@@ -168,6 +183,14 @@ export type IPCChannels = {
   'terminal:write': (id: string, data: string) => void
   'terminal:resize': (id: string, cols: number, rows: number) => void
   'terminal:close': (id: string) => void
+
+  // Profile
+  'profile:settings': () => Promise<ProfileSettings>
+  'profile:saveSettings': (settings: ProfileSettings) => Promise<boolean>
+  'profile:claudemd': () => Promise<string>
+  'profile:saveClaudemd': (content: string) => Promise<boolean>
+  'profile:rules': () => Promise<ClaudeRule[]>
+  'profile:toggleRule': (name: string, enabled: boolean) => Promise<boolean>
 }
 
 // Window API exposed to renderer
