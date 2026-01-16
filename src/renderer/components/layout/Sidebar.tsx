@@ -19,6 +19,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import logoSvg from '@/assets/logo.svg'
 
 type View = 'dashboard' | 'projects' | 'sessions' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'globalSettings' | 'preferences'
 
@@ -61,13 +62,12 @@ export function Sidebar({
       )}
     >
       {/* Logo */}
-      <div className="h-14 flex items-center justify-center border-b border-border">
+      <div className="h-14 flex items-center justify-center border-b border-border px-3">
         {collapsed ? (
-          <span className="text-2xl">✈</span>
+          <img src={logoSvg} alt="Claude Pilot" className="h-8 w-auto" />
         ) : (
           <div className="flex items-center gap-2">
-            <span className="text-2xl">✈</span>
-            <span className="font-semibold text-text-primary">Claude Pilot</span>
+            <img src={logoSvg} alt="Claude Pilot" className="h-8 w-auto" />
           </div>
         )}
       </div>
