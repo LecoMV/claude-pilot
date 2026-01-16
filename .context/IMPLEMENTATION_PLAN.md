@@ -258,20 +258,20 @@ Listen to `nativeTheme.on('updated')` and apply to Tailwind.
 
 ## Implementation Priority Queue
 
-| # | Task | Phase | Effort | Risk | Dependencies |
-|---|------|-------|--------|------|--------------|
-| 1 | Install pg, create PostgresService | 1.1 | 2h | Low | None |
-| 2 | Migrate memory:learnings to pg | 1.1 | 2h | Med | #1 |
-| 3 | Migrate memory:stats to pg | 1.1 | 1h | Low | #1 |
-| 4 | Migrate memory:raw PostgreSQL | 1.1 | 2h | Med | #1 |
-| 5 | Migrate memory:unified-search | 1.1 | 3h | Med | #1-4 |
-| 6 | Create CredentialService | 1.2 | 2h | Low | None |
-| 7 | Settings UI for credentials | 1.2 | 2h | Low | #6 |
-| 8 | Remove all execSync psql calls | 1.1 | 1h | Low | #1-5 |
-| 9 | Streaming transcript parser | 2.2 | 3h | Low | None |
-| 10 | GPU monitoring panel | 3.1 | 4h | Low | None |
-| 11 | OCSF audit logging | 3.3 | 4h | Med | None |
-| 12 | Context Bridge hardening | 1.3 | 8h | High | #1-8 |
+| # | Task | Phase | Status | Notes |
+|---|------|-------|--------|-------|
+| 1 | Install pg, create PostgresService | 1.1 | ✅ DONE | Commit 438b849 |
+| 2 | Migrate memory:learnings to pg | 1.1 | ✅ DONE | Parameterized queries |
+| 3 | Migrate memory:stats to pg | 1.1 | ✅ DONE | queryScalar method |
+| 4 | Migrate memory:raw PostgreSQL | 1.1 | ✅ DONE | queryRaw method |
+| 5 | Migrate memory:unified-search | 1.1 | ✅ DONE | Part of #2 |
+| 6 | Create CredentialService | 1.2 | ✅ DONE | Commit e72e205 |
+| 7 | Settings UI for credentials | 1.2 | 🔲 TODO | IPC handlers ready |
+| 8 | Remove all execSync psql calls | 1.1 | ✅ DONE | 39 → 36 (non-PG remain) |
+| 9 | Streaming transcript parser | 2.2 | ✅ DONE | Commit 6f216e3 |
+| 10 | GPU monitoring panel | 3.1 | 🔲 TODO | deploy-2b52 |
+| 11 | OCSF audit logging | 3.3 | 🔲 TODO | deploy-x2oc |
+| 12 | Context Bridge hardening | 1.3 | 🔲 TODO | deploy-usdx (High Risk) |
 
 ---
 
@@ -279,7 +279,7 @@ Listen to `nativeTheme.on('updated')` and apply to Tailwind.
 
 | Metric | Current | Target | Notes |
 |--------|---------|--------|-------|
-| execSync calls | 39 | 0 | Security critical |
+| execSync calls | 36 | 0 (non-PG OK) | PostgreSQL done, remaining are system calls |
 | Test coverage | ~80% | >85% | Need IPC handler tests |
 | Cold start | ~2.5s | <2s | Lazy loading |
 | Memory usage | ~280MB | <300MB | On target |
@@ -325,9 +325,16 @@ src/
 
 ## Next Steps
 
-1. **Immediate**: Start Phase 1.1 (PostgreSQL native driver)
-2. **This Session**: Complete #1-5 from priority queue
-3. **Next Session**: Complete #6-8, start Phase 3
+**Completed This Session (2026-01-16):**
+- ✅ Phase 1.1: PostgreSQL native driver migration (all handlers)
+- ✅ Phase 1.2: Credential encryption with safeStorage
+- ✅ Phase 2.2: Streaming transcript parser
+
+**Remaining Priority Work:**
+1. Settings UI for credentials (#7) - IPC ready, need renderer component
+2. Context Bridge hardening (#12) - High risk, needs careful planning
+3. GPU monitoring panel (#10) - deploy-2b52
+4. OCSF audit logging (#11) - deploy-x2oc
 
 ---
 
@@ -337,12 +344,14 @@ src/
 ┌─────────────────────────────────────────────────────────┐
 │                    Electron Main Process                 │
 ├─────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
-│  │  IPC        │  │  Services   │  │  Error Handler  │  │
-│  │  Handlers   │  │  - Terminal │  │  - Global catch │  │
-│  │  (3927 LOC) │  │  - Memgraph │  │  - File logging │  │
-│  │  ⚠️ execSync│  │  - (pg TBD) │  │                 │  │
-│  └─────────────┘  └─────────────┘  └─────────────────┘  │
+│  ┌─────────────┐  ┌─────────────────────────────────┐   │
+│  │  IPC        │  │  Services                       │   │
+│  │  Handlers   │  │  - Terminal (node-pty)          │   │
+│  │  (4000+ LOC)│  │  - Memgraph (neo4j-driver) ✅   │   │
+│  │  ✅ Native  │  │  - PostgreSQL (pg) ✅ NEW       │   │
+│  │             │  │  - Credentials (safeStorage) ✅  │   │
+│  │             │  │  - Transcript (streaming) ✅     │   │
+│  └─────────────┘  └─────────────────────────────────┘   │
 └───────────────────────────┬─────────────────────────────┘
                             │ IPC (contextBridge)
 ┌───────────────────────────┴─────────────────────────────┐
@@ -363,6 +372,6 @@ src/
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │ PostgreSQL  │    │  Memgraph   │    │   Qdrant    │
 │ :5433       │    │  :7687      │    │   :6333     │
-│ (execSync!) │    │  (native)   │    │   (REST)    │
+│ ✅ native pg│    │  ✅ native  │    │   (REST)    │
 └─────────────┘    └─────────────┘    └─────────────┘
 ```
