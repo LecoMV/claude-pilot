@@ -418,6 +418,22 @@ export type IPCChannels = {
     edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>
   }>
   'memory:vectors': (query: string, limit?: number) => Promise<VectorMemory[]>
+  'memory:qdrant:browse': (collection?: string, limit?: number, offset?: string) => Promise<{
+    points: Array<{ id: string; payload: Record<string, unknown>; created_at?: string }>
+    nextOffset: string | null
+  }>
+  'memory:qdrant:search': (query: string, collection?: string, limit?: number) => Promise<{
+    results: Array<{ id: string; score: number; payload: Record<string, unknown> }>
+  }>
+  'memory:memgraph:search': (keyword: string, nodeType?: string, limit?: number) => Promise<{
+    results: Array<{ id: string; label: string; type: string; properties: Record<string, unknown>; score?: number }>
+  }>
+  'memory:raw': (source: 'postgresql' | 'memgraph' | 'qdrant', query: string) => Promise<{
+    success: boolean
+    data: unknown
+    error?: string
+    executionTime: number
+  }>
 
   // Terminal
   'terminal:create': () => Promise<string>

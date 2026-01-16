@@ -334,6 +334,38 @@ export function registerIpcHandlers(): void {
     return queryMemgraphGraph(query, limit)
   })
 
+  // Qdrant memory browser
+  ipcMain.handle('memory:qdrant:browse', async (_event, collection = 'mem0_memories', limit = 50, offset?: string): Promise<{
+    points: Array<{ id: string; payload: Record<string, unknown>; created_at?: string }>
+    nextOffset: string | null
+  }> => {
+    return browseQdrantMemories(collection, limit, offset)
+  })
+
+  // Qdrant semantic search
+  ipcMain.handle('memory:qdrant:search', async (_event, query: string, collection = 'mem0_memories', limit = 20): Promise<{
+    results: Array<{ id: string; score: number; payload: Record<string, unknown> }>
+  }> => {
+    return searchQdrantMemories(query, collection, limit)
+  })
+
+  // Memgraph keyword search
+  ipcMain.handle('memory:memgraph:search', async (_event, keyword: string, nodeType?: string, limit = 50): Promise<{
+    results: Array<{ id: string; label: string; type: string; properties: Record<string, unknown>; score?: number }>
+  }> => {
+    return searchMemgraphNodes(keyword, nodeType, limit)
+  })
+
+  // Raw query mode - execute queries directly
+  ipcMain.handle('memory:raw', async (_event, source: 'postgresql' | 'memgraph' | 'qdrant', query: string): Promise<{
+    success: boolean
+    data: unknown
+    error?: string
+    executionTime: number
+  }> => {
+    return executeRawQuery(source, query)
+  })
+
   // Profile handlers
   ipcMain.handle('profile:settings', async () => {
     return getProfileSettings()
@@ -930,18 +962,137 @@ async function getMemoryStats(): Promise<{
     // Ignore
   }
 
-  // Qdrant count
+  // Qdrant count - sum across all collections
   try {
-    const qdrantResult = execSync(
-      'curl -s http://localhost:6333/collections/claude_memories | grep -o \'"points_count":[0-9]*\' | cut -d: -f2',
+    const collectionsResult = execSync(
+      'curl -s http://localhost:6333/collections',
       { encoding: 'utf-8', timeout: 3000 }
     )
-    stats.qdrant.vectors = parseInt(qdrantResult.trim(), 10) || 0
+    const collections = JSON.parse(collectionsResult)
+    let totalVectors = 0
+
+    for (const col of collections.result?.collections || []) {
+      try {
+        const colResult = execSync(
+          `curl -s http://localhost:6333/collections/${col.name}`,
+          { encoding: 'utf-8', timeout: 2000 }
+        )
+        const colData = JSON.parse(colResult)
+        totalVectors += colData.result?.points_count || 0
+      } catch {
+        // Skip failed collection
+      }
+    }
+    stats.qdrant.vectors = totalVectors
   } catch {
     // Ignore
   }
 
   return stats
+}
+
+// Parse mgconsole tabular output into array of objects
+function parseMgconsoleOutput(output: string): Array<Record<string, unknown>> {
+  const lines = output.trim().split('\n')
+  if (lines.length < 4) return [] // Need at least header separator, header, separator, and data
+
+  const results: Array<Record<string, unknown>> = []
+
+  // Find header line (second line after first +---+ separator)
+  let headerLineIdx = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('|') && !lines[i].startsWith('+')) {
+      headerLineIdx = i
+      break
+    }
+  }
+  if (headerLineIdx === -1) return []
+
+  // Parse column names from header
+  const headerLine = lines[headerLineIdx]
+  const columns = headerLine
+    .split('|')
+    .filter(c => c.trim())
+    .map(c => c.trim())
+
+  // Parse data rows (skip header and separator lines)
+  for (let i = headerLineIdx + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.startsWith('+') || !line.startsWith('|')) continue
+
+    const values = line
+      .split('|')
+      .filter(v => v.trim() !== '')
+      .map(v => {
+        const trimmed = v.trim()
+        // Parse value types
+        if (trimmed === 'Null' || trimmed === 'null') return null
+        if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+          return trimmed.slice(1, -1) // Remove quotes
+        }
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          try { return JSON.parse(trimmed) } catch { return trimmed }
+        }
+        const num = Number(trimmed)
+        if (!isNaN(num)) return num
+        return trimmed
+      })
+
+    if (values.length === columns.length) {
+      const row: Record<string, unknown> = {}
+      columns.forEach((col, idx) => {
+        row[col] = values[idx]
+      })
+      results.push(row)
+    }
+  }
+
+  return results
+}
+
+// Parse Cypher node/relationship format: (:Label {prop: value, ...}) or [:TYPE {prop: value, ...}]
+function parseCypherNodeProps(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'string') return {}
+
+  const str = String(value)
+  // Match the properties portion inside curly braces
+  const propsMatch = str.match(/\{([^}]*)\}/)
+  if (!propsMatch) return {}
+
+  const propsStr = propsMatch[1]
+  const props: Record<string, unknown> = {}
+
+  // Parse key: value pairs - handle quoted strings, numbers, etc.
+  // Simple regex-based parser for common cases
+  const pairRegex = /(\w+):\s*("(?:[^"\\]|\\.)*"|[^,}]+)/g
+  let match
+  while ((match = pairRegex.exec(propsStr)) !== null) {
+    const key = match[1]
+    let val: string | number | boolean | null = match[2].trim()
+
+    // Parse value type
+    if (val.startsWith('"') && val.endsWith('"')) {
+      val = val.slice(1, -1).replace(/\\"/g, '"').replace(/\\n/g, '\n')
+    } else if (val === 'true') {
+      props[key] = true
+      continue
+    } else if (val === 'false') {
+      props[key] = false
+      continue
+    } else if (val === 'null' || val === 'Null') {
+      props[key] = null
+      continue
+    } else {
+      const num = Number(val)
+      if (!isNaN(num)) {
+        props[key] = num
+        continue
+      }
+    }
+    props[key] = val
+  }
+
+  return props
 }
 
 async function queryMemgraphGraph(
@@ -980,65 +1131,62 @@ async function queryMemgraphGraph(
     // Execute query via mgconsole - use bash -c to properly handle the pipe
     const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ').replace(/'/g, "'\\''")
     const cmdResult = execSync(
-      `bash -c 'echo "${escapedQuery}" | podman exec -i memgraph mgconsole --output-format=json 2>/dev/null'`,
+      `bash -c 'echo "${escapedQuery}" | podman exec -i memgraph mgconsole 2>/dev/null'`,
       { encoding: 'utf-8', timeout: 10000, shell: '/bin/bash' }
     )
 
     if (!cmdResult.trim()) return result
 
-    // Parse the JSON output
-    const lines = cmdResult.trim().split('\n')
+    // Parse the tabular output
+    const rows = parseMgconsoleOutput(cmdResult)
     const seenNodes = new Set<string>()
     const seenEdges = new Set<string>()
 
-    for (const line of lines) {
-      try {
-        const row = JSON.parse(line)
-
-        // Add source node
-        if (row.sourceId !== undefined && row.sourceId !== null) {
-          const nodeId = String(row.sourceId)
-          if (!seenNodes.has(nodeId)) {
-            seenNodes.add(nodeId)
-            result.nodes.push({
-              id: nodeId,
-              label: row.sourceProps?.name || row.sourceProps?.title || row.sourceLabel || nodeId,
-              type: row.sourceLabel || 'Unknown',
-              properties: row.sourceProps || {},
-            })
-          }
+    for (const row of rows) {
+      // Add source node
+      if (row.sourceId !== undefined && row.sourceId !== null) {
+        const nodeId = String(row.sourceId)
+        if (!seenNodes.has(nodeId)) {
+          seenNodes.add(nodeId)
+          // Parse properties from Cypher node format if present
+          const props = parseCypherNodeProps(row.sourceProps)
+          result.nodes.push({
+            id: nodeId,
+            label: props.name || props.title || String(row.sourceLabel) || nodeId,
+            type: String(row.sourceLabel) || 'Unknown',
+            properties: props,
+          })
         }
+      }
 
-        // Add target node
-        if (row.targetId !== undefined && row.targetId !== null) {
-          const nodeId = String(row.targetId)
-          if (!seenNodes.has(nodeId)) {
-            seenNodes.add(nodeId)
-            result.nodes.push({
-              id: nodeId,
-              label: row.targetProps?.name || row.targetProps?.title || row.targetLabel || nodeId,
-              type: row.targetLabel || 'Unknown',
-              properties: row.targetProps || {},
-            })
-          }
+      // Add target node
+      if (row.targetId !== undefined && row.targetId !== null) {
+        const nodeId = String(row.targetId)
+        if (!seenNodes.has(nodeId)) {
+          seenNodes.add(nodeId)
+          const props = parseCypherNodeProps(row.targetProps)
+          result.nodes.push({
+            id: nodeId,
+            label: props.name || props.title || String(row.targetLabel) || nodeId,
+            type: String(row.targetLabel) || 'Unknown',
+            properties: props,
+          })
         }
+      }
 
-        // Add edge
-        if (row.relId !== undefined && row.relId !== null && row.sourceId !== undefined && row.targetId !== undefined) {
-          const edgeId = String(row.relId)
-          if (!seenEdges.has(edgeId)) {
-            seenEdges.add(edgeId)
-            result.edges.push({
-              id: edgeId,
-              source: String(row.sourceId),
-              target: String(row.targetId),
-              type: row.relType || 'RELATED',
-              properties: row.relProps || {},
-            })
-          }
+      // Add edge
+      if (row.relId !== undefined && row.relId !== null && row.sourceId !== undefined && row.targetId !== undefined) {
+        const edgeId = String(row.relId)
+        if (!seenEdges.has(edgeId)) {
+          seenEdges.add(edgeId)
+          result.edges.push({
+            id: edgeId,
+            source: String(row.sourceId),
+            target: String(row.targetId),
+            type: String(row.relType) || 'RELATED',
+            properties: parseCypherNodeProps(row.relProps),
+          })
         }
-      } catch {
-        // Skip invalid JSON lines
       }
     }
   } catch (error) {
@@ -1046,6 +1194,274 @@ async function queryMemgraphGraph(
   }
 
   return result
+}
+
+// Qdrant browsing function
+async function browseQdrantMemories(
+  collection: string,
+  limit: number,
+  offset?: string
+): Promise<{
+  points: Array<{ id: string; payload: Record<string, unknown>; created_at?: string }>
+  nextOffset: string | null
+}> {
+  const result = {
+    points: [] as Array<{ id: string; payload: Record<string, unknown>; created_at?: string }>,
+    nextOffset: null as string | null,
+  }
+
+  try {
+    const body: Record<string, unknown> = {
+      limit,
+      with_payload: true,
+      with_vector: false,
+    }
+    if (offset) {
+      body.offset = offset
+    }
+
+    const response = await fetch(`http://localhost:6333/collections/${collection}/points/scroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      if (data.result?.points) {
+        result.points = data.result.points.map((p: { id: string; payload: Record<string, unknown> }) => ({
+          id: p.id,
+          payload: p.payload,
+          created_at: p.payload?.created_at as string | undefined,
+        }))
+      }
+      result.nextOffset = data.result?.next_page_offset || null
+    }
+  } catch (error) {
+    console.error('Failed to browse Qdrant:', error)
+  }
+
+  return result
+}
+
+// Qdrant search function (keyword-based since we don't have embeddings locally)
+async function searchQdrantMemories(
+  query: string,
+  collection: string,
+  limit: number
+): Promise<{
+  results: Array<{ id: string; score: number; payload: Record<string, unknown> }>
+}> {
+  const result = {
+    results: [] as Array<{ id: string; score: number; payload: Record<string, unknown> }>,
+  }
+
+  try {
+    // Use scroll and filter by payload data field containing query
+    const response = await fetch(`http://localhost:6333/collections/${collection}/points/scroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        limit: limit * 5, // Get more to filter
+        with_payload: true,
+        with_vector: false,
+      }),
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      const queryLower = query.toLowerCase()
+
+      if (data.result?.points) {
+        // Filter points whose data contains the query
+        const filtered = data.result.points
+          .filter((p: { payload: Record<string, unknown> }) => {
+            const dataStr = String(p.payload?.data || '').toLowerCase()
+            return dataStr.includes(queryLower)
+          })
+          .slice(0, limit)
+          .map((p: { id: string; payload: Record<string, unknown> }, index: number) => ({
+            id: p.id,
+            score: 1 - index * 0.01, // Pseudo score based on position
+            payload: p.payload,
+          }))
+
+        result.results = filtered
+      }
+    }
+  } catch (error) {
+    console.error('Failed to search Qdrant:', error)
+  }
+
+  return result
+}
+
+// Memgraph keyword search function
+function searchMemgraphNodes(
+  keyword: string,
+  nodeType: string | undefined,
+  limit: number
+): {
+  results: Array<{ id: string; label: string; type: string; properties: Record<string, unknown>; score?: number }>
+} {
+  const result = {
+    results: [] as Array<{ id: string; label: string; type: string; properties: Record<string, unknown>; score?: number }>,
+  }
+
+  try {
+    // Build Cypher query for keyword search
+    const sanitizedKeyword = keyword.replace(/['"\\]/g, '')
+    let cypherQuery: string
+
+    if (nodeType && nodeType !== 'all') {
+      cypherQuery = `
+        MATCH (n:${nodeType})
+        WHERE n.name CONTAINS '${sanitizedKeyword}'
+           OR n.title CONTAINS '${sanitizedKeyword}'
+           OR n.description CONTAINS '${sanitizedKeyword}'
+        RETURN id(n) as id, labels(n)[0] as label, n as props
+        LIMIT ${limit}
+      `
+    } else {
+      cypherQuery = `
+        MATCH (n)
+        WHERE n.name CONTAINS '${sanitizedKeyword}'
+           OR n.title CONTAINS '${sanitizedKeyword}'
+           OR n.description CONTAINS '${sanitizedKeyword}'
+        RETURN id(n) as id, labels(n)[0] as label, n as props
+        LIMIT ${limit}
+      `
+    }
+
+    const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ').replace(/'/g, "'\\''")
+    const cmdResult = execSync(
+      `bash -c 'echo "${escapedQuery}" | podman exec -i memgraph mgconsole 2>/dev/null'`,
+      { encoding: 'utf-8', timeout: 10000, shell: '/bin/bash' }
+    )
+
+    if (cmdResult.trim()) {
+      const rows = parseMgconsoleOutput(cmdResult)
+      for (const row of rows) {
+        if (row.id !== undefined) {
+          const props = parseCypherNodeProps(row.props)
+          result.results.push({
+            id: String(row.id),
+            label: props.name || props.title || String(row.label) || String(row.id),
+            type: String(row.label) || 'Unknown',
+            properties: props,
+          })
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to search Memgraph:', error)
+  }
+
+  return result
+}
+
+// Raw query execution function
+function executeRawQuery(
+  source: 'postgresql' | 'memgraph' | 'qdrant',
+  query: string
+): {
+  success: boolean
+  data: unknown
+  error?: string
+  executionTime: number
+} {
+  const startTime = Date.now()
+
+  try {
+    switch (source) {
+      case 'postgresql': {
+        const sanitizedQuery = query.replace(/'/g, "''")
+        const cmdResult = execSync(
+          `PGPASSWORD="claude_deploy_2024" psql -h localhost -p 5433 -U deploy -d claude_memory -t -A -F '|' -c '${sanitizedQuery}'`,
+          { encoding: 'utf-8', timeout: 30000, shell: '/bin/bash' }
+        )
+        return {
+          success: true,
+          data: cmdResult.trim(),
+          executionTime: Date.now() - startTime,
+        }
+      }
+
+      case 'memgraph': {
+        const escapedQuery = query.replace(/"/g, '\\"').replace(/\n/g, ' ').replace(/'/g, "'\\''")
+        const cmdResult = execSync(
+          `bash -c 'echo "${escapedQuery}" | podman exec -i memgraph mgconsole 2>/dev/null'`,
+          { encoding: 'utf-8', timeout: 30000, shell: '/bin/bash' }
+        )
+        // Parse tabular output into structured data
+        const parsed = parseMgconsoleOutput(cmdResult)
+        return {
+          success: true,
+          data: parsed.length === 0 ? cmdResult.trim() : parsed,
+          executionTime: Date.now() - startTime,
+        }
+      }
+
+      case 'qdrant': {
+        // Parse the query as a Qdrant API endpoint
+        // Format: METHOD /path [body]
+        const match = query.match(/^(GET|POST|PUT|DELETE)\s+(\S+)(?:\s+(.+))?$/i)
+        if (!match) {
+          return {
+            success: false,
+            data: null,
+            error: 'Invalid Qdrant query format. Use: METHOD /path [JSON body]',
+            executionTime: Date.now() - startTime,
+          }
+        }
+
+        const [, method, path, bodyStr] = match
+        const cmdParts = [`curl -s -X ${method.toUpperCase()}`]
+
+        if (bodyStr) {
+          cmdParts.push(`-H "Content-Type: application/json"`)
+          cmdParts.push(`-d '${bodyStr}'`)
+        }
+        cmdParts.push(`http://localhost:6333${path}`)
+
+        const cmdResult = execSync(cmdParts.join(' '), {
+          encoding: 'utf-8',
+          timeout: 30000,
+          shell: '/bin/bash',
+        })
+
+        try {
+          const parsed = JSON.parse(cmdResult)
+          return {
+            success: true,
+            data: parsed,
+            executionTime: Date.now() - startTime,
+          }
+        } catch {
+          return {
+            success: true,
+            data: cmdResult.trim(),
+            executionTime: Date.now() - startTime,
+          }
+        }
+      }
+
+      default:
+        return {
+          success: false,
+          data: null,
+          error: `Unknown source: ${source}`,
+          executionTime: Date.now() - startTime,
+        }
+    }
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      executionTime: Date.now() - startTime,
+    }
+  }
 }
 
 // Profile functions
