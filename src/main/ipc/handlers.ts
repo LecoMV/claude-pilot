@@ -857,9 +857,9 @@ async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
       sql = `SELECT id, category, topic, content, created_at FROM learnings ORDER BY created_at DESC LIMIT ${safeLimit}`
     }
 
-    // Execute query - use single quotes for shell, escape properly
+    // Execute query - use correct credentials for deploy user
     const result = execSync(
-      `PGPASSWORD="" psql -h localhost -p 5433 -U postgres -d claude_memory -t -A -F '|' -c '${sql.replace(/'/g, "'\\''")}'`,
+      `PGPASSWORD="claude_deploy_2024" psql -h localhost -p 5433 -U deploy -d claude_memory -t -A -F '|' -c '${sql.replace(/'/g, "'\\''")}'`,
       { encoding: 'utf-8', timeout: 5000 }
     )
 
@@ -900,7 +900,7 @@ async function getMemoryStats(): Promise<{
   // PostgreSQL count
   try {
     const pgResult = execSync(
-      'PGPASSWORD="" psql -h localhost -p 5433 -U postgres -d claude_memory -t -A -c "SELECT COUNT(*) FROM learnings"',
+      'PGPASSWORD="claude_deploy_2024" psql -h localhost -p 5433 -U deploy -d claude_memory -t -A -c "SELECT COUNT(*) FROM learnings"',
       { encoding: 'utf-8', timeout: 3000 }
     )
     stats.postgresql.count = parseInt(pgResult.trim(), 10) || 0
@@ -908,19 +908,24 @@ async function getMemoryStats(): Promise<{
     // Ignore
   }
 
-  // Memgraph counts
+  // Memgraph counts - use bash -c to properly handle the pipe
+  // Output format: +-----+\n| count(n) |\n+-----+\n| 12345 |\n+-----+
+  // Data is on line 4
   try {
     const nodeResult = execSync(
-      'echo "MATCH (n) RETURN count(n);" | podman exec -i memgraph mgconsole 2>/dev/null | tail -1',
-      { encoding: 'utf-8', timeout: 5000 }
+      'bash -c \'echo "MATCH (n) RETURN count(n);" | podman exec -i memgraph mgconsole 2>/dev/null | sed -n "4p"\'',
+      { encoding: 'utf-8', timeout: 5000, shell: '/bin/bash' }
     )
-    stats.memgraph.nodes = parseInt(nodeResult.trim(), 10) || 0
+    // Parse the result - format is "| 12345 |"
+    const nodeMatch = nodeResult.trim().match(/\d+/)
+    stats.memgraph.nodes = nodeMatch ? parseInt(nodeMatch[0], 10) : 0
 
     const edgeResult = execSync(
-      'echo "MATCH ()-[r]->() RETURN count(r);" | podman exec -i memgraph mgconsole 2>/dev/null | tail -1',
-      { encoding: 'utf-8', timeout: 5000 }
+      'bash -c \'echo "MATCH ()-[r]->() RETURN count(r);" | podman exec -i memgraph mgconsole 2>/dev/null | sed -n "4p"\'',
+      { encoding: 'utf-8', timeout: 5000, shell: '/bin/bash' }
     )
-    stats.memgraph.edges = parseInt(edgeResult.trim(), 10) || 0
+    const edgeMatch = edgeResult.trim().match(/\d+/)
+    stats.memgraph.edges = edgeMatch ? parseInt(edgeMatch[0], 10) : 0
   } catch {
     // Ignore
   }
@@ -972,11 +977,11 @@ async function queryMemgraphGraph(
       `
     }
 
-    // Execute query via mgconsole
-    const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ')
+    // Execute query via mgconsole - use bash -c to properly handle the pipe
+    const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ').replace(/'/g, "'\\''")
     const cmdResult = execSync(
-      `echo "${escapedQuery}" | podman exec -i memgraph mgconsole --output-format=json 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 10000 }
+      `bash -c 'echo "${escapedQuery}" | podman exec -i memgraph mgconsole --output-format=json 2>/dev/null'`,
+      { encoding: 'utf-8', timeout: 10000, shell: '/bin/bash' }
     )
 
     if (!cmdResult.trim()) return result

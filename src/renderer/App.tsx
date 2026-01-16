@@ -11,6 +11,7 @@ import { ContextDashboard } from './components/context/ContextDashboard'
 import { ServicesManager } from './components/services/ServicesManager'
 import { Terminal } from './components/terminal/Terminal'
 import { Settings } from './components/settings/Settings'
+import { GlobalSettings } from './components/settings/GlobalSettings'
 import { LogsViewer } from './components/logs/LogsViewer'
 import { OllamaManager } from './components/ollama/OllamaManager'
 import { AgentCanvas } from './components/agents/AgentCanvas'
@@ -19,7 +20,7 @@ import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { ErrorToast } from './components/common/ErrorNotifications'
 import { initializeErrorListener } from './stores/errors'
 
-type View = 'dashboard' | 'projects' | 'sessions' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'sessions' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'globalSettings' | 'preferences'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
@@ -59,7 +60,9 @@ export default function App() {
         return <ChatInterface />
       case 'terminal':
         return <Terminal />
-      case 'settings':
+      case 'globalSettings':
+        return <GlobalSettings />
+      case 'preferences':
         return <Settings />
       default:
         return <Dashboard />
@@ -105,7 +108,7 @@ function getViewTitle(view: View): string {
     sessions: 'External Sessions',
     mcp: 'MCP Servers',
     memory: 'Memory Browser',
-    profiles: 'Profiles & Settings',
+    profiles: 'Work Profiles',
     context: 'Context Management',
     services: 'System Services',
     logs: 'System Logs',
@@ -113,7 +116,8 @@ function getViewTitle(view: View): string {
     agents: 'Agent Orchestration',
     chat: 'Claude Chat',
     terminal: 'Terminal',
-    settings: 'Settings',
+    globalSettings: 'Global Settings',
+    preferences: 'Preferences',
   }
   return titles[view]
 }

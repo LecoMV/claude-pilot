@@ -18,9 +18,80 @@ import {
   Network,
   Crown,
   Hexagon,
+  Send,
+  Zap,
+  GitBranch,
+  LayoutGrid,
+  Target,
+  MessageSquare,
+  ChevronDown,
+  X,
+  Copy,
+  Workflow,
+  Layers,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAgentsStore, type Agent, type AgentType, type AgentStatus } from '@/stores/agents'
+
+type SwarmTopology = 'mesh' | 'hierarchical' | 'ring' | 'star'
+
+const topologyOptions: { value: SwarmTopology; label: string; description: string; icon: typeof LayoutGrid }[] = [
+  { value: 'mesh', label: 'Mesh', description: 'All agents connected to each other', icon: LayoutGrid },
+  { value: 'hierarchical', label: 'Hierarchical', description: 'Tree structure with coordinators', icon: GitBranch },
+  { value: 'ring', label: 'Ring', description: 'Sequential message passing', icon: Target },
+  { value: 'star', label: 'Star', description: 'Central coordinator hub', icon: Zap },
+]
+
+interface AgentTemplate {
+  name: string
+  description: string
+  agents: { type: AgentType; name: string }[]
+  topology: SwarmTopology
+}
+
+const agentTemplates: AgentTemplate[] = [
+  {
+    name: 'Development Team',
+    description: 'Full-stack dev squad with testing',
+    agents: [
+      { type: 'architect', name: 'sys-architect' },
+      { type: 'coder', name: 'frontend-dev' },
+      { type: 'coder', name: 'backend-dev' },
+      { type: 'tester', name: 'qa-engineer' },
+    ],
+    topology: 'hierarchical',
+  },
+  {
+    name: 'Research Squad',
+    description: 'Deep research and analysis team',
+    agents: [
+      { type: 'researcher', name: 'lead-researcher' },
+      { type: 'researcher', name: 'data-analyst' },
+      { type: 'coordinator', name: 'research-coordinator' },
+    ],
+    topology: 'star',
+  },
+  {
+    name: 'Security Audit',
+    description: 'Security-focused review team',
+    agents: [
+      { type: 'security', name: 'security-lead' },
+      { type: 'security', name: 'vuln-scanner' },
+      { type: 'coder', name: 'patch-developer' },
+      { type: 'tester', name: 'pentest-validator' },
+    ],
+    topology: 'mesh',
+  },
+  {
+    name: 'Code Review',
+    description: 'Pair programming and review',
+    agents: [
+      { type: 'coder', name: 'reviewer-1' },
+      { type: 'coder', name: 'reviewer-2' },
+    ],
+    topology: 'ring',
+  },
+]
 
 const agentIcons: Record<AgentType, typeof Brain> = {
   coder: Code,
@@ -62,8 +133,13 @@ export function AgentCanvas() {
   } = useAgentsStore()
 
   const [showSpawnModal, setShowSpawnModal] = useState(false)
+  const [showTaskModal, setShowTaskModal] = useState(false)
+  const [showTemplatesModal, setShowTemplatesModal] = useState(false)
   const [newAgentType, setNewAgentType] = useState<AgentType>('coder')
   const [newAgentName, setNewAgentName] = useState('')
+  const [selectedTopology, setSelectedTopology] = useState<SwarmTopology>('mesh')
+  const [taskDescription, setTaskDescription] = useState('')
+  const [targetAgentId, setTargetAgentId] = useState<string | 'auto'>('auto')
 
   const loadData = useCallback(async () => {
     try {
@@ -114,12 +190,46 @@ export function AgentCanvas() {
     }
   }
 
-  const handleInitSwarm = async () => {
+  const handleInitSwarm = async (topology: SwarmTopology = selectedTopology) => {
     try {
-      await window.electron.invoke('agents:initSwarm', 'mesh')
+      await window.electron.invoke('agents:initSwarm', topology)
       loadData()
     } catch (error) {
       console.error('Failed to init swarm:', error)
+    }
+  }
+
+  const handleSubmitTask = async () => {
+    if (!taskDescription.trim()) return
+
+    try {
+      await window.electron.invoke('agents:submitTask', {
+        description: taskDescription,
+        targetAgent: targetAgentId === 'auto' ? undefined : targetAgentId,
+      })
+      setShowTaskModal(false)
+      setTaskDescription('')
+      setTargetAgentId('auto')
+      loadData()
+    } catch (error) {
+      console.error('Failed to submit task:', error)
+    }
+  }
+
+  const handleSpawnTemplate = async (template: AgentTemplate) => {
+    try {
+      // First init the swarm with the template's topology
+      await window.electron.invoke('agents:initSwarm', template.topology)
+
+      // Spawn all agents from the template
+      for (const agent of template.agents) {
+        await window.electron.invoke('agents:spawn', agent.type, agent.name)
+      }
+
+      setShowTemplatesModal(false)
+      loadData()
+    } catch (error) {
+      console.error('Failed to spawn template:', error)
     }
   }
 
@@ -241,23 +351,60 @@ export function AgentCanvas() {
       </div>
 
       {/* Controls */}
-      <div className="flex items-center gap-4">
-        <button onClick={() => setShowSpawnModal(true)} className="btn btn-primary">
-          <Plus className="w-4 h-4 mr-2" />
-          Spawn Agent
-        </button>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowSpawnModal(true)} className="btn btn-primary">
+            <Plus className="w-4 h-4 mr-2" />
+            Spawn Agent
+          </button>
 
-        {!swarm || swarm.status !== 'active' ? (
-          <button onClick={handleInitSwarm} className="btn btn-secondary">
-            <Play className="w-4 h-4 mr-2" />
-            Init Swarm
+          <button onClick={() => setShowTemplatesModal(true)} className="btn btn-secondary">
+            <Layers className="w-4 h-4 mr-2" />
+            Templates
           </button>
-        ) : (
-          <button onClick={handleShutdownSwarm} className="btn btn-secondary text-accent-red">
-            <Square className="w-4 h-4 mr-2" />
-            Shutdown Swarm
-          </button>
-        )}
+        </div>
+
+        <div className="h-6 w-px bg-border mx-2" />
+
+        {/* Swarm Controls */}
+        <div className="flex items-center gap-2">
+          {!swarm || swarm.status !== 'active' ? (
+            <>
+              <select
+                value={selectedTopology}
+                onChange={(e) => setSelectedTopology(e.target.value as SwarmTopology)}
+                className="input h-9 text-sm pr-8"
+              >
+                {topologyOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <button onClick={() => handleInitSwarm()} className="btn btn-secondary">
+                <Play className="w-4 h-4 mr-2" />
+                Init Swarm
+              </button>
+            </>
+          ) : (
+            <button onClick={handleShutdownSwarm} className="btn btn-secondary text-accent-red">
+              <Square className="w-4 h-4 mr-2" />
+              Shutdown
+            </button>
+          )}
+        </div>
+
+        <div className="h-6 w-px bg-border mx-2" />
+
+        {/* Task Assignment */}
+        <button
+          onClick={() => setShowTaskModal(true)}
+          className="btn btn-secondary"
+          disabled={agents.length === 0}
+        >
+          <Send className="w-4 h-4 mr-2" />
+          Assign Task
+        </button>
 
         <div className="flex-1" />
 
@@ -458,6 +605,134 @@ export function AgentCanvas() {
               </button>
               <button onClick={handleSpawnAgent} disabled={!newAgentName} className="btn btn-primary">
                 Spawn
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Task Assignment Modal */}
+      {showTaskModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="card p-6 w-full max-w-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+                <Send className="w-5 h-5 text-accent-blue" />
+                Assign Task
+              </h2>
+              <button onClick={() => setShowTaskModal(false)} className="text-text-muted hover:text-text-primary">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm text-text-muted mb-2 block">Task Description</label>
+                <textarea
+                  placeholder="Describe the task for the agent(s)..."
+                  value={taskDescription}
+                  onChange={(e) => setTaskDescription(e.target.value)}
+                  className="input w-full h-32 resize-none"
+                  rows={4}
+                />
+              </div>
+
+              <div>
+                <label className="text-sm text-text-muted mb-2 block">Target Agent</label>
+                <select
+                  value={targetAgentId}
+                  onChange={(e) => setTargetAgentId(e.target.value)}
+                  className="input w-full"
+                >
+                  <option value="auto">Auto-route (best fit)</option>
+                  {agents.filter(a => a.status !== 'terminated').map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name || agent.id} ({agent.type})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-text-muted mt-1">
+                  {targetAgentId === 'auto'
+                    ? 'The system will automatically route to the most suitable agent'
+                    : 'Task will be assigned directly to the selected agent'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <button onClick={() => setShowTaskModal(false)} className="btn btn-secondary">
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitTask}
+                disabled={!taskDescription.trim()}
+                className="btn btn-primary"
+              >
+                <Send className="w-4 h-4 mr-2" />
+                Submit Task
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Templates Modal */}
+      {showTemplatesModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="card p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+                <Layers className="w-5 h-5 text-accent-purple" />
+                Agent Templates
+              </h2>
+              <button onClick={() => setShowTemplatesModal(false)} className="text-text-muted hover:text-text-primary">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-text-muted mb-4">
+              Quick-start with pre-configured agent teams. Select a template to spawn all agents and initialize the swarm.
+            </p>
+
+            <div className="grid grid-cols-2 gap-4">
+              {agentTemplates.map((template) => {
+                const TopologyIcon = topologyOptions.find(t => t.value === template.topology)?.icon || LayoutGrid
+                return (
+                  <div
+                    key={template.name}
+                    className="card p-4 hover:bg-surface/80 cursor-pointer transition-colors border border-border hover:border-accent-purple/50"
+                    onClick={() => handleSpawnTemplate(template)}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-semibold text-text-primary">{template.name}</h3>
+                      <div className="flex items-center gap-1 text-xs text-text-muted">
+                        <TopologyIcon className="w-3 h-3" />
+                        {template.topology}
+                      </div>
+                    </div>
+                    <p className="text-sm text-text-muted mb-3">{template.description}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {template.agents.map((agent, i) => {
+                        const Icon = agentIcons[agent.type] || Brain
+                        return (
+                          <div
+                            key={i}
+                            className="flex items-center gap-1 px-2 py-1 bg-surface rounded text-xs text-text-muted"
+                          >
+                            <Icon className="w-3 h-3" />
+                            {agent.name}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <button onClick={() => setShowTemplatesModal(false)} className="btn btn-secondary">
+                Close
               </button>
             </div>
           </div>

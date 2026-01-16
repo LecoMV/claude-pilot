@@ -19,6 +19,9 @@ import {
   Radio,
   ExternalLink,
   Terminal,
+  TrendingUp,
+  DollarSign,
+  AlertTriangle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useContextStore, type SessionSummary } from '@/stores/context'
@@ -234,6 +237,41 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession, onRef
     return 'bg-accent-green'
   }
 
+  // Pricing per million tokens (as of 2025)
+  const MODEL_PRICING: Record<string, { input: number; output: number; cached: number }> = {
+    'claude-sonnet-4': { input: 3, output: 15, cached: 0.30 },
+    'claude-opus-4': { input: 15, output: 75, cached: 1.50 },
+    'claude-opus-4-5': { input: 15, output: 75, cached: 1.50 },
+    'claude-3-5-sonnet': { input: 3, output: 15, cached: 0.30 },
+    'default': { input: 3, output: 15, cached: 0.30 },
+  }
+
+  const estimateCost = (session: ExternalSession) => {
+    const model = session.model || 'default'
+    const pricing = MODEL_PRICING[model] || MODEL_PRICING['default']
+    const inputCost = (session.stats.inputTokens / 1_000_000) * pricing.input
+    const outputCost = (session.stats.outputTokens / 1_000_000) * pricing.output
+    const cachedSavings = (session.stats.cachedTokens / 1_000_000) * (pricing.input - pricing.cached)
+    return {
+      total: inputCost + outputCost,
+      saved: cachedSavings,
+    }
+  }
+
+  const getRemainingTokens = (session: ExternalSession) => {
+    const used = session.stats.inputTokens + session.stats.outputTokens
+    const maxContext = 200000
+    return Math.max(0, maxContext - used)
+  }
+
+  const getEstimatedMessagesRemaining = (session: ExternalSession) => {
+    const remaining = getRemainingTokens(session)
+    const avgTokensPerMessage = session.stats.messageCount > 0
+      ? (session.stats.inputTokens + session.stats.outputTokens) / session.stats.messageCount
+      : 2000 // Default estimate
+    return Math.floor(remaining / Math.max(avgTokensPerMessage, 500))
+  }
+
   const openProjectFolder = async (path: string) => {
     try {
       await window.electron.invoke('shell:openPath', path)
@@ -242,8 +280,36 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession, onRef
     }
   }
 
+  // Check if any session is critically low on context
+  const criticalSessions = sessions.filter(s => getUsagePercentage(s) >= 85)
+
   return (
     <div className="space-y-4">
+      {/* Critical context warning */}
+      {criticalSessions.length > 0 && (
+        <div className="card p-4 border-accent-yellow/50 bg-accent-yellow/5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-accent-yellow flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium text-text-primary">Context Running Low</p>
+              <p className="text-sm text-text-secondary mt-1">
+                {criticalSessions.length === 1 ? (
+                  <>
+                    <span className="font-medium">{criticalSessions[0].projectName}</span> is at{' '}
+                    <span className="text-accent-yellow font-medium">{getUsagePercentage(criticalSessions[0]).toFixed(0)}%</span> context usage.
+                  </>
+                ) : (
+                  <>
+                    {criticalSessions.length} sessions are above 85% context usage.
+                  </>
+                )}
+                {' '}Consider running <code className="text-accent-purple">/compact</code> or starting a new session.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Active sessions */}
       <div className="card">
         <div className="card-header flex items-center justify-between">
@@ -328,7 +394,7 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession, onRef
                     </div>
 
                     {/* Stats */}
-                    <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div className="grid grid-cols-5 gap-2 text-xs">
                       <div className="bg-background rounded p-2 text-center">
                         <p className="text-text-primary font-medium">{session.stats.messageCount}</p>
                         <p className="text-text-muted">Messages</p>
@@ -342,14 +408,33 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession, onRef
                         <p className="text-text-muted">Cached</p>
                       </div>
                       <div className="bg-background rounded p-2 text-center">
-                        <p className="text-text-primary font-medium">{formatTime(session.lastActivity)}</p>
-                        <p className="text-text-muted">Last Activity</p>
+                        <p className="text-accent-green font-medium">~{getEstimatedMessagesRemaining(session)}</p>
+                        <p className="text-text-muted">Msgs Left</p>
+                      </div>
+                      <div className="bg-background rounded p-2 text-center">
+                        <p className="text-accent-blue font-medium">${estimateCost(session).total.toFixed(2)}</p>
+                        <p className="text-text-muted">Est. Cost</p>
                       </div>
                     </div>
 
                     {/* Expanded details */}
                     {isSelected && (
                       <div className="mt-4 pt-4 border-t border-border space-y-3">
+                        {/* Cost breakdown */}
+                        {(() => {
+                          const cost = estimateCost(session)
+                          return cost.saved > 0.001 ? (
+                            <div className="p-3 bg-accent-green/10 rounded-lg">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-text-muted">Cache savings</span>
+                                <span className="text-accent-green font-medium">
+                                  ${cost.saved.toFixed(2)} saved
+                                </span>
+                              </div>
+                            </div>
+                          ) : null
+                        })()}
+
                         <div className="grid grid-cols-2 gap-4 text-sm">
                           <div>
                             <p className="text-text-muted">Input Tokens</p>
@@ -373,6 +458,21 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession, onRef
                             <p className="text-text-muted">Assistant Messages</p>
                             <p className="text-text-primary font-medium">
                               {session.stats.assistantMessages}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-text-muted">Tokens Remaining</p>
+                            <p className={cn(
+                              'font-medium',
+                              getRemainingTokens(session) < 30000 ? 'text-accent-yellow' : 'text-text-primary'
+                            )}>
+                              {formatTokens(getRemainingTokens(session))}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-text-muted">Last Activity</p>
+                            <p className="text-text-primary font-medium">
+                              {formatTime(session.lastActivity)}
                             </p>
                           </div>
                         </div>

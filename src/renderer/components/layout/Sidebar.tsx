@@ -15,10 +15,12 @@ import {
   Network,
   MessageSquare,
   History,
+  Globe,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type View = 'dashboard' | 'projects' | 'sessions' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'settings'
+type View = 'dashboard' | 'projects' | 'sessions' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'globalSettings' | 'preferences'
 
 interface SidebarProps {
   currentView: View
@@ -41,7 +43,8 @@ const navItems: { id: View; icon: typeof LayoutDashboard; label: string }[] = [
   { id: 'agents', icon: Network, label: 'Agents' },
   { id: 'chat', icon: MessageSquare, label: 'Chat' },
   { id: 'terminal', icon: Terminal, label: 'Terminal' },
-  { id: 'settings', icon: Settings, label: 'Settings' },
+  { id: 'globalSettings', icon: Globe, label: 'Global Settings' },
+  { id: 'preferences', icon: SlidersHorizontal, label: 'Preferences' },
 ]
 
 export function Sidebar({
