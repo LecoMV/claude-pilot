@@ -62,11 +62,11 @@ export function Sidebar({
       )}
     >
       {/* Logo */}
-      <div className="h-20 flex items-center justify-center border-b border-border px-4">
+      <div className="py-6 flex items-center justify-center border-b border-border px-3">
         {collapsed ? (
-          <img src={logoSvg} alt="Claude Pilot" className="h-10 w-auto" />
+          <img src={logoSvg} alt="Claude Pilot" className="w-10 h-auto" />
         ) : (
-          <img src={logoSvg} alt="Claude Pilot" className="h-12 w-auto max-w-full" />
+          <img src={logoSvg} alt="Claude Pilot" className="w-full h-auto px-1" />
         )}
       </div>
 
