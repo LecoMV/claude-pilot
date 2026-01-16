@@ -32,8 +32,20 @@ const CATEGORIES = ['all', 'bugbounty', 'project', 'architecture', 'security', '
 // Qdrant collections
 const QDRANT_COLLECTIONS = ['mem0_memories', 'claude_memories']
 
-// Memgraph node types
-const MEMGRAPH_NODE_TYPES = ['all', 'Technique', 'CVE', 'Tool', 'Target', 'Attack', 'Defense']
+// Memgraph node types (based on actual CybersecKB data)
+const MEMGRAPH_NODE_TYPES = [
+  'all',
+  'CyberTechnique',
+  'Technology',
+  'DataSource',
+  'Project',
+  'Target',
+  'Document',
+  'Finding',
+  'Pattern',
+  'Security',
+  'BugBounty',
+]
 
 interface QdrantPoint {
   id: string
