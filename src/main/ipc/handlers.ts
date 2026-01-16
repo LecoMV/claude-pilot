@@ -940,26 +940,29 @@ async function getMemoryStats(): Promise<{
     // Ignore
   }
 
-  // Memgraph counts - use bash -c to properly handle the pipe
+  // Memgraph counts - pipe query through podman exec
   // Output format: +-----+\n| count(n) |\n+-----+\n| 12345 |\n+-----+
-  // Data is on line 4
   try {
     const nodeResult = execSync(
-      'bash -c \'echo "MATCH (n) RETURN count(n);" | podman exec -i memgraph mgconsole 2>/dev/null | sed -n "4p"\'',
+      'echo "MATCH (n) RETURN count(n);" | /usr/bin/podman exec -i memgraph mgconsole',
       { encoding: 'utf-8', timeout: 5000, shell: '/bin/bash' }
     )
-    // Parse the result - format is "| 12345 |"
-    const nodeMatch = nodeResult.trim().match(/\d+/)
-    stats.memgraph.nodes = nodeMatch ? parseInt(nodeMatch[0], 10) : 0
+    // Parse tabular output - find the number in the data row
+    const rows = parseMgconsoleOutput(nodeResult)
+    if (rows.length > 0 && rows[0]['count(n)'] !== undefined) {
+      stats.memgraph.nodes = Number(rows[0]['count(n)']) || 0
+    }
 
     const edgeResult = execSync(
-      'bash -c \'echo "MATCH ()-[r]->() RETURN count(r);" | podman exec -i memgraph mgconsole 2>/dev/null | sed -n "4p"\'',
+      'echo "MATCH ()-[r]->() RETURN count(r);" | /usr/bin/podman exec -i memgraph mgconsole',
       { encoding: 'utf-8', timeout: 5000, shell: '/bin/bash' }
     )
-    const edgeMatch = edgeResult.trim().match(/\d+/)
-    stats.memgraph.edges = edgeMatch ? parseInt(edgeMatch[0], 10) : 0
-  } catch {
-    // Ignore
+    const edgeRows = parseMgconsoleOutput(edgeResult)
+    if (edgeRows.length > 0 && edgeRows[0]['count(r)'] !== undefined) {
+      stats.memgraph.edges = Number(edgeRows[0]['count(r)']) || 0
+    }
+  } catch (error) {
+    console.error('Failed to get Memgraph stats:', error)
   }
 
   // Qdrant count - sum across all collections
@@ -1128,10 +1131,10 @@ async function queryMemgraphGraph(
       `
     }
 
-    // Execute query via mgconsole - use bash -c to properly handle the pipe
-    const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ').replace(/'/g, "'\\''")
+    // Execute query via mgconsole - use spawnSync for better control
+    const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ')
     const cmdResult = execSync(
-      `bash -c 'echo "${escapedQuery}" | podman exec -i memgraph mgconsole 2>/dev/null'`,
+      `echo "${escapedQuery}" | /usr/bin/podman exec -i memgraph mgconsole`,
       { encoding: 'utf-8', timeout: 10000, shell: '/bin/bash' }
     )
 
@@ -1333,9 +1336,9 @@ function searchMemgraphNodes(
       `
     }
 
-    const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ').replace(/'/g, "'\\''")
+    const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ')
     const cmdResult = execSync(
-      `bash -c 'echo "${escapedQuery}" | podman exec -i memgraph mgconsole 2>/dev/null'`,
+      `echo "${escapedQuery}" | /usr/bin/podman exec -i memgraph mgconsole`,
       { encoding: 'utf-8', timeout: 10000, shell: '/bin/bash' }
     )
 
@@ -1388,9 +1391,9 @@ function executeRawQuery(
       }
 
       case 'memgraph': {
-        const escapedQuery = query.replace(/"/g, '\\"').replace(/\n/g, ' ').replace(/'/g, "'\\''")
+        const escapedQuery = query.replace(/"/g, '\\"').replace(/\n/g, ' ')
         const cmdResult = execSync(
-          `bash -c 'echo "${escapedQuery}" | podman exec -i memgraph mgconsole 2>/dev/null'`,
+          `echo "${escapedQuery}" | /usr/bin/podman exec -i memgraph mgconsole`,
           { encoding: 'utf-8', timeout: 30000, shell: '/bin/bash' }
         )
         // Parse tabular output into structured data
