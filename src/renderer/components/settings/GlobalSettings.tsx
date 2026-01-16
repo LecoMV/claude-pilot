@@ -46,20 +46,13 @@ export function GlobalSettings() {
 
   // Load rules, CLAUDE.md, and settings
   const loadData = useCallback(async () => {
-    console.log('[GlobalSettings] loadData called, setting loading=true')
     try {
       setLoading(true)
-      console.log('[GlobalSettings] Calling IPC handlers...')
       const [rulesData, claudeMd, settings] = await Promise.all([
         window.electron.invoke('profile:rules'),
         window.electron.invoke('profile:claudemd'),
         window.electron.invoke('profile:settings'),
       ])
-      console.log('[GlobalSettings] IPC handlers returned:', {
-        rulesCount: rulesData?.length,
-        claudeMdLength: claudeMd?.length,
-        settingsKeys: Object.keys(settings || {}),
-      })
       setRules(rulesData || [])
       setClaudeMdContent(claudeMd || '')
       const safeSettings = settings || {}
@@ -71,9 +64,8 @@ export function GlobalSettings() {
         thinkingBudget: safeSettings.thinkingBudget || 32000,
       })
     } catch (error) {
-      console.error('[GlobalSettings] Failed to load global settings data:', error)
+      console.error('[GlobalSettings] Failed to load data:', error)
     } finally {
-      console.log('[GlobalSettings] Setting loading=false')
       setLoading(false)
     }
   }, [setRules, setClaudeMdContent, setGlobalSettings, setLoading])

@@ -58,12 +58,24 @@ export interface ResourceUsage {
   cpu: number
   memory: number
   disk: DiskUsage
+  gpu?: GPUUsage
 }
 
 export interface DiskUsage {
   used: number
   total: number
   claudeData: number
+}
+
+export interface GPUUsage {
+  available: boolean
+  name?: string
+  memoryUsed?: number
+  memoryTotal?: number
+  utilization?: number
+  temperature?: number
+  driverVersion?: string
+  error?: string
 }
 
 // Project types

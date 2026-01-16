@@ -7,6 +7,7 @@ import { homedir } from 'os'
 import type {
   SystemStatus,
   ResourceUsage,
+  GPUUsage,
   ClaudeProject,
   MCPServer,
   Learning,
@@ -369,10 +370,7 @@ export function registerIpcHandlers(): void {
 
   // Profile handlers
   ipcMain.handle('profile:settings', async () => {
-    console.log('[IPC] profile:settings called')
-    const result = getProfileSettings()
-    console.log('[IPC] profile:settings returned:', JSON.stringify(result).slice(0, 100))
-    return result
+    return getProfileSettings()
   })
 
   ipcMain.handle('profile:saveSettings', async (_event, settings: ProfileSettings) => {
@@ -380,10 +378,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('profile:claudemd', async () => {
-    console.log('[IPC] profile:claudemd called')
-    const result = getClaudeMd()
-    console.log('[IPC] profile:claudemd returned:', result.length, 'chars')
-    return result
+    return getClaudeMd()
   })
 
   ipcMain.handle('profile:saveClaudemd', async (_event, content: string) => {
@@ -391,10 +386,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('profile:rules', async () => {
-    console.log('[IPC] profile:rules called')
-    const result = getRules()
-    console.log('[IPC] profile:rules returned:', result.length, 'rules')
-    return result
+    return getRules()
   })
 
   ipcMain.handle('profile:toggleRule', async (_event, name: string, enabled: boolean) => {
@@ -790,9 +782,105 @@ async function getResourceUsage(): Promise<ResourceUsage> {
     // Ignore
   }
 
-  const result = { cpu, memory, disk }
+  // Get GPU usage
+  const gpu = getGPUUsage()
+
+  const result = { cpu, memory, disk, gpu }
   dataCache.set('resourceUsage', result, 5000) // 5s cache
   return result
+}
+
+// Get GPU usage with fallback for when nvidia-smi fails
+function getGPUUsage(): GPUUsage {
+  // Return cached data if available (5 second cache)
+  const cached = dataCache.get<GPUUsage>('gpuUsage')
+  if (cached) return cached
+
+  const gpuInfo: GPUUsage = { available: false }
+
+  // First try nvidia-smi (most reliable when working)
+  try {
+    const nvidiaSmi = execSync(
+      'nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu,driver_version --format=csv,noheader,nounits',
+      { encoding: 'utf-8', timeout: 3000 }
+    )
+    const parts = nvidiaSmi.trim().split(', ')
+    if (parts.length >= 6) {
+      gpuInfo.available = true
+      gpuInfo.name = parts[0].trim()
+      gpuInfo.memoryUsed = parseInt(parts[1]) * 1024 * 1024 // MiB to bytes
+      gpuInfo.memoryTotal = parseInt(parts[2]) * 1024 * 1024 // MiB to bytes
+      gpuInfo.utilization = parseInt(parts[3])
+      gpuInfo.temperature = parseInt(parts[4])
+      gpuInfo.driverVersion = parts[5].trim()
+      dataCache.set('gpuUsage', gpuInfo, 5000) // 5s cache
+      return gpuInfo
+    }
+  } catch (err) {
+    // nvidia-smi failed - try fallback methods
+    const errorMsg = err instanceof Error ? err.message : String(err)
+
+    // Check if it's a driver mismatch error
+    if (errorMsg.includes('version mismatch') || errorMsg.includes('NVML')) {
+      gpuInfo.error = 'Driver version mismatch - reboot required'
+    }
+  }
+
+  // Fallback: Try /proc/driver/nvidia/gpus for basic GPU info
+  try {
+    const nvidiaGpusDir = '/proc/driver/nvidia/gpus'
+    if (existsSync(nvidiaGpusDir)) {
+      const gpuDirs = readdirSync(nvidiaGpusDir)
+      if (gpuDirs.length > 0) {
+        const infoPath = join(nvidiaGpusDir, gpuDirs[0], 'information')
+        if (existsSync(infoPath)) {
+          const info = readFileSync(infoPath, 'utf-8')
+          // Parse GPU model from the info file
+          const modelMatch = info.match(/Model:\s*(.+)/i)
+          if (modelMatch) {
+            gpuInfo.available = true
+            gpuInfo.name = modelMatch[1].trim()
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore fallback errors
+  }
+
+  // Fallback: Try lspci for GPU detection
+  if (!gpuInfo.name) {
+    try {
+      const lspciResult = execSync("lspci | grep -i 'vga\\|3d\\|nvidia' | head -1", {
+        encoding: 'utf-8',
+        timeout: 2000,
+      })
+      if (lspciResult.includes('NVIDIA')) {
+        gpuInfo.available = true
+        const match = lspciResult.match(/NVIDIA\s+Corporation\s+(.+?)(?:\s+\[|$)/i)
+        gpuInfo.name = match ? match[1].trim() : 'NVIDIA GPU (detected via lspci)'
+      }
+    } catch {
+      // lspci failed
+    }
+  }
+
+  // Fallback: Get driver version from /sys
+  if (!gpuInfo.driverVersion) {
+    try {
+      if (existsSync('/sys/module/nvidia/version')) {
+        gpuInfo.driverVersion = readFileSync('/sys/module/nvidia/version', 'utf-8').trim()
+        if (!gpuInfo.error) {
+          gpuInfo.error = 'nvidia-smi unavailable'
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  dataCache.set('gpuUsage', gpuInfo, 5000) // 5s cache
+  return gpuInfo
 }
 
 function getClaudeProjects(): ClaudeProject[] {
@@ -1550,19 +1638,16 @@ function ensureProfilesDir(): void {
 }
 
 function listProfiles(): ClaudeCodeProfile[] {
-  console.log('[Profiles] Looking for profiles in:', PROFILES_DIR)
   const profiles: ClaudeCodeProfile[] = []
 
   try {
     if (!existsSync(PROFILES_DIR)) {
-      console.log('[Profiles] Directory does not exist')
       return profiles
     }
 
     // Get all directories in the profiles folder
     const entries = readdirSync(PROFILES_DIR, { withFileTypes: true })
     const profileDirs = entries.filter((e) => e.isDirectory())
-    console.log('[Profiles] Found directories:', profileDirs.map((d) => d.name))
 
     for (const dir of profileDirs) {
       const profilePath = join(PROFILES_DIR, dir.name)
@@ -1609,7 +1694,6 @@ function listProfiles(): ClaudeCodeProfile[] {
         }
 
         profiles.push(profile)
-        console.log('[Profiles] Loaded profile:', dir.name)
       } catch (err) {
         console.error(`[Profiles] Failed to load profile ${dir.name}:`, err)
       }

@@ -11,11 +11,14 @@ import {
   RefreshCw,
   Zap,
   Bot,
+  Monitor,
+  Thermometer,
+  AlertTriangle,
 } from 'lucide-react'
 import { formatBytes, cn } from '@/lib/utils'
 import { useSystemStatus } from '@/hooks/useSystemStatus'
 import { MetricsChart } from './MetricsChart'
-import type { SystemStatus } from '@shared/types'
+import type { SystemStatus, GPUUsage } from '@shared/types'
 
 interface DashboardProps {
   onNavigate?: (view: string) => void
@@ -109,7 +112,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       {/* Resource usage with live meters */}
       <section>
         <h2 className="text-lg font-semibold text-text-primary mb-4">Resource Usage</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <ResourceMeter
             icon={Cpu}
             label="CPU Usage"
@@ -126,6 +129,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             unit="%"
             color="blue"
           />
+          <GPUCard gpu={status?.resources.gpu} />
           <MetricCard
             icon={HardDrive}
             label="Claude Data"
@@ -379,6 +383,96 @@ function QuickAction({ icon: Icon, label, onClick }: QuickActionProps) {
       <Icon className="w-6 h-6 text-accent-purple" />
       <span className="text-sm font-medium text-text-primary">{label}</span>
     </button>
+  )
+}
+
+interface GPUCardProps {
+  gpu?: GPUUsage
+}
+
+function GPUCard({ gpu }: GPUCardProps) {
+  // No GPU detected
+  if (!gpu || !gpu.available) {
+    return (
+      <div className="card p-4">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="inline-flex p-2 rounded-lg bg-surface-hover text-text-muted">
+            <Monitor className="w-5 h-5" />
+          </div>
+          <span className="text-sm text-text-muted">GPU</span>
+        </div>
+        <p className="text-lg text-text-muted">Not detected</p>
+        <p className="text-xs text-text-muted mt-1">No NVIDIA GPU found</p>
+      </div>
+    )
+  }
+
+  // GPU detected but limited info (fallback mode)
+  if (gpu.error || gpu.utilization === undefined) {
+    return (
+      <div className="card p-4">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="inline-flex p-2 rounded-lg bg-accent-yellow/10 text-accent-yellow">
+            <Monitor className="w-5 h-5" />
+          </div>
+          <span className="text-sm text-text-muted">GPU</span>
+        </div>
+        <p className="text-lg font-semibold text-text-primary truncate" title={gpu.name}>
+          {gpu.name || 'NVIDIA GPU'}
+        </p>
+        <div className="flex items-center gap-2 mt-1">
+          <AlertTriangle className="w-3 h-3 text-accent-yellow" />
+          <p className="text-xs text-accent-yellow">
+            {gpu.error || 'Limited info available'}
+          </p>
+        </div>
+        {gpu.driverVersion && (
+          <p className="text-xs text-text-muted mt-1">
+            Driver: {gpu.driverVersion}
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  // Full GPU info available
+  const memUsagePercent = gpu.memoryUsed && gpu.memoryTotal
+    ? (gpu.memoryUsed / gpu.memoryTotal) * 100
+    : 0
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="inline-flex p-2 rounded-lg bg-accent-green/10 text-accent-green">
+          <Monitor className="w-5 h-5" />
+        </div>
+        <span className="text-sm text-text-muted">GPU</span>
+      </div>
+      <p className="text-lg font-semibold text-text-primary truncate" title={gpu.name}>
+        {gpu.name?.replace('NVIDIA ', '').replace('GeForce ', '') || 'GPU'}
+      </p>
+      <div className="flex items-center gap-4 mt-2 text-xs text-text-muted">
+        <span className="flex items-center gap-1">
+          <Zap className="w-3 h-3" />
+          {gpu.utilization}%
+        </span>
+        {gpu.temperature !== undefined && (
+          <span className="flex items-center gap-1">
+            <Thermometer className="w-3 h-3" />
+            {gpu.temperature}°C
+          </span>
+        )}
+      </div>
+      <div className="w-full h-1.5 rounded-full bg-surface-hover overflow-hidden mt-2">
+        <div
+          className="h-full rounded-full bg-accent-green transition-all duration-500"
+          style={{ width: `${memUsagePercent}%` }}
+        />
+      </div>
+      <p className="text-xs text-text-muted mt-1">
+        {formatBytes(gpu.memoryUsed || 0)} / {formatBytes(gpu.memoryTotal || 0)}
+      </p>
+    </div>
   )
 }
 
