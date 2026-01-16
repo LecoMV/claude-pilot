@@ -61,7 +61,7 @@ function createWindow(): void {
 // App lifecycle
 app.whenReady().then(() => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.claude.command-center')
+  electronApp.setAppUserModelId('com.claude.pilot')
 
   // Default open or close DevTools by F12 in development
   app.on('browser-window-created', (_, window) => {

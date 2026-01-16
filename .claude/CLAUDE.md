@@ -1,7 +1,7 @@
-# Claude Command Center - Project Memory
+# Claude Pilot - Project Memory
 
 ## Project Overview
-All-in-one desktop command center for Claude Code management, monitoring, and orchestration.
+Professional session control for Claude Code - manage profiles, monitor resources, and orchestrate workflows.
 **Aesthetic**: VSCode-inspired dark theme with Grafana-style monitoring dashboards.
 
 ## Tech Stack

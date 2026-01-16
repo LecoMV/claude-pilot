@@ -63,11 +63,11 @@ export function Sidebar({
       {/* Logo */}
       <div className="h-14 flex items-center justify-center border-b border-border">
         {collapsed ? (
-          <span className="text-2xl">⚡</span>
+          <span className="text-2xl">✈</span>
         ) : (
           <div className="flex items-center gap-2">
-            <span className="text-2xl">⚡</span>
-            <span className="font-semibold text-text-primary">Claude CC</span>
+            <span className="text-2xl">✈</span>
+            <span className="font-semibold text-text-primary">Claude Pilot</span>
           </div>
         )}
       </div>

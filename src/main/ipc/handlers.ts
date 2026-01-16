@@ -2778,7 +2778,7 @@ function sendChatMessage(sender: WebContents, projectPath: string, message: stri
 }
 
 // App settings file path
-const APP_SETTINGS_PATH = join(HOME, '.config', 'claude-command-center', 'settings.json')
+const APP_SETTINGS_PATH = join(HOME, '.config', 'claude-pilot', 'settings.json')
 
 const defaultAppSettings: AppSettings = {
   theme: 'dark',
@@ -2813,7 +2813,7 @@ function getAppSettings(): AppSettings {
 function saveAppSettings(settings: AppSettings): boolean {
   try {
     // Ensure config directory exists
-    const configDir = join(HOME, '.config', 'claude-command-center')
+    const configDir = join(HOME, '.config', 'claude-pilot')
     if (!existsSync(configDir)) {
       mkdirSync(configDir, { recursive: true })
     }

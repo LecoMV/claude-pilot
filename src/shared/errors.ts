@@ -1,4 +1,4 @@
-// Enterprise-grade error handling types for Claude Command Center
+// Enterprise-grade error handling types for Claude Pilot
 
 /**
  * Error severity levels for categorization and handling

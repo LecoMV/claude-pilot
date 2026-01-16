@@ -1,7 +1,7 @@
 {
-  "name": "claude-command-center",
+  "name": "claude-pilot",
   "version": "0.1.0",
-  "description": "All-in-one command center for Claude Code management, monitoring, and orchestration",
+  "description": "Professional session control for Claude Code - manage profiles, monitor resources, and orchestrate workflows",
   "main": "out/main/index.js",
   "author": "Alex Mayhew",
   "license": "MIT",
