@@ -17,7 +17,7 @@ export const useSystemStore = create<SystemState>((set) => ({
   status: null,
   loading: true,
   error: null,
-  pollInterval: 5000, // 5 seconds default
+  pollInterval: 10000, // 10 seconds default (backend caches for 5-10s)
   lastUpdate: 0,
 
   setStatus: (status) => set({ status, lastUpdate: Date.now(), error: null }),

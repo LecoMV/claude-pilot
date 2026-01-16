@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useMemo } from 'react'
 import {
   Database,
   Search,
@@ -11,11 +11,16 @@ import {
   ChevronDown,
   ChevronUp,
   AlertCircle,
+  Filter,
+  X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMemoryStore, type MemorySource } from '@/stores/memory'
 import { GraphViewer } from './GraphViewer'
 import type { Learning } from '@shared/types'
+
+// Available categories for filtering
+const CATEGORIES = ['all', 'bugbounty', 'project', 'architecture', 'security', 'general', 'htb', 'memory']
 
 export function MemoryBrowser() {
   const {
@@ -36,6 +41,7 @@ export function MemoryBrowser() {
 
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [initialLoaded, setInitialLoaded] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState<string>('all')
 
   // Load initial data and stats
   const loadStats = useCallback(async () => {
@@ -108,6 +114,18 @@ export function MemoryBrowser() {
     return num.toString()
   }
 
+  // Filter learnings by category
+  const filteredLearnings = useMemo(() => {
+    if (selectedCategory === 'all') return learnings
+    return learnings.filter((l) => l.category === selectedCategory)
+  }, [learnings, selectedCategory])
+
+  // Get unique categories from current data
+  const availableCategories = useMemo(() => {
+    const cats = new Set(learnings.map((l) => l.category))
+    return ['all', ...Array.from(cats).sort()]
+  }, [learnings])
+
   return (
     <div className="space-y-6 animate-in">
       {/* Source tabs */}
@@ -152,6 +170,32 @@ export function MemoryBrowser() {
             disabled={activeSource !== 'postgresql'}
           />
         </div>
+        {/* Category filter for PostgreSQL */}
+        {activeSource === 'postgresql' && (
+          <div className="relative">
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="input pl-10 pr-8 appearance-none cursor-pointer min-w-[150px]"
+            >
+              {availableCategories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat === 'all' ? 'All Categories' : cat}
+                </option>
+              ))}
+            </select>
+            {selectedCategory !== 'all' && (
+              <button
+                onClick={() => setSelectedCategory('all')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-surface-hover rounded"
+                title="Clear filter"
+              >
+                <X className="w-3 h-3 text-text-muted" />
+              </button>
+            )}
+          </div>
+        )}
         <button
           onClick={handleSearch}
           className="btn btn-primary"
@@ -176,7 +220,11 @@ export function MemoryBrowser() {
             {activeSource === 'postgresql' ? 'Learnings' : `${getSourceName(activeSource)} Browser`}
           </h3>
           {activeSource === 'postgresql' && learnings.length > 0 && (
-            <span className="text-sm text-text-muted">{learnings.length} results</span>
+            <span className="text-sm text-text-muted">
+              {selectedCategory !== 'all'
+                ? `${filteredLearnings.length} of ${learnings.length} (${selectedCategory})`
+                : `${learnings.length} results`}
+            </span>
           )}
         </div>
         <div className={cn(
@@ -184,9 +232,9 @@ export function MemoryBrowser() {
           activeSource === 'memgraph' ? 'min-h-[400px] h-[500px]' : 'min-h-[300px] max-h-[500px]'
         )}>
           {activeSource === 'postgresql' ? (
-            learnings.length > 0 ? (
+            filteredLearnings.length > 0 ? (
               <div className="space-y-2">
-                {learnings.map((learning) => (
+                {filteredLearnings.map((learning) => (
                   <LearningCard
                     key={learning.id}
                     learning={learning}
@@ -196,6 +244,12 @@ export function MemoryBrowser() {
                   />
                 ))}
               </div>
+            ) : learnings.length > 0 ? (
+              <EmptyState
+                icon={Filter}
+                title="No learnings in this category"
+                description={`No learnings found with category "${selectedCategory}". Try selecting a different filter.`}
+              />
             ) : (
               <EmptyState
                 icon={Database}

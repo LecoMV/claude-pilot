@@ -15,6 +15,12 @@ import {
   XCircle,
   AlertCircle,
   Loader,
+  Database,
+  Brain,
+  Layers,
+  Settings,
+  Zap,
+  Server,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useOllamaStore, type OllamaModel } from '@/stores/ollama'
@@ -28,6 +34,15 @@ const POPULAR_MODELS = [
   { name: 'deepseek-coder:latest', desc: 'DeepSeek Coder', size: '4GB' },
   { name: 'phi3:latest', desc: 'Microsoft Phi-3', size: '2.2GB' },
   { name: 'qwen2.5:latest', desc: 'Alibaba Qwen 2.5', size: '4.4GB' },
+]
+
+// Embedding models for vector storage systems
+const EMBEDDING_MODELS = [
+  { name: 'nomic-embed-text:latest', desc: 'Nomic Embed Text', size: '274MB', dims: 768 },
+  { name: 'all-minilm:latest', desc: 'All-MiniLM-L6', size: '46MB', dims: 384 },
+  { name: 'mxbai-embed-large:latest', desc: 'MixedBread Embed', size: '669MB', dims: 1024 },
+  { name: 'bge-large:latest', desc: 'BGE Large', size: '670MB', dims: 1024 },
+  { name: 'snowflake-arctic-embed:latest', desc: 'Snowflake Arctic', size: '669MB', dims: 1024 },
 ]
 
 export function OllamaManager() {
@@ -51,6 +66,7 @@ export function OllamaManager() {
   const [filter, setFilter] = useState('')
   const [customModel, setCustomModel] = useState('')
   const [showPullModal, setShowPullModal] = useState(false)
+  const [activeTab, setActiveTab] = useState<'models' | 'system'>('models')
 
   const loadData = useCallback(async () => {
     try {
@@ -156,35 +172,63 @@ export function OllamaManager() {
     )
   }
 
+  // Check for installed embedding models
+  const installedEmbeddings = models.filter((m) =>
+    EMBEDDING_MODELS.some((e) => m.name.startsWith(e.name.split(':')[0]))
+  )
+
   return (
     <div className="space-y-6 animate-in">
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard
-          icon={ollamaOnline ? CheckCircle : XCircle}
-          value={ollamaOnline ? 'Online' : 'Offline'}
-          label="Ollama Status"
-          color={ollamaOnline ? 'text-accent-green' : 'text-accent-red'}
-        />
-        <StatCard
+      {/* Tab navigation */}
+      <div className="flex items-center gap-2 border-b border-border pb-4">
+        <TabButton
+          active={activeTab === 'models'}
+          onClick={() => setActiveTab('models')}
           icon={Box}
-          value={models.length}
           label="Models"
-          color="text-accent-blue"
         />
-        <StatCard
-          icon={Play}
-          value={runningModels.length}
-          label="Running"
-          color="text-accent-green"
+        <TabButton
+          active={activeTab === 'system'}
+          onClick={() => setActiveTab('system')}
+          icon={Server}
+          label="System LLM"
         />
-        <StatCard
-          icon={HardDrive}
-          value={formatSize(totalSize)}
-          label="Total Size"
-          color="text-accent-purple"
-        />
+        <div className="flex-1" />
+        <button onClick={loadData} className="btn btn-secondary">
+          <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+          Refresh
+        </button>
       </div>
+
+      {activeTab === 'models' && (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-4 gap-4">
+            <StatCard
+              icon={ollamaOnline ? CheckCircle : XCircle}
+              value={ollamaOnline ? 'Online' : 'Offline'}
+              label="Ollama Status"
+              color={ollamaOnline ? 'text-accent-green' : 'text-accent-red'}
+            />
+            <StatCard
+              icon={Box}
+              value={models.length}
+              label="Models"
+              color="text-accent-blue"
+            />
+            <StatCard
+              icon={Play}
+              value={runningModels.length}
+              label="Running"
+              color="text-accent-green"
+            />
+            <StatCard
+              icon={HardDrive}
+              value={formatSize(totalSize)}
+              label="Total Size"
+              color="text-accent-purple"
+            />
+          </div>
 
       {/* Pull progress */}
       {pulling && pullProgress && (
@@ -343,6 +387,18 @@ export function OllamaManager() {
             </div>
           </div>
         </div>
+      )}
+        </>
+      )}
+
+      {activeTab === 'system' && (
+        <SystemLLMPanel
+          models={models}
+          installedEmbeddings={installedEmbeddings}
+          onPull={handlePull}
+          pulling={pulling}
+          formatSize={formatSize}
+        />
       )}
     </div>
   )
@@ -507,6 +563,232 @@ function ModelCard({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+interface TabButtonProps {
+  active: boolean
+  onClick: () => void
+  icon: typeof Box
+  label: string
+}
+
+function TabButton({ active, onClick, icon: Icon, label }: TabButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex items-center gap-2 px-4 py-2 rounded-lg transition-colors',
+        active
+          ? 'bg-accent-purple/10 text-accent-purple'
+          : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+      )}
+    >
+      <Icon className="w-4 h-4" />
+      {label}
+    </button>
+  )
+}
+
+// System LLM Panel - for mem0, pgvector, and other system integrations
+interface SystemLLMPanelProps {
+  models: OllamaModel[]
+  installedEmbeddings: OllamaModel[]
+  onPull: (name: string) => void
+  pulling: string | null
+  formatSize: (bytes: number) => string
+}
+
+function SystemLLMPanel({ models, installedEmbeddings, onPull, pulling, formatSize }: SystemLLMPanelProps) {
+  return (
+    <div className="space-y-6">
+      {/* System Integration Status */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-accent-blue/10 flex items-center justify-center">
+              <Database className="w-5 h-5 text-accent-blue" />
+            </div>
+            <div>
+              <p className="font-medium text-text-primary">pgvector</p>
+              <p className="text-xs text-text-muted">PostgreSQL embeddings</p>
+            </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-border">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-text-muted">Status</span>
+              <span className="text-accent-green flex items-center gap-1">
+                <CheckCircle className="w-3 h-3" />
+                Active
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-accent-purple/10 flex items-center justify-center">
+              <Brain className="w-5 h-5 text-accent-purple" />
+            </div>
+            <div>
+              <p className="font-medium text-text-primary">mem0</p>
+              <p className="text-xs text-text-muted">Memory system</p>
+            </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-border">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-text-muted">Status</span>
+              <span className="text-accent-green flex items-center gap-1">
+                <CheckCircle className="w-3 h-3" />
+                Active
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center">
+              <Layers className="w-5 h-5 text-accent-green" />
+            </div>
+            <div>
+              <p className="font-medium text-text-primary">Qdrant</p>
+              <p className="text-xs text-text-muted">Vector storage</p>
+            </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-border">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-text-muted">Status</span>
+              <span className="text-accent-green flex items-center gap-1">
+                <CheckCircle className="w-3 h-3" />
+                Active
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Installed Embedding Models */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="font-medium text-text-primary flex items-center gap-2">
+            <Zap className="w-4 h-4 text-accent-yellow" />
+            Installed Embedding Models
+          </h3>
+          <p className="text-xs text-text-muted mt-1">
+            Models used for generating embeddings in memory systems
+          </p>
+        </div>
+        <div className="card-body">
+          {installedEmbeddings.length === 0 ? (
+            <div className="text-center py-6">
+              <Brain className="w-10 h-10 mx-auto text-text-muted mb-3" />
+              <p className="text-text-muted mb-2">No embedding models installed</p>
+              <p className="text-xs text-text-muted">
+                Install an embedding model to enable local vector operations
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {installedEmbeddings.map((model) => (
+                <div
+                  key={model.name}
+                  className="flex items-center justify-between p-3 rounded-lg bg-surface"
+                >
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-accent-green" />
+                    <div>
+                      <p className="font-medium text-text-primary">{model.name}</p>
+                      <p className="text-xs text-text-muted">
+                        {formatSize(model.size)}
+                        {model.details?.family && ` • ${model.details.family}`}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2 py-1 text-xs bg-accent-green/20 text-accent-green rounded">
+                    Active
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Available Embedding Models */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="font-medium text-text-primary flex items-center gap-2">
+            <Download className="w-4 h-4 text-accent-blue" />
+            Available Embedding Models
+          </h3>
+          <p className="text-xs text-text-muted mt-1">
+            Recommended models for mem0 and pgvector integrations
+          </p>
+        </div>
+        <div className="card-body">
+          <div className="space-y-2">
+            {EMBEDDING_MODELS.map((em) => {
+              const isInstalled = models.some((m) => m.name.startsWith(em.name.split(':')[0]))
+              return (
+                <div
+                  key={em.name}
+                  className={cn(
+                    'flex items-center justify-between p-3 rounded-lg transition-colors',
+                    isInstalled ? 'bg-accent-green/5' : 'bg-surface hover:bg-surface-hover'
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    {isInstalled ? (
+                      <CheckCircle className="w-5 h-5 text-accent-green" />
+                    ) : (
+                      <Box className="w-5 h-5 text-text-muted" />
+                    )}
+                    <div>
+                      <p className="font-medium text-text-primary">{em.desc}</p>
+                      <p className="text-xs text-text-muted">
+                        {em.name} • {em.size} • {em.dims}d vectors
+                      </p>
+                    </div>
+                  </div>
+                  {isInstalled ? (
+                    <span className="px-2 py-1 text-xs bg-accent-green/20 text-accent-green rounded">
+                      Installed
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => onPull(em.name)}
+                      disabled={!!pulling}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      <Download className="w-3 h-3" />
+                      Pull
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Info card */}
+      <div className="card p-4">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-accent-blue flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-text-secondary">
+            <p className="font-medium text-text-primary mb-1">About System LLM</p>
+            <p>
+              System LLM models power local memory and embedding operations.
+              The <code className="text-accent-purple">nomic-embed-text</code> model is recommended
+              for balanced performance with mem0 and pgvector integrations.
+              Smaller models like <code className="text-accent-purple">all-minilm</code> are faster
+              but may have reduced semantic understanding.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

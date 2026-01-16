@@ -85,7 +85,7 @@ export function AgentCanvas() {
 
   useEffect(() => {
     loadData()
-    const interval = setInterval(loadData, 5000) // Refresh every 5s
+    const interval = setInterval(loadData, 15000) // Refresh every 15s
     return () => clearInterval(interval)
   }, [loadData])
 

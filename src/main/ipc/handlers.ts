@@ -1,6 +1,6 @@
-import { ipcMain, BrowserWindow, type WebContents } from 'electron'
+import { ipcMain, BrowserWindow, type WebContents, shell, dialog } from 'electron'
 import { execSync, spawn, ChildProcess } from 'child_process'
-import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import type {
@@ -11,6 +11,7 @@ import type {
   Learning,
   ProfileSettings,
   ClaudeRule,
+  ClaudeCodeProfile,
   TokenUsage,
   CompactionSettings,
   SessionSummary,
@@ -32,6 +33,31 @@ import type {
 
 const HOME = homedir()
 const CLAUDE_DIR = join(HOME, '.claude')
+
+// Simple cache for expensive operations
+class DataCache {
+  private cache: Map<string, { data: unknown; expiry: number }> = new Map()
+
+  get<T>(key: string): T | null {
+    const entry = this.cache.get(key)
+    if (!entry) return null
+    if (Date.now() > entry.expiry) {
+      this.cache.delete(key)
+      return null
+    }
+    return entry.data as T
+  }
+
+  set<T>(key: string, data: T, ttlMs: number): void {
+    this.cache.set(key, { data, expiry: Date.now() + ttlMs })
+  }
+
+  clear(): void {
+    this.cache.clear()
+  }
+}
+
+const dataCache = new DataCache()
 
 // Log stream manager for real-time log streaming
 class LogStreamManager {
@@ -256,6 +282,38 @@ export function registerIpcHandlers(): void {
     return true
   })
 
+  ipcMain.handle('mcp:getConfig', async (): Promise<string> => {
+    const settingsPath = join(CLAUDE_DIR, 'settings.json')
+    try {
+      if (existsSync(settingsPath)) {
+        const content = readFileSync(settingsPath, 'utf-8')
+        return content
+      }
+      // Return default config structure if file doesn't exist
+      return JSON.stringify({ mcpServers: {} }, null, 2)
+    } catch (error) {
+      console.error('Failed to read MCP config:', error)
+      return JSON.stringify({ mcpServers: {} }, null, 2)
+    }
+  })
+
+  ipcMain.handle('mcp:saveConfig', async (_event, content: string): Promise<boolean> => {
+    const settingsPath = join(CLAUDE_DIR, 'settings.json')
+    try {
+      // Validate JSON before saving
+      JSON.parse(content)
+      // Ensure .claude directory exists
+      if (!existsSync(CLAUDE_DIR)) {
+        mkdirSync(CLAUDE_DIR, { recursive: true })
+      }
+      writeFileSync(settingsPath, content, 'utf-8')
+      return true
+    } catch (error) {
+      console.error('Failed to save MCP config:', error)
+      return false
+    }
+  })
+
   // Memory handlers
   ipcMain.handle('memory:learnings', async (_event, query?: string, limit = 50): Promise<Learning[]> => {
     return queryLearnings(query, limit)
@@ -299,6 +357,54 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('profile:toggleRule', async (_event, name: string, enabled: boolean) => {
     return toggleRule(name, enabled)
+  })
+
+  ipcMain.handle('profile:saveRule', async (_event, path: string, content: string): Promise<boolean> => {
+    try {
+      writeFileSync(path, content, 'utf-8')
+      return true
+    } catch (error) {
+      console.error('Failed to save rule:', error)
+      return false
+    }
+  })
+
+  // Custom Profiles handlers (claude-eng, claude-sec, etc.)
+  ipcMain.handle('profiles:list', async (): Promise<ClaudeCodeProfile[]> => {
+    return listProfiles()
+  })
+
+  ipcMain.handle('profiles:get', async (_event, id: string): Promise<ClaudeCodeProfile | null> => {
+    return getProfile(id)
+  })
+
+  ipcMain.handle(
+    'profiles:create',
+    async (
+      _event,
+      profile: Omit<ClaudeCodeProfile, 'id' | 'createdAt' | 'updatedAt'>
+    ): Promise<ClaudeCodeProfile | null> => {
+      return createProfile(profile)
+    }
+  )
+
+  ipcMain.handle(
+    'profiles:update',
+    async (_event, id: string, updates: Partial<ClaudeCodeProfile>): Promise<boolean> => {
+      return updateProfile(id, updates)
+    }
+  )
+
+  ipcMain.handle('profiles:delete', async (_event, id: string): Promise<boolean> => {
+    return deleteProfile(id)
+  })
+
+  ipcMain.handle('profiles:activate', async (_event, id: string): Promise<boolean> => {
+    return activateProfile(id)
+  })
+
+  ipcMain.handle('profiles:getActive', async (): Promise<string | null> => {
+    return getActiveProfileId()
   })
 
   // Context handlers
@@ -423,15 +529,63 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('settings:save', async (_event, settings: AppSettings): Promise<boolean> => {
     return saveAppSettings(settings)
   })
+
+  // System helpers
+  ipcMain.handle('system:getHomePath', async (): Promise<string> => {
+    return HOME
+  })
+
+  // Shell operations
+  ipcMain.handle('shell:openPath', async (_event, path: string): Promise<string> => {
+    return shell.openPath(path)
+  })
+
+  ipcMain.handle('shell:openExternal', async (_event, url: string): Promise<void> => {
+    await shell.openExternal(url)
+  })
+
+  // Dialog operations
+  ipcMain.handle('dialog:openDirectory', async (): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: 'Select Project Folder',
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+    return result.filePaths[0]
+  })
+
+  // Terminal at specific path - sends message to renderer to open terminal at path
+  ipcMain.handle('terminal:openAt', async (event, path: string): Promise<boolean> => {
+    try {
+      // Get the webContents that sent this message
+      const webContents = event.sender
+      // Send message back to renderer to navigate to terminal and set cwd
+      webContents.send('terminal:setCwd', path)
+      return true
+    } catch {
+      return false
+    }
+  })
 }
 
 async function getClaudeStatus() {
+  // Return cached data if available (30 second cache - version rarely changes)
+  type ClaudeStatus = { online: boolean; version?: string; lastCheck: number }
+  const cached = dataCache.get<ClaudeStatus>('claudeStatus')
+  if (cached) return cached
+
   try {
-    execSync('which claude', { encoding: 'utf-8' })
-    const version = execSync('claude --version', { encoding: 'utf-8' }).trim()
-    return { online: true, version, lastCheck: Date.now() }
+    execSync('which claude', { encoding: 'utf-8', timeout: 1000 })
+    const version = execSync('claude --version', { encoding: 'utf-8', timeout: 2000 }).trim()
+    const status = { online: true, version, lastCheck: Date.now() }
+    dataCache.set('claudeStatus', status, 30000) // 30s cache
+    return status
   } catch {
-    return { online: false, lastCheck: Date.now() }
+    const status = { online: false, lastCheck: Date.now() }
+    dataCache.set('claudeStatus', status, 5000) // 5s cache for offline
+    return status
   }
 }
 
@@ -445,10 +599,19 @@ async function getMCPStatus() {
 }
 
 async function getMemoryStatus() {
+  // Return cached data if available (10 second cache)
+  type MemStatus = {
+    postgresql: { online: boolean }
+    memgraph: { online: boolean }
+    qdrant: { online: boolean }
+  }
+  const cached = dataCache.get<MemStatus>('memoryStatus')
+  if (cached) return cached
+
   // Check PostgreSQL
   let postgresql = { online: false }
   try {
-    execSync('pg_isready -h localhost -p 5433', { encoding: 'utf-8' })
+    execSync('pg_isready -h localhost -p 5433', { encoding: 'utf-8', timeout: 1000 })
     postgresql = { online: true }
   } catch {
     // PostgreSQL offline
@@ -458,7 +621,7 @@ async function getMemoryStatus() {
   // Using network check instead of podman exec to avoid cgroup permission issues in Electron
   let memgraph = { online: false }
   try {
-    execSync('nc -z localhost 7687', { encoding: 'utf-8', timeout: 3000 })
+    execSync('nc -z localhost 7687', { encoding: 'utf-8', timeout: 1000 })
     memgraph = { online: true }
   } catch {
     // Memgraph offline
@@ -467,7 +630,10 @@ async function getMemoryStatus() {
   // Check Qdrant
   let qdrant = { online: false }
   try {
-    const result = execSync('curl -s http://localhost:6333/collections', { encoding: 'utf-8', timeout: 3000 })
+    const result = execSync('curl -s http://localhost:6333/collections', {
+      encoding: 'utf-8',
+      timeout: 2000,
+    })
     if (result.includes('result')) {
       qdrant = { online: true }
     }
@@ -475,44 +641,69 @@ async function getMemoryStatus() {
     // Qdrant offline
   }
 
-  return { postgresql, memgraph, qdrant }
+  const status = { postgresql, memgraph, qdrant }
+  dataCache.set('memoryStatus', status, 10000) // 10s cache
+  return status
 }
 
 async function getOllamaServiceStatus() {
+  // Return cached data if available (10 second cache)
+  const cached = dataCache.get<{ online: boolean; modelCount: number; runningModels: number }>(
+    'ollamaStatus'
+  )
+  if (cached) return cached
+
   try {
-    const result = execSync('curl -s http://localhost:11434/api/tags', { encoding: 'utf-8', timeout: 3000 })
+    const result = execSync('curl -s http://localhost:11434/api/tags', {
+      encoding: 'utf-8',
+      timeout: 2000,
+    })
     const data = JSON.parse(result)
     const models = data.models || []
 
     // Check for running models
     let runningModels = 0
     try {
-      const psResult = execSync('curl -s http://localhost:11434/api/ps', { encoding: 'utf-8', timeout: 3000 })
+      const psResult = execSync('curl -s http://localhost:11434/api/ps', {
+        encoding: 'utf-8',
+        timeout: 2000,
+      })
       const psData = JSON.parse(psResult)
       runningModels = psData.models?.length || 0
     } catch {
       // Ignore - just means no models running
     }
 
-    return {
+    const status = {
       online: true,
       modelCount: models.length,
       runningModels,
     }
+    dataCache.set('ollamaStatus', status, 10000) // 10s cache
+    return status
   } catch {
-    return {
+    const status = {
       online: false,
       modelCount: 0,
       runningModels: 0,
     }
+    dataCache.set('ollamaStatus', status, 5000) // 5s cache for offline
+    return status
   }
 }
 
 async function getResourceUsage(): Promise<ResourceUsage> {
+  // Return cached data if available (5 second cache)
+  const cached = dataCache.get<ResourceUsage>('resourceUsage')
+  if (cached) return cached
+
   // Get CPU usage
   let cpu = 0
   try {
-    const result = execSync("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'", { encoding: 'utf-8' })
+    const result = execSync("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'", {
+      encoding: 'utf-8',
+      timeout: 2000,
+    })
     cpu = parseFloat(result) || 0
   } catch {
     // Ignore
@@ -521,7 +712,10 @@ async function getResourceUsage(): Promise<ResourceUsage> {
   // Get memory usage
   let memory = 0
   try {
-    const result = execSync("free | grep Mem | awk '{print $3/$2 * 100}'", { encoding: 'utf-8' })
+    const result = execSync("free | grep Mem | awk '{print $3/$2 * 100}'", {
+      encoding: 'utf-8',
+      timeout: 1000,
+    })
     memory = parseFloat(result) || 0
   } catch {
     // Ignore
@@ -530,21 +724,33 @@ async function getResourceUsage(): Promise<ResourceUsage> {
   // Get disk usage
   let disk = { used: 0, total: 0, claudeData: 0 }
   try {
-    const dfResult = execSync("df -B1 / | tail -1 | awk '{print $3, $2}'", { encoding: 'utf-8' })
+    const dfResult = execSync("df -B1 / | tail -1 | awk '{print $3, $2}'", {
+      encoding: 'utf-8',
+      timeout: 1000,
+    })
     const [used, total] = dfResult.trim().split(' ').map(Number)
     disk.used = used
     disk.total = total
 
-    // Get Claude data size
-    if (existsSync(CLAUDE_DIR)) {
-      const duResult = execSync(`du -sb ${CLAUDE_DIR} 2>/dev/null | cut -f1`, { encoding: 'utf-8' })
+    // Get Claude data size (cache for 30 seconds - expensive operation)
+    const cachedClaudeData = dataCache.get<number>('claudeDataSize')
+    if (cachedClaudeData !== null) {
+      disk.claudeData = cachedClaudeData
+    } else if (existsSync(CLAUDE_DIR)) {
+      const duResult = execSync(`du -sb ${CLAUDE_DIR} 2>/dev/null | cut -f1`, {
+        encoding: 'utf-8',
+        timeout: 5000,
+      })
       disk.claudeData = parseInt(duResult.trim()) || 0
+      dataCache.set('claudeDataSize', disk.claudeData, 30000) // 30s cache
     }
   } catch {
     // Ignore
   }
 
-  return { cpu, memory, disk }
+  const result = { cpu, memory, disk }
+  dataCache.set('resourceUsage', result, 5000) // 5s cache
+  return result
 }
 
 function getClaudeProjects(): ClaudeProject[] {
@@ -1005,6 +1211,174 @@ function toggleRule(name: string, enabled: boolean): boolean {
   } catch (error) {
     console.error('Failed to toggle rule:', error)
     return false
+  }
+}
+
+// Custom Profiles functions (claude-eng, claude-sec, etc.)
+const PROFILES_DIR = join(CLAUDE_DIR, 'profiles')
+const ACTIVE_PROFILE_FILE = join(CLAUDE_DIR, 'active-profile')
+
+function ensureProfilesDir(): void {
+  if (!existsSync(PROFILES_DIR)) {
+    mkdirSync(PROFILES_DIR, { recursive: true })
+  }
+}
+
+function listProfiles(): ClaudeCodeProfile[] {
+  ensureProfilesDir()
+  const profiles: ClaudeCodeProfile[] = []
+
+  try {
+    const files = readdirSync(PROFILES_DIR).filter((f) => f.endsWith('.json'))
+    for (const file of files) {
+      try {
+        const content = readFileSync(join(PROFILES_DIR, file), 'utf-8')
+        const profile = JSON.parse(content) as ClaudeCodeProfile
+        profiles.push(profile)
+      } catch {
+        // Skip invalid profile files
+      }
+    }
+  } catch (error) {
+    console.error('Failed to list profiles:', error)
+  }
+
+  return profiles.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function getProfile(id: string): ClaudeCodeProfile | null {
+  const profilePath = join(PROFILES_DIR, `${id}.json`)
+  try {
+    if (!existsSync(profilePath)) return null
+    const content = readFileSync(profilePath, 'utf-8')
+    return JSON.parse(content) as ClaudeCodeProfile
+  } catch (error) {
+    console.error('Failed to get profile:', error)
+    return null
+  }
+}
+
+function createProfile(
+  profile: Omit<ClaudeCodeProfile, 'id' | 'createdAt' | 'updatedAt'>
+): ClaudeCodeProfile | null {
+  ensureProfilesDir()
+
+  // Generate ID from name (slugified)
+  const id = profile.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  const now = Date.now()
+
+  const newProfile: ClaudeCodeProfile = {
+    ...profile,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  const profilePath = join(PROFILES_DIR, `${id}.json`)
+  try {
+    if (existsSync(profilePath)) {
+      console.error('Profile with this name already exists')
+      return null
+    }
+    writeFileSync(profilePath, JSON.stringify(newProfile, null, 2))
+    return newProfile
+  } catch (error) {
+    console.error('Failed to create profile:', error)
+    return null
+  }
+}
+
+function updateProfile(id: string, updates: Partial<ClaudeCodeProfile>): boolean {
+  const profilePath = join(PROFILES_DIR, `${id}.json`)
+  try {
+    if (!existsSync(profilePath)) return false
+
+    const existing = JSON.parse(readFileSync(profilePath, 'utf-8')) as ClaudeCodeProfile
+    const updated: ClaudeCodeProfile = {
+      ...existing,
+      ...updates,
+      id: existing.id, // Prevent ID changes
+      createdAt: existing.createdAt, // Preserve creation time
+      updatedAt: Date.now(),
+    }
+
+    writeFileSync(profilePath, JSON.stringify(updated, null, 2))
+    return true
+  } catch (error) {
+    console.error('Failed to update profile:', error)
+    return false
+  }
+}
+
+function deleteProfile(id: string): boolean {
+  const profilePath = join(PROFILES_DIR, `${id}.json`)
+  try {
+    if (!existsSync(profilePath)) return false
+    unlinkSync(profilePath)
+
+    // If this was the active profile, clear it
+    if (getActiveProfileId() === id) {
+      if (existsSync(ACTIVE_PROFILE_FILE)) {
+        unlinkSync(ACTIVE_PROFILE_FILE)
+      }
+    }
+    return true
+  } catch (error) {
+    console.error('Failed to delete profile:', error)
+    return false
+  }
+}
+
+function activateProfile(id: string): boolean {
+  const profile = getProfile(id)
+  if (!profile) return false
+
+  try {
+    // Save active profile ID
+    writeFileSync(ACTIVE_PROFILE_FILE, id)
+
+    // Apply profile settings to Claude
+    if (profile.settings) {
+      saveProfileSettings(profile.settings)
+    }
+
+    // Apply CLAUDE.md if specified
+    if (profile.claudeMd) {
+      saveClaudeMd(profile.claudeMd)
+    }
+
+    // Apply enabled rules
+    if (profile.enabledRules) {
+      const allRules = getRules()
+      const settingsPath = join(CLAUDE_DIR, 'settings.json')
+      let settings: Record<string, unknown> = {}
+
+      if (existsSync(settingsPath)) {
+        settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+      }
+
+      // Disable all rules not in the enabled list
+      const disabledRules = allRules
+        .filter((r) => !profile.enabledRules!.includes(r.name))
+        .map((r) => r.name)
+
+      settings.disabledRules = disabledRules
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+    }
+
+    return true
+  } catch (error) {
+    console.error('Failed to activate profile:', error)
+    return false
+  }
+}
+
+function getActiveProfileId(): string | null {
+  try {
+    if (!existsSync(ACTIVE_PROFILE_FILE)) return null
+    return readFileSync(ACTIVE_PROFILE_FILE, 'utf-8').trim()
+  } catch {
+    return null
   }
 }
 
@@ -1622,10 +1996,8 @@ function stopOllamaModel(model: string): boolean {
   }
 }
 
-// Agent functions - using Claude Flow MCP
-const CLAUDE_FLOW_API = 'http://localhost:3456'
-
-// In-memory agent state (would normally come from Claude Flow)
+// Agent functions - local simulation (Claude Flow MCP integration removed for responsiveness)
+// In-memory agent state
 let agentState: {
   agents: Agent[]
   swarm: SwarmInfo | null
@@ -1641,40 +2013,22 @@ function generateAgentId(): string {
 }
 
 function getAgentList(): Agent[] {
-  // Try to get from Claude Flow MCP
-  try {
-    const result = execSync(`curl -s ${CLAUDE_FLOW_API}/api/agents`, {
-      encoding: 'utf-8',
-      timeout: 3000,
-    })
-    const data = JSON.parse(result)
-    if (data.agents) {
-      agentState.agents = data.agents
-      return data.agents
+  // Update agent statuses randomly for demo purposes
+  agentState.agents.forEach((agent) => {
+    if (agent.status !== 'terminated') {
+      // Randomly update health slightly
+      agent.health = Math.min(1, Math.max(0.1, agent.health + (Math.random() - 0.5) * 0.1))
+      // Randomly toggle between idle/active/busy
+      const rand = Math.random()
+      if (rand < 0.1 && agent.status === 'active') agent.status = 'busy'
+      else if (rand < 0.2 && agent.status === 'busy') agent.status = 'active'
     }
-  } catch {
-    // Fall back to in-memory state
-  }
+  })
   return agentState.agents
 }
 
 function spawnAgent(type: AgentType, name: string): Agent | null {
-  // Try to spawn via Claude Flow MCP
-  try {
-    const body = JSON.stringify({ agentType: type, agentId: name })
-    const result = execSync(
-      `curl -s -X POST ${CLAUDE_FLOW_API}/api/agents/spawn -H "Content-Type: application/json" -d '${body}'`,
-      { encoding: 'utf-8', timeout: 10000 }
-    )
-    const data = JSON.parse(result)
-    if (data.agent) {
-      return data.agent
-    }
-  } catch {
-    // Fall back to local simulation
-  }
-
-  // Simulate agent spawn locally
+  // Create agent locally
   const agent: Agent = {
     id: generateAgentId(),
     name,
@@ -1684,101 +2038,51 @@ function spawnAgent(type: AgentType, name: string): Agent | null {
     health: 1.0,
   }
   agentState.agents.push(agent)
+
+  // Simulate agent becoming active after spawn
+  setTimeout(() => {
+    const idx = agentState.agents.findIndex((a) => a.id === agent.id)
+    if (idx >= 0 && agentState.agents[idx].status === 'idle') {
+      agentState.agents[idx].status = 'active'
+    }
+  }, 1000)
+
   return agent
 }
 
 function terminateAgent(id: string): boolean {
-  // Try to terminate via Claude Flow MCP
-  try {
-    execSync(
-      `curl -s -X POST ${CLAUDE_FLOW_API}/api/agents/${id}/terminate`,
-      { encoding: 'utf-8', timeout: 5000 }
-    )
-    agentState.agents = agentState.agents.filter((a) => a.id !== id)
-    return true
-  } catch {
-    // Fall back to local simulation
-  }
-
   const index = agentState.agents.findIndex((a) => a.id === id)
   if (index >= 0) {
-    agentState.agents.splice(index, 1)
+    agentState.agents[index].status = 'terminated'
+    // Remove after a short delay
+    setTimeout(() => {
+      agentState.agents = agentState.agents.filter((a) => a.id !== id)
+    }, 500)
     return true
   }
   return false
 }
 
 function getSwarmStatus(): SwarmInfo | null {
-  try {
-    const result = execSync(`curl -s ${CLAUDE_FLOW_API}/api/swarm/status`, {
-      encoding: 'utf-8',
-      timeout: 3000,
-    })
-    const data = JSON.parse(result)
-    if (data.swarm) {
-      agentState.swarm = data.swarm
-      return data.swarm
-    }
-  } catch {
-    // Fall back to in-memory state
-  }
   return agentState.swarm
 }
 
 function getHiveMindStatus(): HiveMindInfo | null {
-  try {
-    const result = execSync(`curl -s ${CLAUDE_FLOW_API}/api/hive-mind/status`, {
-      encoding: 'utf-8',
-      timeout: 3000,
-    })
-    const data = JSON.parse(result)
-    if (data.hiveMind) {
-      agentState.hiveMind = data.hiveMind
-      return data.hiveMind
-    }
-  } catch {
-    // Fall back to in-memory state
-  }
   return agentState.hiveMind
 }
 
 function initSwarm(topology: string): boolean {
-  try {
-    const body = JSON.stringify({ topology })
-    execSync(
-      `curl -s -X POST ${CLAUDE_FLOW_API}/api/swarm/init -H "Content-Type: application/json" -d '${body}'`,
-      { encoding: 'utf-8', timeout: 10000 }
-    )
-    agentState.swarm = {
-      id: `swarm-${Date.now()}`,
-      topology,
-      agents: agentState.agents.map((a) => a.id),
-      status: 'active',
-      createdAt: Date.now(),
-    }
-    return true
-  } catch {
-    // Simulate locally
-    agentState.swarm = {
-      id: `swarm-${Date.now()}`,
-      topology,
-      agents: agentState.agents.map((a) => a.id),
-      status: 'active',
-      createdAt: Date.now(),
-    }
-    return true
+  agentState.swarm = {
+    id: `swarm-${Date.now()}`,
+    topology,
+    agents: agentState.agents.map((a) => a.id),
+    status: 'active',
+    createdAt: Date.now(),
   }
+  return true
 }
 
 function shutdownSwarm(): boolean {
-  try {
-    execSync(`curl -s -X POST ${CLAUDE_FLOW_API}/api/swarm/shutdown`, {
-      encoding: 'utf-8',
-      timeout: 5000,
-    })
-  } catch {
-    // Continue with local shutdown
-  }
   agentState.swarm = null
   return true
 }
@@ -1992,13 +2296,17 @@ async function parseSessionFile(filePath: string): Promise<ExternalSession | nul
           stats.toolCalls++
         }
 
-        // Extract token usage
+        // Extract token usage and service tier
         const message = entry.message as Record<string, unknown> | undefined
         if (message?.usage) {
-          const usage = message.usage as Record<string, number>
-          stats.inputTokens += usage.input_tokens || 0
-          stats.outputTokens += usage.output_tokens || 0
-          stats.cachedTokens += usage.cache_read_input_tokens || 0
+          const usage = message.usage as Record<string, unknown>
+          stats.inputTokens += (usage.input_tokens as number) || 0
+          stats.outputTokens += (usage.output_tokens as number) || 0
+          stats.cachedTokens += (usage.cache_read_input_tokens as number) || 0
+          // Extract service tier (standard, scale, pro, etc.)
+          if (usage.service_tier && !stats.serviceTier) {
+            stats.serviceTier = usage.service_tier as string
+          }
         }
       } catch {
         // Skip malformed lines
@@ -2119,6 +2427,40 @@ async function getSessionMessages(sessionId: string, limit = 100): Promise<Sessi
 
         const message = entry.message as Record<string, unknown> | undefined
 
+        // Extract content - could be string, array, or object
+        let content: string | undefined
+        const rawContent = message?.content ?? entry.content
+        if (typeof rawContent === 'string') {
+          content = rawContent
+        } else if (Array.isArray(rawContent)) {
+          // Extract text from content blocks
+          content = rawContent
+            .map((block: Record<string, unknown>) => {
+              if (typeof block === 'string') return block
+              if (block?.type === 'text' && block?.text) return block.text as string
+              if (block?.type === 'tool_result' && block?.content) {
+                return typeof block.content === 'string' ? block.content : '[Tool Result]'
+              }
+              if (block?.type === 'tool_use' && block?.name) {
+                // Show tool invocation
+                return `[Tool: ${block.name}]`
+              }
+              if (block?.type === 'thinking') {
+                return '[Thinking...]'
+              }
+              return ''
+            })
+            .filter(Boolean)
+            .join('\n')
+        } else if (rawContent && typeof rawContent === 'object') {
+          const obj = rawContent as Record<string, unknown>
+          if (obj.text && typeof obj.text === 'string') {
+            content = obj.text
+          } else {
+            content = JSON.stringify(rawContent)
+          }
+        }
+
         const sessionMessage: SessionMessage = {
           uuid: entry.uuid as string,
           parentUuid: entry.parentUuid as string | undefined,
@@ -2126,7 +2468,7 @@ async function getSessionMessages(sessionId: string, limit = 100): Promise<Sessi
           timestamp: entry.timestamp
             ? new Date(entry.timestamp as string).getTime()
             : Date.now(),
-          content: (message?.content as string) || (entry.content as string),
+          content,
           model: message?.model as string | undefined,
           usage: message?.usage as SessionMessage['usage'],
         }

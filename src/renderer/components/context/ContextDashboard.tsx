@@ -16,9 +16,13 @@ import {
   AlertCircle,
   CheckCircle,
   XCircle,
+  Radio,
+  ExternalLink,
+  Terminal,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useContextStore, type SessionSummary } from '@/stores/context'
+import type { ExternalSession } from '@shared/types'
 
 export function ContextDashboard() {
   const {
@@ -36,20 +40,24 @@ export function ContextDashboard() {
     setSelectedSession,
   } = useContextStore()
 
-  const [activeTab, setActiveTab] = useState<'usage' | 'sessions'>('usage')
+  const [activeTab, setActiveTab] = useState<'active' | 'usage' | 'sessions'>('active')
+  const [activeSessions, setActiveSessions] = useState<ExternalSession[]>([])
+  const [selectedActiveSession, setSelectedActiveSession] = useState<ExternalSession | null>(null)
 
   // Load data
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
-      const [usage, settings, sessionList] = await Promise.all([
+      const [usage, settings, sessionList, activeList] = await Promise.all([
         window.electron.invoke('context:tokenUsage'),
         window.electron.invoke('context:compactionSettings'),
         window.electron.invoke('context:sessions'),
+        window.electron.invoke('sessions:getActive'),
       ])
       setTokenUsage(usage)
       setCompactionSettings(settings)
       setSessions(sessionList)
+      setActiveSessions(activeList || [])
     } catch (error) {
       console.error('Failed to load context data:', error)
     } finally {
@@ -95,10 +103,17 @@ export function ContextDashboard() {
       {/* Tab navigation */}
       <div className="flex items-center gap-2 border-b border-border pb-4">
         <TabButton
+          active={activeTab === 'active'}
+          onClick={() => setActiveTab('active')}
+          icon={Radio}
+          label="Active Sessions"
+          badge={activeSessions.length > 0 ? activeSessions.length : undefined}
+        />
+        <TabButton
           active={activeTab === 'usage'}
           onClick={() => setActiveTab('usage')}
           icon={Gauge}
-          label="Token Usage"
+          label="Token Estimation"
         />
         <TabButton
           active={activeTab === 'sessions'}
@@ -112,6 +127,15 @@ export function ContextDashboard() {
           Refresh
         </button>
       </div>
+
+      {activeTab === 'active' && (
+        <ActiveSessionsPanel
+          sessions={activeSessions}
+          selectedSession={selectedActiveSession}
+          onSelectSession={setSelectedActiveSession}
+          onRefresh={loadData}
+        />
+      )}
 
       {activeTab === 'usage' && (
         <UsagePanel
@@ -139,9 +163,10 @@ interface TabButtonProps {
   onClick: () => void
   icon: typeof Gauge
   label: string
+  badge?: number
 }
 
-function TabButton({ active, onClick, icon: Icon, label }: TabButtonProps) {
+function TabButton({ active, onClick, icon: Icon, label, badge }: TabButtonProps) {
   return (
     <button
       onClick={onClick}
@@ -154,7 +179,244 @@ function TabButton({ active, onClick, icon: Icon, label }: TabButtonProps) {
     >
       <Icon className="w-4 h-4" />
       {label}
+      {badge !== undefined && (
+        <span className={cn(
+          'ml-1 px-1.5 py-0.5 text-xs rounded-full',
+          active ? 'bg-accent-purple/20 text-accent-purple' : 'bg-accent-green/20 text-accent-green'
+        )}>
+          {badge}
+        </span>
+      )}
     </button>
+  )
+}
+
+// Active Sessions Panel - shows live Claude Code sessions
+interface ActiveSessionsPanelProps {
+  sessions: ExternalSession[]
+  selectedSession: ExternalSession | null
+  onSelectSession: (session: ExternalSession | null) => void
+  onRefresh: () => void
+}
+
+function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession, onRefresh }: ActiveSessionsPanelProps) {
+  const formatTokens = (num: number) => {
+    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
+    if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
+    return num.toString()
+  }
+
+  const formatTime = (ts: number) => {
+    const now = Date.now()
+    const diff = now - ts
+    const minutes = Math.floor(diff / 60000)
+    const hours = Math.floor(minutes / 60)
+    if (hours > 0) return `${hours}h ${minutes % 60}m ago`
+    if (minutes > 0) return `${minutes}m ago`
+    return 'Just now'
+  }
+
+  const getUsagePercentage = (session: ExternalSession) => {
+    const total = session.stats.inputTokens + session.stats.outputTokens
+    const maxContext = 200000 // Default max context
+    return Math.min((total / maxContext) * 100, 100)
+  }
+
+  const getUsageColor = (percentage: number) => {
+    if (percentage >= 90) return 'text-accent-red'
+    if (percentage >= 70) return 'text-accent-yellow'
+    return 'text-accent-green'
+  }
+
+  const getProgressColor = (percentage: number) => {
+    if (percentage >= 90) return 'bg-accent-red'
+    if (percentage >= 70) return 'bg-accent-yellow'
+    return 'bg-accent-green'
+  }
+
+  const openProjectFolder = async (path: string) => {
+    try {
+      await window.electron.invoke('shell:openPath', path)
+    } catch (error) {
+      console.error('Failed to open project folder:', error)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Active sessions */}
+      <div className="card">
+        <div className="card-header flex items-center justify-between">
+          <div>
+            <h3 className="font-medium text-text-primary flex items-center gap-2">
+              <Radio className="w-4 h-4 text-accent-green animate-pulse" />
+              Live Sessions
+            </h3>
+            <p className="text-xs text-text-muted mt-1">
+              Claude Code sessions currently running
+            </p>
+          </div>
+          <span className="text-sm text-text-muted">
+            {sessions.length} active
+          </span>
+        </div>
+        <div className="card-body">
+          {sessions.length === 0 ? (
+            <div className="text-center py-8">
+              <Terminal className="w-12 h-12 mx-auto text-text-muted mb-4" />
+              <p className="text-text-muted">No active Claude Code sessions</p>
+              <p className="text-xs text-text-muted mt-1">
+                Start a claude session in your terminal to see it here
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {sessions.map((session) => {
+                const totalTokens = session.stats.inputTokens + session.stats.outputTokens
+                const usagePercent = getUsagePercentage(session)
+                const isSelected = selectedSession?.id === session.id
+
+                return (
+                  <div
+                    key={session.id}
+                    className={cn(
+                      'rounded-lg border p-4 transition-all cursor-pointer',
+                      isSelected
+                        ? 'border-accent-purple bg-accent-purple/5'
+                        : 'border-border hover:border-border-hover'
+                    )}
+                    onClick={() => onSelectSession(isSelected ? null : session)}
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center">
+                          <Radio className="w-5 h-5 text-accent-green" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-text-primary">{session.projectName}</p>
+                            <span className="px-2 py-0.5 text-xs bg-accent-green/20 text-accent-green rounded">
+                              Active
+                            </span>
+                          </div>
+                          <p className="text-xs text-text-muted">
+                            {session.model?.replace('claude-', '').replace(/-\d+$/, '') || 'Unknown model'}
+                            {session.gitBranch && ` • ${session.gitBranch}`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={cn('font-semibold', getUsageColor(usagePercent))}>
+                          {usagePercent.toFixed(1)}%
+                        </p>
+                        <p className="text-xs text-text-muted">Context</p>
+                      </div>
+                    </div>
+
+                    {/* Context usage bar */}
+                    <div className="mb-3">
+                      <div className="h-2 bg-surface-hover rounded-full overflow-hidden">
+                        <div
+                          className={cn('h-full rounded-full transition-all', getProgressColor(usagePercent))}
+                          style={{ width: `${usagePercent}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-text-muted mt-1">
+                        <span>{formatTokens(totalTokens)} tokens used</span>
+                        <span>~200K max</span>
+                      </div>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="grid grid-cols-4 gap-2 text-xs">
+                      <div className="bg-background rounded p-2 text-center">
+                        <p className="text-text-primary font-medium">{session.stats.messageCount}</p>
+                        <p className="text-text-muted">Messages</p>
+                      </div>
+                      <div className="bg-background rounded p-2 text-center">
+                        <p className="text-text-primary font-medium">{session.stats.toolCalls}</p>
+                        <p className="text-text-muted">Tool Calls</p>
+                      </div>
+                      <div className="bg-background rounded p-2 text-center">
+                        <p className="text-text-primary font-medium">{formatTokens(session.stats.cachedTokens)}</p>
+                        <p className="text-text-muted">Cached</p>
+                      </div>
+                      <div className="bg-background rounded p-2 text-center">
+                        <p className="text-text-primary font-medium">{formatTime(session.lastActivity)}</p>
+                        <p className="text-text-muted">Last Activity</p>
+                      </div>
+                    </div>
+
+                    {/* Expanded details */}
+                    {isSelected && (
+                      <div className="mt-4 pt-4 border-t border-border space-y-3">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <p className="text-text-muted">Input Tokens</p>
+                            <p className="text-text-primary font-medium">
+                              {session.stats.inputTokens.toLocaleString()}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-text-muted">Output Tokens</p>
+                            <p className="text-text-primary font-medium">
+                              {session.stats.outputTokens.toLocaleString()}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-text-muted">User Messages</p>
+                            <p className="text-text-primary font-medium">
+                              {session.stats.userMessages}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-text-muted">Assistant Messages</p>
+                            <p className="text-text-primary font-medium">
+                              {session.stats.assistantMessages}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-text-muted truncate max-w-[300px]" title={session.projectPath}>
+                            {session.projectPath}
+                          </p>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openProjectFolder(session.projectPath)
+                            }}
+                            className="btn btn-secondary btn-sm"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Open Folder
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Info card */}
+      <div className="card p-4">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-accent-blue flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-text-secondary">
+            <p className="font-medium text-text-primary mb-1">About Active Sessions</p>
+            <p>
+              This panel shows Claude Code sessions currently running in your terminals.
+              Each session tracks its own context window usage. When context fills up,
+              Claude will automatically create a summary checkpoint. You can trigger
+              manual compaction within each session using the <code className="text-accent-purple">/compact</code> command.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -280,13 +542,14 @@ function UsagePanel({ tokenUsage, compactionSettings, onCompact, onToggleAutoCom
           </div>
 
           <div className="pt-4 border-t border-border">
-            <button onClick={onCompact} className="btn btn-primary w-full">
-              <Archive className="w-4 h-4" />
-              Compact Now
-            </button>
-            <p className="text-xs text-text-muted text-center mt-2">
-              Creates a summary checkpoint and resets context
-            </p>
+            <div className="p-3 bg-background rounded-lg text-center">
+              <p className="text-sm text-text-secondary mb-2">
+                To compact a session, use the <code className="text-accent-purple">/compact</code> command within that session
+              </p>
+              <p className="text-xs text-text-muted">
+                Or wait for automatic compaction when context fills up
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -296,11 +559,11 @@ function UsagePanel({ tokenUsage, compactionSettings, onCompact, onToggleAutoCom
         <div className="flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-accent-blue flex-shrink-0 mt-0.5" />
           <div className="text-sm text-text-secondary">
-            <p className="font-medium text-text-primary mb-1">About Context Management</p>
+            <p className="font-medium text-text-primary mb-1">About Token Estimation</p>
             <p>
-              Claude Code maintains conversation context to remember what you're working on.
-              When the context fills up, compaction creates a summary and starts fresh while
-              preserving important information.
+              This panel shows estimated token usage from stored checkpoints.
+              For accurate real-time usage, check the Active Sessions tab.
+              Each Claude Code session maintains its own context window (typically ~200K tokens).
             </p>
           </div>
         </div>

@@ -17,7 +17,11 @@ import { useSystemStatus } from '@/hooks/useSystemStatus'
 import { MetricsChart } from './MetricsChart'
 import type { SystemStatus } from '@shared/types'
 
-export function Dashboard() {
+interface DashboardProps {
+  onNavigate?: (view: string) => void
+}
+
+export function Dashboard({ onNavigate }: DashboardProps) {
   const { status, loading, error, lastUpdate, refresh } = useSystemStatus()
 
   if (loading && !status) {
@@ -169,23 +173,23 @@ export function Dashboard() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <QuickAction
             icon={Server}
-            label="Restart MCP"
-            onClick={() => console.log('Restart MCP')}
+            label="MCP Servers"
+            onClick={() => onNavigate?.('mcp')}
           />
           <QuickAction
             icon={Database}
-            label="Sync Memory"
-            onClick={() => console.log('Sync Memory')}
+            label="Memory Browser"
+            onClick={() => onNavigate?.('memory')}
           />
           <QuickAction
             icon={Layers}
-            label="View Graph"
-            onClick={() => console.log('View Graph')}
+            label="Knowledge Graph"
+            onClick={() => onNavigate?.('memory')}
           />
           <QuickAction
             icon={Clock}
-            label="Recent Sessions"
-            onClick={() => console.log('Recent Sessions')}
+            label="Sessions"
+            onClick={() => onNavigate?.('sessions')}
           />
         </div>
       </section>

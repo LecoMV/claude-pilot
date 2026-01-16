@@ -367,6 +367,17 @@ function SessionDetail({ session, messages, formatDate, formatTokens, formatCost
               {session.gitBranch}
             </span>
           )}
+          {session.stats.serviceTier && (
+            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+              session.stats.serviceTier === 'standard'
+                ? 'bg-accent-blue/20 text-accent-blue'
+                : session.stats.serviceTier === 'scale'
+                ? 'bg-accent-purple/20 text-accent-purple'
+                : 'bg-accent-green/20 text-accent-green'
+            }`}>
+              {session.stats.serviceTier.toUpperCase()}
+            </span>
+          )}
         </div>
       </div>
 
@@ -412,6 +423,50 @@ function StatCard({
   )
 }
 
+// Helper to extract displayable text from message content
+function getDisplayContent(message: SessionMessage): string {
+  // Handle tool output
+  if (message.toolOutput) {
+    return typeof message.toolOutput === 'string'
+      ? message.toolOutput
+      : JSON.stringify(message.toolOutput, null, 2)
+  }
+
+  // Handle content
+  if (!message.content) {
+    return '(no content)'
+  }
+
+  // If content is a string, return it directly
+  if (typeof message.content === 'string') {
+    return message.content
+  }
+
+  // If content is an array (common for Claude responses with multiple blocks)
+  if (Array.isArray(message.content)) {
+    return message.content
+      .map((block) => {
+        if (typeof block === 'string') return block
+        if (block?.type === 'text' && block?.text) return block.text
+        if (block?.type === 'thinking' && block?.thinking) return `[Thinking: ${block.thinking.slice(0, 100)}...]`
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+
+  // If content is an object with text property
+  if (typeof message.content === 'object') {
+    const content = message.content as Record<string, unknown>
+    if (content.text && typeof content.text === 'string') return content.text
+    if (content.type === 'thinking') return '[Thinking block]'
+    // Fallback: stringify the object
+    return JSON.stringify(content, null, 2)
+  }
+
+  return '(unknown content format)'
+}
+
 // Message Card Component
 function MessageCard({
   message,
@@ -453,7 +508,7 @@ function MessageCard({
         <span className="text-xs text-text-muted">{formatDate(message.timestamp)}</span>
       </div>
       <p className="text-sm text-text-primary whitespace-pre-wrap line-clamp-4">
-        {message.content || message.toolOutput || '(no content)'}
+        {getDisplayContent(message)}
       </p>
       {message.usage && (
         <div className="mt-2 text-xs text-text-muted flex items-center gap-2">

@@ -34,7 +34,7 @@ export default function App() {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':
-        return <Dashboard />
+        return <Dashboard onNavigate={(view) => setCurrentView(view as View)} />
       case 'projects':
         return <Projects />
       case 'sessions':

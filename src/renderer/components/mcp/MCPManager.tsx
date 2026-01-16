@@ -17,10 +17,14 @@ import {
   X,
   ExternalLink,
   Copy,
+  FileJson,
+  Save,
+  FolderOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMCPStore } from '@/stores/mcp'
 import type { MCPServer } from '@shared/types'
+import { CodeEditor } from '@/components/common/CodeEditor'
 
 export function MCPManager() {
   const {
@@ -39,6 +43,11 @@ export function MCPManager() {
   } = useMCPStore()
 
   const [searchQuery, setSearchQuery] = useState('')
+  const [activeTab, setActiveTab] = useState<'servers' | 'config'>('servers')
+  const [configContent, setConfigContent] = useState('')
+  const [configLoading, setConfigLoading] = useState(false)
+  const [configSaving, setConfigSaving] = useState(false)
+  const [configError, setConfigError] = useState<string | null>(null)
 
   const loadServers = useCallback(async () => {
     try {
@@ -51,9 +60,29 @@ export function MCPManager() {
     }
   }, [setServers, setLoading])
 
+  const loadConfig = useCallback(async () => {
+    setConfigLoading(true)
+    setConfigError(null)
+    try {
+      const content = await window.electron.invoke('mcp:getConfig')
+      setConfigContent(content)
+    } catch (error) {
+      console.error('Failed to load MCP config:', error)
+      setConfigError('Failed to load configuration')
+    } finally {
+      setConfigLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadServers()
   }, [loadServers])
+
+  useEffect(() => {
+    if (activeTab === 'config' && !configContent) {
+      loadConfig()
+    }
+  }, [activeTab, configContent, loadConfig])
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -67,6 +96,50 @@ export function MCPManager() {
       await loadServers()
     } catch (error) {
       console.error('Failed to toggle server:', error)
+    }
+  }
+
+  const handleReload = async () => {
+    setRefreshing(true)
+    try {
+      await window.electron.invoke('mcp:reload')
+      await loadServers()
+    } catch (error) {
+      console.error('Failed to reload MCP config:', error)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  const handleSaveConfig = async () => {
+    // Validate JSON before saving
+    try {
+      JSON.parse(configContent)
+    } catch (e) {
+      setConfigError('Invalid JSON. Please fix syntax errors before saving.')
+      return
+    }
+
+    setConfigSaving(true)
+    setConfigError(null)
+    try {
+      await window.electron.invoke('mcp:saveConfig', configContent)
+      await loadServers() // Refresh server list after config change
+    } catch (error) {
+      console.error('Failed to save MCP config:', error)
+      setConfigError('Failed to save configuration')
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
+  const openMCPSettings = async () => {
+    try {
+      // Open the MCP configuration file in the default text editor
+      const homePath = await window.electron.invoke('system:getHomePath')
+      await window.electron.invoke('shell:openPath', `${homePath}/.claude`)
+    } catch (error) {
+      console.error('Failed to open MCP settings:', error)
     }
   }
 
@@ -89,68 +162,179 @@ export function MCPManager() {
 
   return (
     <div className="flex h-full animate-in">
-      {/* Main list */}
-      <div className={cn('flex-1 space-y-6 transition-all', showDetail && 'mr-[400px]')}>
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
-          <StatCard value={servers.length} label="Total Servers" />
-          <StatCard value={getActiveCount()} label="Active" className="text-accent-green" />
-          <StatCard value={getDisabledCount()} label="Disabled" className="text-text-muted" />
+      {/* Main content */}
+      <div className={cn('flex-1 space-y-6 transition-all', showDetail && activeTab === 'servers' && 'mr-[400px]')}>
+        {/* Tab navigation */}
+        <div className="flex items-center gap-2 border-b border-border pb-4">
+          <button
+            onClick={() => setActiveTab('servers')}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 rounded-lg transition-colors',
+              activeTab === 'servers'
+                ? 'bg-accent-purple/10 text-accent-purple'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            )}
+          >
+            <Server className="w-4 h-4" />
+            Servers
+          </button>
+          <button
+            onClick={() => setActiveTab('config')}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 rounded-lg transition-colors',
+              activeTab === 'config'
+                ? 'bg-accent-purple/10 text-accent-purple'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            )}
+          >
+            <FileJson className="w-4 h-4" />
+            Config Editor
+          </button>
         </div>
 
-        {/* Search and actions */}
-        <div className="flex items-center justify-between gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-            <input
-              type="text"
-              placeholder="Search servers..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="input pl-10"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleRefresh}
-              className="btn btn-secondary"
-              disabled={refreshing}
-            >
-              <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
-              Refresh
-            </button>
-            <button className="btn btn-primary">
-              <Plus className="w-4 h-4" />
-              Add Server
-            </button>
-          </div>
-        </div>
-
-        {/* Server list */}
-        <div className="space-y-2">
-          {filteredServers.map((server) => (
-            <ServerCard
-              key={server.name}
-              server={server}
-              selected={selectedServer?.name === server.name}
-              onSelect={() => handleSelectServer(server)}
-              onToggle={(enable) => handleToggle(server.name, enable)}
-            />
-          ))}
-
-          {filteredServers.length === 0 && (
-            <div className="card text-center py-12">
-              <Server className="w-12 h-12 mx-auto text-text-muted mb-4" />
-              <p className="text-text-muted">
-                {searchQuery ? 'No servers found' : 'No MCP servers configured'}
-              </p>
+        {activeTab === 'servers' && (
+          <>
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-4">
+              <StatCard value={servers.length} label="Total Servers" />
+              <StatCard value={getActiveCount()} label="Active" className="text-accent-green" />
+              <StatCard value={getDisabledCount()} label="Disabled" className="text-text-muted" />
             </div>
-          )}
-        </div>
+
+            {/* Search and actions */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+                <input
+                  type="text"
+                  placeholder="Search servers..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="input pl-10"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleRefresh}
+                  className="btn btn-secondary"
+                  disabled={refreshing}
+                >
+                  <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
+                  Refresh
+                </button>
+                <button onClick={openMCPSettings} className="btn btn-primary" title="Open MCP config folder">
+                  <Plus className="w-4 h-4" />
+                  Add Server
+                </button>
+              </div>
+            </div>
+
+            {/* Server list */}
+            <div className="space-y-2">
+              {filteredServers.map((server) => (
+                <ServerCard
+                  key={server.name}
+                  server={server}
+                  selected={selectedServer?.name === server.name}
+                  onSelect={() => handleSelectServer(server)}
+                  onToggle={(enable) => handleToggle(server.name, enable)}
+                />
+              ))}
+
+              {filteredServers.length === 0 && (
+                <div className="card text-center py-12">
+                  <Server className="w-12 h-12 mx-auto text-text-muted mb-4" />
+                  <p className="text-text-muted">
+                    {searchQuery ? 'No servers found' : 'No MCP servers configured'}
+                  </p>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {activeTab === 'config' && (
+          <div className="space-y-4">
+            <div className="card">
+              <div className="card-header flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium text-text-primary">MCP Configuration</h3>
+                  <p className="text-xs text-text-muted mt-1">~/.claude/settings.json (mcpServers section)</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={openMCPSettings}
+                    className="btn btn-secondary"
+                    title="Open folder"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={loadConfig}
+                    className="btn btn-secondary"
+                    disabled={configLoading}
+                  >
+                    <RefreshCw className={cn('w-4 h-4', configLoading && 'animate-spin')} />
+                    Reload
+                  </button>
+                  <button
+                    onClick={handleSaveConfig}
+                    className="btn btn-primary"
+                    disabled={configSaving}
+                  >
+                    {configSaving ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save
+                  </button>
+                </div>
+              </div>
+              <div className="card-body">
+                {configLoading ? (
+                  <div className="flex items-center justify-center h-64">
+                    <div className="animate-spin w-8 h-8 border-2 border-accent-purple border-t-transparent rounded-full" />
+                  </div>
+                ) : (
+                  <CodeEditor
+                    value={configContent}
+                    onChange={setConfigContent}
+                    language="json"
+                    height="500px"
+                    minimap={true}
+                  />
+                )}
+              </div>
+            </div>
+
+            {configError && (
+              <div className="card p-4 bg-accent-red/10 border-accent-red">
+                <div className="flex items-center gap-3 text-accent-red">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <p className="text-sm">{configError}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="card p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-accent-blue flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-text-secondary">
+                  <p className="font-medium text-text-primary mb-1">About MCP Configuration</p>
+                  <p>
+                    Edit the MCP servers configuration directly. Changes are validated as JSON before saving.
+                    After saving, the servers will be automatically reloaded.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Detail panel */}
-      {showDetail && selectedServer && (
+      {/* Detail panel - only show on servers tab */}
+      {activeTab === 'servers' && showDetail && selectedServer && (
         <ServerDetailPanel
           server={selectedServer}
           onClose={() => {
@@ -158,6 +342,8 @@ export function MCPManager() {
             setSelectedServer(null)
           }}
           onToggle={(enable) => handleToggle(selectedServer.name, enable)}
+          onReload={handleReload}
+          isReloading={refreshing}
         />
       )}
     </div>
@@ -248,9 +434,11 @@ interface ServerDetailPanelProps {
   server: MCPServer
   onClose: () => void
   onToggle: (enable: boolean) => void
+  onReload: () => void
+  isReloading: boolean
 }
 
-function ServerDetailPanel({ server, onClose, onToggle }: ServerDetailPanelProps) {
+function ServerDetailPanel({ server, onClose, onToggle, onReload, isReloading }: ServerDetailPanelProps) {
   const [copied, setCopied] = useState(false)
 
   const copyCommand = () => {
@@ -304,9 +492,9 @@ function ServerDetailPanel({ server, onClose, onToggle }: ServerDetailPanelProps
               </>
             )}
           </button>
-          <button className="btn btn-sm btn-secondary">
-            <RefreshCw className="w-4 h-4" />
-            Restart
+          <button onClick={onReload} disabled={isReloading} className="btn btn-sm btn-secondary">
+            <RefreshCw className={cn('w-4 h-4', isReloading && 'animate-spin')} />
+            Reload
           </button>
         </div>
 

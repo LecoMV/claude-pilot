@@ -217,6 +217,7 @@ export interface SessionStats {
   outputTokens: number
   cachedTokens: number
   estimatedCost?: number
+  serviceTier?: 'standard' | 'scale' | 'pro' | string  // API tier from Anthropic
 }
 
 export interface SessionMessage {
@@ -256,6 +257,18 @@ export interface ClaudeRule {
   path: string
   enabled: boolean
   content?: string
+}
+
+// Custom Claude Code Profile (for different work contexts like claude-eng, claude-sec)
+export interface ClaudeCodeProfile {
+  id: string
+  name: string
+  description?: string
+  settings: ProfileSettings
+  claudeMd?: string
+  enabledRules?: string[]
+  createdAt: number
+  updatedAt: number
 }
 
 // Logs types
@@ -390,6 +403,8 @@ export type IPCChannels = {
   'mcp:toggle': (name: string, enabled: boolean) => Promise<boolean>
   'mcp:reload': () => Promise<boolean>
   'mcp:getServer': (name: string) => Promise<MCPServer | null>
+  'mcp:getConfig': () => Promise<string>
+  'mcp:saveConfig': (content: string) => Promise<boolean>
 
   // Memory
   'memory:learnings': (query?: string, limit?: number) => Promise<Learning[]>
@@ -417,6 +432,16 @@ export type IPCChannels = {
   'profile:saveClaudemd': (content: string) => Promise<boolean>
   'profile:rules': () => Promise<ClaudeRule[]>
   'profile:toggleRule': (name: string, enabled: boolean) => Promise<boolean>
+  'profile:saveRule': (path: string, content: string) => Promise<boolean>
+
+  // Custom Profiles (claude-eng, claude-sec, etc.)
+  'profiles:list': () => Promise<ClaudeCodeProfile[]>
+  'profiles:get': (id: string) => Promise<ClaudeCodeProfile | null>
+  'profiles:create': (profile: Omit<ClaudeCodeProfile, 'id' | 'createdAt' | 'updatedAt'>) => Promise<ClaudeCodeProfile | null>
+  'profiles:update': (id: string, updates: Partial<ClaudeCodeProfile>) => Promise<boolean>
+  'profiles:delete': (id: string) => Promise<boolean>
+  'profiles:activate': (id: string) => Promise<boolean>
+  'profiles:getActive': () => Promise<string | null>
 
   // Context
   'context:tokenUsage': () => Promise<TokenUsage>
@@ -467,6 +492,19 @@ export type IPCChannels = {
   'sessions:getMessages': (sessionId: string, limit?: number) => Promise<SessionMessage[]>
   'sessions:watch': (enable: boolean) => Promise<boolean>
   'sessions:getActive': () => Promise<ExternalSession[]>
+
+  // System helpers
+  'system:getHomePath': () => Promise<string>
+
+  // Shell operations
+  'shell:openPath': (path: string) => Promise<string>
+  'shell:openExternal': (url: string) => Promise<void>
+
+  // Dialog operations
+  'dialog:openDirectory': () => Promise<string | null>
+
+  // Terminal operations
+  'terminal:openAt': (path: string) => Promise<boolean>
 }
 
 // Window API exposed to renderer
