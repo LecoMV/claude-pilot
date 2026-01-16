@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow, type WebContents, shell, dialog } from 'electron'
 import { execSync, spawn, ChildProcess } from 'child_process'
 import { memgraphService } from '../services/memgraph'
+import { postgresService } from '../services/postgresql'
 import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync, statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -37,32 +38,6 @@ import type {
 
 const HOME = homedir()
 const CLAUDE_DIR = join(HOME, '.claude')
-
-// Database configuration from environment variables
-const DB_CONFIG = {
-  postgresql: {
-    host: process.env.CLAUDE_PG_HOST || 'localhost',
-    port: process.env.CLAUDE_PG_PORT || '5433',
-    user: process.env.CLAUDE_PG_USER || 'deploy',
-    database: process.env.CLAUDE_PG_DATABASE || 'claude_memory',
-    password: process.env.CLAUDE_PG_PASSWORD || '',
-  },
-}
-
-// Helper to build psql command with credentials from environment
-function buildPsqlCommand(sql: string): string {
-  const { host, port, user, database, password } = DB_CONFIG.postgresql
-  const passwordEnv = password ? `PGPASSWORD="${password}" ` : ''
-  return `${passwordEnv}psql -h ${host} -p ${port} -U ${user} -d ${database} -t -A -c '${sql.replace(/'/g, "'\\''")}'`
-}
-
-function buildPsqlCommandWithDelimiter(sql: string, delimiter = '|', recordSeparator?: string): string {
-  const { host, port, user, database, password } = DB_CONFIG.postgresql
-  const passwordEnv = password ? `PGPASSWORD="${password}" ` : ''
-  // Use -R for record separator (row delimiter) to handle multiline content
-  const recordSep = recordSeparator ? ` -R '${recordSeparator}'` : ''
-  return `${passwordEnv}psql -h ${host} -p ${port} -U ${user} -d ${database} -t -A -F '${delimiter}'${recordSep} -c '${sql.replace(/'/g, "'\\''")}'`
-}
 
 // Input sanitization functions to prevent shell injection
 function sanitizeServiceName(name: string): string {
@@ -1138,106 +1113,88 @@ function getMCPServers(): MCPServer[] {
   return servers
 }
 
-// Record separator character for parsing multiline content
-const RECORD_SEPARATOR = '\x1E'
-
 async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
   try {
-    // Sanitize and validate limit to prevent injection
+    // Ensure connection
+    await postgresService.connect()
+
+    // Validate limit
     const safeLimit = Math.min(Math.max(1, Math.floor(Number(limit) || 50)), 1000)
 
-    // Use parameterized query with safe escaping to prevent SQL injection
-    let sql: string
+    interface LearningRow {
+      id: number
+      category: string | null
+      topic: string | null
+      content: string | null
+      created_at: Date | string
+      relevance: number | string
+    }
+
+    let rows: LearningRow[]
 
     if (query && query.trim()) {
-      // Sanitize query: remove null bytes, limit length, escape for shell
-      const sanitizedQuery = query
-        .replace(/\0/g, '') // Remove null bytes
-        .slice(0, 500) // Limit query length
-        .replace(/'/g, "''") // Escape single quotes for SQL
-        .replace(/\\/g, '\\\\') // Escape backslashes
+      // Sanitize query: remove null bytes, limit length
+      const searchQuery = query.replace(/\0/g, '').slice(0, 500)
+      const likePattern = `%${searchQuery}%`
 
       // Enhanced search using PostgreSQL full-text search + pg_trgm fuzzy matching
-      // This provides:
-      // 1. Full-text search with ts_rank for relevance scoring
-      // 2. Trigram similarity for fuzzy/typo-tolerant matching
-      // 3. Combined scoring for best results
-      sql = `
+      // Uses parameterized queries for security
+      rows = await postgresService.query<LearningRow>(
+        `
         WITH search_results AS (
           SELECT
             id, category, topic, content, created_at,
             -- Full-text search score (higher weight for exact phrase matches)
             COALESCE(ts_rank_cd(
               to_tsvector('english', COALESCE(content, '') || ' ' || COALESCE(topic, '') || ' ' || COALESCE(category, '')),
-              plainto_tsquery('english', $$${sanitizedQuery}$$)
+              plainto_tsquery('english', $1)
             ), 0) AS fts_score,
             -- Trigram similarity score for fuzzy matching
             GREATEST(
-              COALESCE(similarity(content, $$${sanitizedQuery}$$), 0),
-              COALESCE(similarity(topic, $$${sanitizedQuery}$$), 0),
-              COALESCE(similarity(category, $$${sanitizedQuery}$$), 0)
+              COALESCE(similarity(content, $1), 0),
+              COALESCE(similarity(topic, $1), 0),
+              COALESCE(similarity(category, $1), 0)
             ) AS trgm_score
           FROM learnings
           WHERE
             -- Full-text search match
             to_tsvector('english', COALESCE(content, '') || ' ' || COALESCE(topic, '') || ' ' || COALESCE(category, ''))
-              @@ plainto_tsquery('english', $$${sanitizedQuery}$$)
-            -- OR trigram similarity match (fuzzy matching with 0.1 threshold for typo tolerance)
-            OR content % $$${sanitizedQuery}$$
-            OR topic % $$${sanitizedQuery}$$
-            OR category % $$${sanitizedQuery}$$
+              @@ plainto_tsquery('english', $1)
+            -- OR trigram similarity match (fuzzy matching)
+            OR content % $1
+            OR topic % $1
+            OR category % $1
             -- OR fallback to ILIKE for substring matches
-            OR content ILIKE $$%${sanitizedQuery}%$$
-            OR topic ILIKE $$%${sanitizedQuery}%$$
-            OR category ILIKE $$%${sanitizedQuery}%$$
+            OR content ILIKE $2
+            OR topic ILIKE $2
+            OR category ILIKE $2
         )
         SELECT id, category, topic, content, created_at,
                ROUND((COALESCE(fts_score * 0.4, 0) + COALESCE(trgm_score * 0.6, 0))::numeric, 3) AS relevance
         FROM search_results
         ORDER BY relevance DESC, created_at DESC
-        LIMIT ${safeLimit}
-      `
+        LIMIT $3
+        `,
+        [searchQuery, likePattern, safeLimit]
+      )
     } else {
-      sql = `SELECT id, category, topic, content, created_at, 1.0 AS relevance FROM learnings ORDER BY created_at DESC LIMIT ${safeLimit}`
+      rows = await postgresService.query<LearningRow>(
+        `SELECT id, category, topic, content, created_at, 1.0 AS relevance
+         FROM learnings ORDER BY created_at DESC LIMIT $1`,
+        [safeLimit]
+      )
     }
 
-    // Execute query using database configuration
-    // Use record separator to handle multiline content in fields
-    const result = execSync(
-      buildPsqlCommandWithDelimiter(sql, '|', RECORD_SEPARATOR),
-      { encoding: 'utf-8', timeout: 10000 } // Increased timeout for complex query
-    )
-
-    if (!result.trim()) return []
-
-    // Split by record separator instead of newline to handle multiline content
-    return result
-      .trim()
-      .split(RECORD_SEPARATOR)
-      .filter((record) => record.trim())
-      .map((record) => {
-        // Split by field separator - content can contain pipes, so we need to be careful
-        // The format is: id|category|topic|content|created_at|relevance
-        // Since content can contain |, we split from both ends
-        const parts = record.split('|')
-        const id = parts[0]
-        const category = parts[1]
-        const topic = parts[2]
-        const relevance = parts[parts.length - 1]
-        const created_at = parts[parts.length - 2]
-        // Content is everything between topic and created_at
-        const content = parts.slice(3, parts.length - 2).join('|')
-
-        return {
-          id: parseInt(id, 10),
-          category: category || 'general',
-          content: content || '',
-          confidence: parseFloat(relevance) || 1, // Use relevance score as confidence
-          createdAt: created_at || new Date().toISOString(),
-          source: topic || undefined,
-        }
-      })
-      .filter((learning) => !isNaN(learning.id)) // Filter out invalid records
+    return rows.map((row) => ({
+      id: row.id,
+      category: row.category || 'general',
+      content: row.content || '',
+      confidence: typeof row.relevance === 'string' ? parseFloat(row.relevance) : row.relevance || 1,
+      createdAt: row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : String(row.created_at),
+      source: row.topic || undefined,
+    }))
   } catch (error) {
     console.error('Failed to query learnings:', error)
     // Fallback to simple ILIKE query if advanced search fails (pg_trgm might not be installed)
@@ -1248,50 +1205,49 @@ async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
 // Fallback simple search without pg_trgm (in case extension is not installed)
 async function queryLearningsSimple(query?: string, limit = 50): Promise<Learning[]> {
   try {
+    // Ensure connection
+    await postgresService.connect()
+
     const safeLimit = Math.min(Math.max(1, Math.floor(Number(limit) || 50)), 1000)
-    let sql: string
 
-    if (query && query.trim()) {
-      const sanitizedQuery = query
-        .replace(/\0/g, '')
-        .slice(0, 500)
-        .replace(/'/g, "''")
-        .replace(/\\/g, '\\\\')
-
-      sql = `SELECT id, category, topic, content, created_at FROM learnings WHERE content ILIKE $$%${sanitizedQuery}%$$ OR topic ILIKE $$%${sanitizedQuery}%$$ OR category ILIKE $$%${sanitizedQuery}%$$ ORDER BY created_at DESC LIMIT ${safeLimit}`
-    } else {
-      sql = `SELECT id, category, topic, content, created_at FROM learnings ORDER BY created_at DESC LIMIT ${safeLimit}`
+    interface LearningRow {
+      id: number
+      category: string | null
+      topic: string | null
+      content: string | null
+      created_at: Date | string
     }
 
-    const result = execSync(
-      buildPsqlCommandWithDelimiter(sql, '|', RECORD_SEPARATOR),
-      { encoding: 'utf-8', timeout: 5000 }
-    )
+    let rows: LearningRow[]
 
-    if (!result.trim()) return []
+    if (query && query.trim()) {
+      const searchQuery = query.replace(/\0/g, '').slice(0, 500)
+      const likePattern = `%${searchQuery}%`
 
-    return result
-      .trim()
-      .split(RECORD_SEPARATOR)
-      .filter((record) => record.trim())
-      .map((record) => {
-        const parts = record.split('|')
-        const id = parts[0]
-        const category = parts[1]
-        const topic = parts[2]
-        const created_at = parts[parts.length - 1]
-        const content = parts.slice(3, parts.length - 1).join('|')
+      rows = await postgresService.query<LearningRow>(
+        `SELECT id, category, topic, content, created_at FROM learnings
+         WHERE content ILIKE $1 OR topic ILIKE $1 OR category ILIKE $1
+         ORDER BY created_at DESC LIMIT $2`,
+        [likePattern, safeLimit]
+      )
+    } else {
+      rows = await postgresService.query<LearningRow>(
+        `SELECT id, category, topic, content, created_at FROM learnings
+         ORDER BY created_at DESC LIMIT $1`,
+        [safeLimit]
+      )
+    }
 
-        return {
-          id: parseInt(id, 10),
-          category: category || 'general',
-          content: content || '',
-          confidence: 1,
-          createdAt: created_at || new Date().toISOString(),
-          source: topic || undefined,
-        }
-      })
-      .filter((learning) => !isNaN(learning.id))
+    return rows.map((row) => ({
+      id: row.id,
+      category: row.category || 'general',
+      content: row.content || '',
+      confidence: 1,
+      createdAt: row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : String(row.created_at),
+      source: row.topic || undefined,
+    }))
   } catch (error) {
     console.error('Failed to query learnings (simple):', error)
     return []
@@ -1309,13 +1265,11 @@ async function getMemoryStats(): Promise<{
     qdrant: { vectors: 0 },
   }
 
-  // PostgreSQL count
+  // PostgreSQL count - native driver
   try {
-    const pgResult = execSync(
-      buildPsqlCommand('SELECT COUNT(*) FROM learnings'),
-      { encoding: 'utf-8', timeout: 3000 }
-    )
-    stats.postgresql.count = parseInt(pgResult.trim(), 10) || 0
+    await postgresService.connect()
+    const count = await postgresService.queryScalar<number>('SELECT COUNT(*) FROM learnings')
+    stats.postgresql.count = count ?? 0
   } catch {
     // Ignore
   }
@@ -1911,24 +1865,12 @@ async function executeRawQuery(
   try {
     switch (source) {
       case 'postgresql': {
-        // Validate SQL query doesn't contain dangerous operations
-        const upperQuery = query.toUpperCase().trim()
-        if (upperQuery.includes('DROP ') || upperQuery.includes('TRUNCATE ') || upperQuery.includes('DELETE FROM ') && !upperQuery.includes('WHERE')) {
-          return {
-            success: false,
-            data: null,
-            error: 'Dangerous operation detected. DROP, TRUNCATE, and DELETE without WHERE are not allowed.',
-            executionTime: Date.now() - startTime,
-          }
-        }
-
-        const cmdResult = execSync(
-          buildPsqlCommandWithDelimiter(query),
-          { encoding: 'utf-8', timeout: 30000, shell: '/bin/bash' }
-        )
+        // Native pg driver - queryRaw handles dangerous operation validation
+        await postgresService.connect()
+        const result = await postgresService.queryRaw(query)
         return {
           success: true,
-          data: cmdResult.trim(),
+          data: { rows: result.rows, rowCount: result.rowCount, fields: result.fields },
           executionTime: Date.now() - startTime,
         }
       }
