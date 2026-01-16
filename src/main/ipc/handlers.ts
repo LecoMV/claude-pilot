@@ -441,6 +441,13 @@ export function registerIpcHandlers(): void {
     return getActiveProfileId()
   })
 
+  ipcMain.handle(
+    'profiles:launch',
+    async (_event, id: string, projectPath?: string): Promise<{ success: boolean; error?: string }> => {
+      return launchProfile(id, projectPath)
+    }
+  )
+
   // Context handlers
   ipcMain.handle('context:tokenUsage', async (): Promise<TokenUsage> => {
     return getTokenUsage()
@@ -1874,6 +1881,133 @@ function getActiveProfileId(): string | null {
     return readFileSync(ACTIVE_PROFILE_FILE, 'utf-8').trim()
   } catch {
     return null
+  }
+}
+
+function launchProfile(
+  id: string,
+  projectPath?: string
+): { success: boolean; error?: string } {
+  const profile = getProfile(id)
+  if (!profile) {
+    return { success: false, error: 'Profile not found' }
+  }
+
+  try {
+    // Check for launcher script at ~/bin/claude-{profileName}
+    const binDir = join(homedir(), 'bin')
+    const launcherScript = join(binDir, `claude-${id}`)
+    const hasLauncher = existsSync(launcherScript)
+
+    let command: string
+
+    if (hasLauncher) {
+      // Use the custom launcher script
+      command = launcherScript
+      if (projectPath) {
+        command += ` "${projectPath}"`
+      }
+    } else if (profile.profilePath && profile.hasMcpConfig) {
+      // Build command from profile directory structure
+      const mcpConfig = join(profile.profilePath, 'mcp.json')
+      const settingsJson = join(profile.profilePath, 'settings.json')
+      const claudeMd = join(profile.profilePath, 'CLAUDE.md')
+
+      const args: string[] = ['claude']
+
+      // Add MCP config if exists
+      if (existsSync(mcpConfig)) {
+        args.push(`--mcp-config "${mcpConfig}"`)
+      }
+
+      // Add settings if exists
+      if (existsSync(settingsJson)) {
+        args.push(`--settings "${settingsJson}"`)
+      }
+
+      // Add CLAUDE.md as system prompt if exists
+      if (existsSync(claudeMd)) {
+        args.push(`--append-system-prompt "${claudeMd}"`)
+      }
+
+      // Add model if specified
+      if (profile.settings.model) {
+        args.push(`--model ${profile.settings.model}`)
+      }
+
+      // Add project path if provided
+      if (projectPath) {
+        args.push(`"${projectPath}"`)
+      }
+
+      command = args.join(' ')
+    } else {
+      // Fallback: just run claude with model
+      const args: string[] = ['claude']
+      if (profile.settings.model) {
+        args.push(`--model ${profile.settings.model}`)
+      }
+      if (projectPath) {
+        args.push(`"${projectPath}"`)
+      }
+      command = args.join(' ')
+    }
+
+    // Open a new terminal with the command
+    // Use x-terminal-emulator on Linux, or fallback to common terminals
+    const terminals = [
+      'x-terminal-emulator',
+      'gnome-terminal',
+      'konsole',
+      'xfce4-terminal',
+      'alacritty',
+      'kitty',
+      'terminator',
+      'xterm',
+    ]
+
+    let terminalCmd: string | null = null
+    for (const term of terminals) {
+      try {
+        execSync(`which ${term}`, { stdio: 'ignore' })
+        terminalCmd = term
+        break
+      } catch {
+        // Terminal not found, try next
+      }
+    }
+
+    if (!terminalCmd) {
+      return { success: false, error: 'No terminal emulator found' }
+    }
+
+    // Build the terminal command
+    let fullCommand: string
+    if (terminalCmd === 'gnome-terminal' || terminalCmd === 'x-terminal-emulator') {
+      fullCommand = `${terminalCmd} -- bash -c '${command}; exec bash'`
+    } else if (terminalCmd === 'konsole') {
+      fullCommand = `${terminalCmd} -e bash -c '${command}; exec bash'`
+    } else if (terminalCmd === 'alacritty' || terminalCmd === 'kitty') {
+      fullCommand = `${terminalCmd} -e bash -c '${command}; exec bash'`
+    } else {
+      fullCommand = `${terminalCmd} -e bash -c '${command}; exec bash'`
+    }
+
+    // Spawn the terminal in the background
+    const child = spawn('bash', ['-c', fullCommand], {
+      detached: true,
+      stdio: 'ignore',
+      cwd: projectPath || homedir(),
+    })
+    child.unref()
+
+    return { success: true }
+  } catch (error) {
+    console.error('Failed to launch profile:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to launch profile',
+    }
   }
 }
 

@@ -474,6 +474,7 @@ export type IPCChannels = {
   'profiles:delete': (id: string) => Promise<boolean>
   'profiles:activate': (id: string) => Promise<boolean>
   'profiles:getActive': () => Promise<string | null>
+  'profiles:launch': (id: string, projectPath?: string) => Promise<{ success: boolean; error?: string }>
 
   // Context
   'context:tokenUsage': () => Promise<TokenUsage>

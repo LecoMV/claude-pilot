@@ -16,6 +16,8 @@ import {
   Shield,
   Code,
   Brain,
+  Terminal,
+  ExternalLink,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useProfileStore } from '@/stores/profile'
@@ -221,6 +223,29 @@ function CustomProfilesPanel({
       onActiveChange(id)
     } catch (error) {
       console.error('Failed to activate profile:', error)
+    }
+  }
+
+  const [launching, setLaunching] = useState<string | null>(null)
+  const [launchError, setLaunchError] = useState<string | null>(null)
+
+  const handleLaunch = async (id: string) => {
+    setLaunching(id)
+    setLaunchError(null)
+    try {
+      const result = await window.electron.invoke('profiles:launch', id)
+      if (!result.success) {
+        setLaunchError(result.error || 'Failed to launch profile')
+      }
+    } catch (error) {
+      console.error('Failed to launch profile:', error)
+      setLaunchError('Failed to launch profile')
+    } finally {
+      setLaunching(null)
+      // Clear error after 5 seconds
+      if (launchError) {
+        setTimeout(() => setLaunchError(null), 5000)
+      }
     }
   }
 
@@ -463,11 +488,24 @@ function CustomProfilesPanel({
                         </div>
                       </button>
                       <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleLaunch(profile.id)}
+                          disabled={launching === profile.id}
+                          className="btn btn-primary btn-sm"
+                          title="Launch Claude Code with this profile"
+                        >
+                          {launching === profile.id ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Terminal className="w-4 h-4" />
+                          )}
+                          Launch
+                        </button>
                         {!isActive && (
                           <button
                             onClick={() => handleActivate(profile.id)}
                             className="btn btn-secondary btn-sm"
-                            title="Activate profile"
+                            title="Activate profile (apply settings)"
                           >
                             <Play className="w-4 h-4" />
                             Activate
