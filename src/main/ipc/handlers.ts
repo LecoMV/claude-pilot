@@ -1,5 +1,6 @@
 import { ipcMain, BrowserWindow, type WebContents, shell, dialog } from 'electron'
 import { execSync, spawn, ChildProcess } from 'child_process'
+import { memgraphService } from '../services/memgraph'
 import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -940,27 +941,12 @@ async function getMemoryStats(): Promise<{
     // Ignore
   }
 
-  // Memgraph counts - pipe query through podman exec
-  // Output format: +-----+\n| count(n) |\n+-----+\n| 12345 |\n+-----+
+  // Memgraph counts - direct Bolt connection
   try {
-    const nodeResult = execSync(
-      'echo "MATCH (n) RETURN count(n);" | /usr/bin/podman exec -i memgraph mgconsole',
-      { encoding: 'utf-8', timeout: 5000, shell: '/bin/bash' }
-    )
-    // Parse tabular output - find the number in the data row
-    const rows = parseMgconsoleOutput(nodeResult)
-    if (rows.length > 0 && rows[0]['count(n)'] !== undefined) {
-      stats.memgraph.nodes = Number(rows[0]['count(n)']) || 0
-    }
-
-    const edgeResult = execSync(
-      'echo "MATCH ()-[r]->() RETURN count(r);" | /usr/bin/podman exec -i memgraph mgconsole',
-      { encoding: 'utf-8', timeout: 5000, shell: '/bin/bash' }
-    )
-    const edgeRows = parseMgconsoleOutput(edgeResult)
-    if (edgeRows.length > 0 && edgeRows[0]['count(r)'] !== undefined) {
-      stats.memgraph.edges = Number(edgeRows[0]['count(r)']) || 0
-    }
+    await memgraphService.connect()
+    const memgraphStats = await memgraphService.getStats()
+    stats.memgraph.nodes = memgraphStats.nodes
+    stats.memgraph.edges = memgraphStats.edges
   } catch (error) {
     console.error('Failed to get Memgraph stats:', error)
   }
@@ -1105,98 +1091,40 @@ async function queryMemgraphGraph(
   nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>
   edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>
 }> {
-  const result = {
-    nodes: [] as Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>,
-    edges: [] as Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>,
-  }
-
   try {
-    // Build Cypher query - if no query provided, get sample of graph
-    let cypherQuery: string
+    await memgraphService.connect()
+
     if (query && query.trim()) {
-      // Use provided Cypher query
-      cypherQuery = query
-    } else {
-      // Default: get sample nodes and their relationships
-      cypherQuery = `
-        MATCH (n)
-        WITH n LIMIT ${limit}
-        OPTIONAL MATCH (n)-[r]->(m)
-        WHERE m IS NOT NULL
-        RETURN
-          id(n) as sourceId, labels(n)[0] as sourceLabel, n as sourceProps,
-          id(m) as targetId, labels(m)[0] as targetLabel, m as targetProps,
-          id(r) as relId, type(r) as relType, r as relProps
-        LIMIT ${limit * 2}
-      `
+      // Execute custom Cypher query
+      const results = await memgraphService.query(query)
+      // For custom queries, try to extract nodes/edges from results
+      const nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }> = []
+      const edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }> = []
+
+      for (const row of results) {
+        // Look for node-like objects in results
+        for (const value of Object.values(row)) {
+          if (value && typeof value === 'object' && 'id' in value && 'labels' in value) {
+            const node = value as { id: number; labels: string[]; properties: Record<string, unknown> }
+            nodes.push({
+              id: String(node.id),
+              label: (node.properties.name || node.properties.title || `Node ${node.id}`) as string,
+              type: node.labels[0] || 'Unknown',
+              properties: node.properties,
+            })
+          }
+        }
+      }
+
+      return { nodes, edges }
     }
 
-    // Execute query via mgconsole - use spawnSync for better control
-    const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ')
-    const cmdResult = execSync(
-      `echo "${escapedQuery}" | /usr/bin/podman exec -i memgraph mgconsole`,
-      { encoding: 'utf-8', timeout: 10000, shell: '/bin/bash' }
-    )
-
-    if (!cmdResult.trim()) return result
-
-    // Parse the tabular output
-    const rows = parseMgconsoleOutput(cmdResult)
-    const seenNodes = new Set<string>()
-    const seenEdges = new Set<string>()
-
-    for (const row of rows) {
-      // Add source node
-      if (row.sourceId !== undefined && row.sourceId !== null) {
-        const nodeId = String(row.sourceId)
-        if (!seenNodes.has(nodeId)) {
-          seenNodes.add(nodeId)
-          // Parse properties from Cypher node format if present
-          const props = parseCypherNodeProps(row.sourceProps)
-          result.nodes.push({
-            id: nodeId,
-            label: props.name || props.title || String(row.sourceLabel) || nodeId,
-            type: String(row.sourceLabel) || 'Unknown',
-            properties: props,
-          })
-        }
-      }
-
-      // Add target node
-      if (row.targetId !== undefined && row.targetId !== null) {
-        const nodeId = String(row.targetId)
-        if (!seenNodes.has(nodeId)) {
-          seenNodes.add(nodeId)
-          const props = parseCypherNodeProps(row.targetProps)
-          result.nodes.push({
-            id: nodeId,
-            label: props.name || props.title || String(row.targetLabel) || nodeId,
-            type: String(row.targetLabel) || 'Unknown',
-            properties: props,
-          })
-        }
-      }
-
-      // Add edge
-      if (row.relId !== undefined && row.relId !== null && row.sourceId !== undefined && row.targetId !== undefined) {
-        const edgeId = String(row.relId)
-        if (!seenEdges.has(edgeId)) {
-          seenEdges.add(edgeId)
-          result.edges.push({
-            id: edgeId,
-            source: String(row.sourceId),
-            target: String(row.targetId),
-            type: String(row.relType) || 'RELATED',
-            properties: parseCypherNodeProps(row.relProps),
-          })
-        }
-      }
-    }
+    // Default: get sample graph
+    return await memgraphService.getSampleGraph(limit)
   } catch (error) {
     console.error('Failed to query Memgraph:', error)
+    return { nodes: [], edges: [] }
   }
-
-  return result
 }
 
 // Qdrant browsing function
@@ -1300,79 +1228,45 @@ async function searchQdrantMemories(
 }
 
 // Memgraph keyword search function
-function searchMemgraphNodes(
+async function searchMemgraphNodes(
   keyword: string,
   nodeType: string | undefined,
   limit: number
-): {
+): Promise<{
   results: Array<{ id: string; label: string; type: string; properties: Record<string, unknown>; score?: number }>
-} {
-  const result = {
-    results: [] as Array<{ id: string; label: string; type: string; properties: Record<string, unknown>; score?: number }>,
-  }
-
+}> {
   try {
-    // Build Cypher query for keyword search
-    const sanitizedKeyword = keyword.replace(/['"\\]/g, '')
-    let cypherQuery: string
-
-    if (nodeType && nodeType !== 'all') {
-      cypherQuery = `
-        MATCH (n:${nodeType})
-        WHERE n.name CONTAINS '${sanitizedKeyword}'
-           OR n.title CONTAINS '${sanitizedKeyword}'
-           OR n.description CONTAINS '${sanitizedKeyword}'
-        RETURN id(n) as id, labels(n)[0] as label, n as props
-        LIMIT ${limit}
-      `
-    } else {
-      cypherQuery = `
-        MATCH (n)
-        WHERE n.name CONTAINS '${sanitizedKeyword}'
-           OR n.title CONTAINS '${sanitizedKeyword}'
-           OR n.description CONTAINS '${sanitizedKeyword}'
-        RETURN id(n) as id, labels(n)[0] as label, n as props
-        LIMIT ${limit}
-      `
-    }
-
-    const escapedQuery = cypherQuery.replace(/"/g, '\\"').replace(/\n/g, ' ')
-    const cmdResult = execSync(
-      `echo "${escapedQuery}" | /usr/bin/podman exec -i memgraph mgconsole`,
-      { encoding: 'utf-8', timeout: 10000, shell: '/bin/bash' }
+    await memgraphService.connect()
+    const searchResults = await memgraphService.searchNodes(
+      keyword,
+      nodeType === 'all' ? undefined : nodeType,
+      limit
     )
 
-    if (cmdResult.trim()) {
-      const rows = parseMgconsoleOutput(cmdResult)
-      for (const row of rows) {
-        if (row.id !== undefined) {
-          const props = parseCypherNodeProps(row.props)
-          result.results.push({
-            id: String(row.id),
-            label: props.name || props.title || String(row.label) || String(row.id),
-            type: String(row.label) || 'Unknown',
-            properties: props,
-          })
-        }
-      }
+    return {
+      results: searchResults.map(r => ({
+        id: String(r.id),
+        label: r.label,
+        type: r.type,
+        properties: r.properties,
+      })),
     }
   } catch (error) {
     console.error('Failed to search Memgraph:', error)
+    return { results: [] }
   }
-
-  return result
 }
 
 // Raw query execution function
-function executeRawQuery(
+async function executeRawQuery(
   source: 'postgresql' | 'memgraph' | 'qdrant',
   query: string
-): {
+): Promise<{
   success: boolean
   data: unknown
   error?: string
   executionTime: number
-} {
+}> {
   const startTime = Date.now()
 
   try {
@@ -1391,16 +1285,12 @@ function executeRawQuery(
       }
 
       case 'memgraph': {
-        const escapedQuery = query.replace(/"/g, '\\"').replace(/\n/g, ' ')
-        const cmdResult = execSync(
-          `echo "${escapedQuery}" | /usr/bin/podman exec -i memgraph mgconsole`,
-          { encoding: 'utf-8', timeout: 30000, shell: '/bin/bash' }
-        )
-        // Parse tabular output into structured data
-        const parsed = parseMgconsoleOutput(cmdResult)
+        // Use direct Bolt connection instead of podman exec
+        await memgraphService.connect()
+        const results = await memgraphService.query(query)
         return {
           success: true,
-          data: parsed.length === 0 ? cmdResult.trim() : parsed,
+          data: results,
           executionTime: Date.now() - startTime,
         }
       }
