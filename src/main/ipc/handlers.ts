@@ -3,6 +3,7 @@ import { execSync, spawn, ChildProcess } from 'child_process'
 import { memgraphService } from '../services/memgraph'
 import { postgresService } from '../services/postgresql'
 import { credentialService } from '../services/credentials'
+import { transcriptService, type ParseOptions, type TranscriptStats } from '../services/transcript'
 import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync, statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -3916,4 +3917,60 @@ ipcMain.handle('sessions:watch', async (_event, enable: boolean) => {
 
 ipcMain.handle('sessions:getActive', async () => {
   return getActiveSessions()
+})
+
+// Transcript handlers - streaming transcript parser
+ipcMain.handle('transcript:parse', async (
+  _event,
+  filePath: string,
+  options?: ParseOptions
+) => {
+  try {
+    return await transcriptService.parseAll(filePath, options)
+  } catch (error) {
+    console.error('Failed to parse transcript:', error)
+    return []
+  }
+})
+
+ipcMain.handle('transcript:stats', async (
+  _event,
+  filePath: string
+): Promise<TranscriptStats> => {
+  try {
+    return await transcriptService.getStats(filePath)
+  } catch (error) {
+    console.error('Failed to get transcript stats:', error)
+    return {
+      totalMessages: 0,
+      userMessages: 0,
+      assistantMessages: 0,
+      toolCalls: 0,
+      fileSize: 0,
+      parseTime: 0,
+    }
+  }
+})
+
+ipcMain.handle('transcript:last', async (
+  _event,
+  filePath: string,
+  count: number
+) => {
+  try {
+    return await transcriptService.getLastMessages(filePath, count)
+  } catch (error) {
+    console.error('Failed to get last messages:', error)
+    return []
+  }
+})
+
+ipcMain.handle('transcript:watch', async (_event, filePath: string, enable: boolean) => {
+  if (enable) {
+    transcriptService.watchTranscript(filePath)
+    return true
+  } else {
+    transcriptService.unwatchTranscript(filePath)
+    return true
+  }
 })
