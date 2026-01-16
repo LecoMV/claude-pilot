@@ -260,6 +260,8 @@ export interface ClaudeRule {
 }
 
 // Custom Claude Code Profile (for different work contexts like claude-eng, claude-sec)
+// Profiles are stored as directories in ~/.claude-profiles/
+// Each profile directory contains: mcp.json, settings.json, CLAUDE.md, .env
 export interface ClaudeCodeProfile {
   id: string
   name: string
@@ -267,6 +269,8 @@ export interface ClaudeCodeProfile {
   settings: ProfileSettings
   claudeMd?: string
   enabledRules?: string[]
+  hasMcpConfig?: boolean  // Whether profile has mcp.json
+  profilePath?: string    // Full path to profile directory
   createdAt: number
   updatedAt: number
 }

@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, type WebContents, shell, dialog } from 'electron'
 import { execSync, spawn, ChildProcess } from 'child_process'
 import { memgraphService } from '../services/memgraph'
-import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync, statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import type {
@@ -369,7 +369,10 @@ export function registerIpcHandlers(): void {
 
   // Profile handlers
   ipcMain.handle('profile:settings', async () => {
-    return getProfileSettings()
+    console.log('[IPC] profile:settings called')
+    const result = getProfileSettings()
+    console.log('[IPC] profile:settings returned:', JSON.stringify(result).slice(0, 100))
+    return result
   })
 
   ipcMain.handle('profile:saveSettings', async (_event, settings: ProfileSettings) => {
@@ -377,7 +380,10 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('profile:claudemd', async () => {
-    return getClaudeMd()
+    console.log('[IPC] profile:claudemd called')
+    const result = getClaudeMd()
+    console.log('[IPC] profile:claudemd returned:', result.length, 'chars')
+    return result
   })
 
   ipcMain.handle('profile:saveClaudemd', async (_event, content: string) => {
@@ -385,7 +391,10 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('profile:rules', async () => {
-    return getRules()
+    console.log('[IPC] profile:rules called')
+    const result = getRules()
+    console.log('[IPC] profile:rules returned:', result.length, 'rules')
+    return result
   })
 
   ipcMain.handle('profile:toggleRule', async (_event, name: string, enabled: boolean) => {
@@ -1529,7 +1538,9 @@ function toggleRule(name: string, enabled: boolean): boolean {
 }
 
 // Custom Profiles functions (claude-eng, claude-sec, etc.)
-const PROFILES_DIR = join(CLAUDE_DIR, 'profiles')
+// Profiles are stored as directories in ~/.claude-profiles/
+// Each profile directory contains: mcp.json, settings.json, CLAUDE.md, .env
+const PROFILES_DIR = join(homedir(), '.claude-profiles')
 const ACTIVE_PROFILE_FILE = join(CLAUDE_DIR, 'active-profile')
 
 function ensureProfilesDir(): void {
@@ -1539,33 +1550,119 @@ function ensureProfilesDir(): void {
 }
 
 function listProfiles(): ClaudeCodeProfile[] {
-  ensureProfilesDir()
+  console.log('[Profiles] Looking for profiles in:', PROFILES_DIR)
   const profiles: ClaudeCodeProfile[] = []
 
   try {
-    const files = readdirSync(PROFILES_DIR).filter((f) => f.endsWith('.json'))
-    for (const file of files) {
+    if (!existsSync(PROFILES_DIR)) {
+      console.log('[Profiles] Directory does not exist')
+      return profiles
+    }
+
+    // Get all directories in the profiles folder
+    const entries = readdirSync(PROFILES_DIR, { withFileTypes: true })
+    const profileDirs = entries.filter((e) => e.isDirectory())
+    console.log('[Profiles] Found directories:', profileDirs.map((d) => d.name))
+
+    for (const dir of profileDirs) {
+      const profilePath = join(PROFILES_DIR, dir.name)
       try {
-        const content = readFileSync(join(PROFILES_DIR, file), 'utf-8')
-        const profile = JSON.parse(content) as ClaudeCodeProfile
+        // Read profile components
+        const settingsPath = join(profilePath, 'settings.json')
+        const mcpPath = join(profilePath, 'mcp.json')
+        const claudeMdPath = join(profilePath, 'CLAUDE.md')
+
+        // Parse settings if exists
+        let settings: ClaudeCodeProfile['settings'] = {}
+        if (existsSync(settingsPath)) {
+          const settingsContent = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+          settings = {
+            model: settingsContent.model,
+            maxTokens: settingsContent.max_tokens,
+            thinkingEnabled: settingsContent.thinking?.type === 'enabled',
+            thinkingBudget: settingsContent.thinking?.budget_tokens,
+          }
+        }
+
+        // Read CLAUDE.md if exists
+        let claudeMd: string | undefined
+        if (existsSync(claudeMdPath)) {
+          claudeMd = readFileSync(claudeMdPath, 'utf-8')
+        }
+
+        // Check if mcp.json exists (for validation)
+        const hasMcp = existsSync(mcpPath)
+
+        // Get directory stats for timestamps
+        const stats = statSync(profilePath)
+
+        const profile: ClaudeCodeProfile = {
+          id: dir.name,
+          name: dir.name,
+          description: `Profile at ${profilePath}`,
+          settings,
+          claudeMd,
+          hasMcpConfig: hasMcp,
+          profilePath,
+          createdAt: stats.birthtime.getTime(),
+          updatedAt: stats.mtime.getTime(),
+        }
+
         profiles.push(profile)
-      } catch {
-        // Skip invalid profile files
+        console.log('[Profiles] Loaded profile:', dir.name)
+      } catch (err) {
+        console.error(`[Profiles] Failed to load profile ${dir.name}:`, err)
       }
     }
   } catch (error) {
-    console.error('Failed to list profiles:', error)
+    console.error('[Profiles] Failed to list profiles:', error)
   }
 
   return profiles.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function getProfile(id: string): ClaudeCodeProfile | null {
-  const profilePath = join(PROFILES_DIR, `${id}.json`)
+  // Profile is a directory, not a JSON file
+  const profilePath = join(PROFILES_DIR, id)
   try {
     if (!existsSync(profilePath)) return null
-    const content = readFileSync(profilePath, 'utf-8')
-    return JSON.parse(content) as ClaudeCodeProfile
+
+    const settingsPath = join(profilePath, 'settings.json')
+    const mcpPath = join(profilePath, 'mcp.json')
+    const claudeMdPath = join(profilePath, 'CLAUDE.md')
+
+    // Parse settings if exists
+    let settings: ClaudeCodeProfile['settings'] = {}
+    if (existsSync(settingsPath)) {
+      const settingsContent = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+      settings = {
+        model: settingsContent.model,
+        maxTokens: settingsContent.max_tokens,
+        thinkingEnabled: settingsContent.thinking?.type === 'enabled',
+        thinkingBudget: settingsContent.thinking?.budget_tokens,
+      }
+    }
+
+    // Read CLAUDE.md if exists
+    let claudeMd: string | undefined
+    if (existsSync(claudeMdPath)) {
+      claudeMd = readFileSync(claudeMdPath, 'utf-8')
+    }
+
+    const hasMcp = existsSync(mcpPath)
+    const stats = statSync(profilePath)
+
+    return {
+      id,
+      name: id,
+      description: `Profile at ${profilePath}`,
+      settings,
+      claudeMd,
+      hasMcpConfig: hasMcp,
+      profilePath,
+      createdAt: stats.birthtime.getTime(),
+      updatedAt: stats.mtime.getTime(),
+    }
   } catch (error) {
     console.error('Failed to get profile:', error)
     return null

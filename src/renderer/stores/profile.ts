@@ -61,7 +61,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
   activeProfile: null,
   rules: [],
   globalSettings: null,
-  loading: true,
+  loading: false,  // Changed to false - loadData will set true when needed
   rulesLoading: false,
   selectedProfileId: null,
   showDetail: false,
