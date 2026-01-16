@@ -1,6 +1,119 @@
 // Shared type definitions between main and renderer processes
 
+// ============================================================================
+// MODEL CAPABILITIES - All Claude Code models with their capabilities
+// ============================================================================
+
+export interface ModelCapabilities {
+  id: string
+  name: string
+  maxContextTokens: number
+  supportsExtendedThinking: boolean
+  thinkingBudgetRange: [number, number] | null // [min, max] or null if not supported
+  supportsVision: boolean
+  supportsToolUse: boolean
+  inputPricePerMillion: number
+  outputPricePerMillion: number
+  cachePricePerMillion: number
+  description: string
+  recommended: 'planning' | 'coding' | 'fast' | 'balanced'
+}
+
+export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
+  'claude-opus-4-5-20251101': {
+    id: 'claude-opus-4-5-20251101',
+    name: 'Claude Opus 4.5',
+    maxContextTokens: 200000,
+    supportsExtendedThinking: true,
+    thinkingBudgetRange: [1024, 128000],
+    supportsVision: true,
+    supportsToolUse: true,
+    inputPricePerMillion: 15.00,
+    outputPricePerMillion: 75.00,
+    cachePricePerMillion: 1.875,
+    description: 'Most capable model for complex reasoning and planning',
+    recommended: 'planning',
+  },
+  'claude-sonnet-4-5-20250929': {
+    id: 'claude-sonnet-4-5-20250929',
+    name: 'Claude Sonnet 4.5',
+    maxContextTokens: 200000,
+    supportsExtendedThinking: true,
+    thinkingBudgetRange: [1024, 32000],
+    supportsVision: true,
+    supportsToolUse: true,
+    inputPricePerMillion: 3.00,
+    outputPricePerMillion: 15.00,
+    cachePricePerMillion: 0.375,
+    description: 'Best balance of capability and speed for coding',
+    recommended: 'coding',
+  },
+  'claude-sonnet-4-20250514': {
+    id: 'claude-sonnet-4-20250514',
+    name: 'Claude Sonnet 4',
+    maxContextTokens: 200000,
+    supportsExtendedThinking: true,
+    thinkingBudgetRange: [1024, 32000],
+    supportsVision: true,
+    supportsToolUse: true,
+    inputPricePerMillion: 3.00,
+    outputPricePerMillion: 15.00,
+    cachePricePerMillion: 0.375,
+    description: 'Fast and efficient for everyday tasks',
+    recommended: 'balanced',
+  },
+  'claude-haiku-3-5-20241022': {
+    id: 'claude-haiku-3-5-20241022',
+    name: 'Claude Haiku 3.5',
+    maxContextTokens: 200000,
+    supportsExtendedThinking: false,
+    thinkingBudgetRange: null,
+    supportsVision: true,
+    supportsToolUse: true,
+    inputPricePerMillion: 0.80,
+    outputPricePerMillion: 4.00,
+    cachePricePerMillion: 0.10,
+    description: 'Fastest model for simple tasks and quick responses',
+    recommended: 'fast',
+  },
+}
+
+// Helper to get model by ID or partial match
+export function getModelCapabilities(modelId: string): ModelCapabilities | null {
+  // Direct match
+  if (MODEL_CAPABILITIES[modelId]) {
+    return MODEL_CAPABILITIES[modelId]
+  }
+  // Partial match (e.g., 'opus' matches 'claude-opus-4-5-20251101')
+  const lowerModelId = modelId.toLowerCase()
+  for (const [id, caps] of Object.entries(MODEL_CAPABILITIES)) {
+    if (id.toLowerCase().includes(lowerModelId) || caps.name.toLowerCase().includes(lowerModelId)) {
+      return caps
+    }
+  }
+  return null
+}
+
+// Helper to calculate estimated cost
+export function calculateSessionCost(
+  inputTokens: number,
+  outputTokens: number,
+  cachedTokens: number,
+  modelId: string
+): number {
+  const caps = getModelCapabilities(modelId)
+  if (!caps) return 0
+
+  const inputCost = (inputTokens / 1_000_000) * caps.inputPricePerMillion
+  const outputCost = (outputTokens / 1_000_000) * caps.outputPricePerMillion
+  const cacheCost = (cachedTokens / 1_000_000) * caps.cachePricePerMillion
+
+  return inputCost + outputCost + cacheCost
+}
+
+// ============================================================================
 // System status types
+// ============================================================================
 export interface SystemStatus {
   claude: ServiceStatus
   mcp: MCPStatus
@@ -109,6 +222,8 @@ export interface ProfileSettings {
   maxTokens?: number
   temperature?: number
   customInstructions?: string
+  thinkingEnabled?: boolean
+  thinkingBudget?: number
 }
 
 // Workflow types (Claude Flow)
@@ -218,6 +333,22 @@ export interface ExternalSession {
   version?: string
   gitBranch?: string
   stats: SessionStats
+  // Enhanced session metadata
+  workingDirectory?: string      // cwd from JSONL - where Claude was launched
+  userType?: 'external' | 'api' | 'internal' | string  // How session was initiated
+  isSubagent?: boolean           // Whether this is a subagent/sidechain session
+  // Process info (for active sessions only)
+  processInfo?: SessionProcessInfo
+}
+
+export interface SessionProcessInfo {
+  pid: number                    // Process ID
+  profile: string                // Profile name (default, engineering, security, etc.)
+  terminal: string               // TTY (pts/3) or 'background'
+  launchMode: 'new' | 'resume'   // Whether session was resumed or new
+  permissionMode?: string        // Permission level (bypassPermissions, etc.)
+  wrapper?: string               // Launch wrapper (claude+, claude-eng, etc.)
+  activeMcpServers: string[]     // Running MCP server names
 }
 
 export interface SessionStats {
@@ -256,13 +387,8 @@ export interface SessionEvent {
   data?: Partial<ExternalSession>
 }
 
-// Profile types
-export interface ProfileSettings {
-  model?: string
-  maxTokens?: number
-  thinkingEnabled?: boolean
-  thinkingBudget?: number
-}
+// Note: ProfileSettings is defined above in "Claude profile types" section
+// with all properties including thinkingEnabled and thinkingBudget
 
 export interface ClaudeRule {
   name: string

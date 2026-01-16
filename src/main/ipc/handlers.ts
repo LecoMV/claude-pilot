@@ -32,6 +32,7 @@ import type {
   ExternalSession,
   SessionStats,
   SessionMessage,
+  SessionProcessInfo,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -79,9 +80,24 @@ function sanitizeModelName(model: string): string {
   return model.replace(/[^a-zA-Z0-9._:/-]/g, '')
 }
 
-// Simple cache for expensive operations
+// Simple cache for expensive operations with automatic cleanup
 class DataCache {
   private cache: Map<string, { data: unknown; expiry: number }> = new Map()
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null
+
+  constructor(cleanupIntervalMs = 60000) {
+    // Periodically clean up expired entries to prevent memory leaks
+    this.cleanupInterval = setInterval(() => this.cleanup(), cleanupIntervalMs)
+  }
+
+  private cleanup(): void {
+    const now = Date.now()
+    for (const [key, entry] of this.cache.entries()) {
+      if (now > entry.expiry) {
+        this.cache.delete(key)
+      }
+    }
+  }
 
   get<T>(key: string): T | null {
     const entry = this.cache.get(key)
@@ -95,6 +111,14 @@ class DataCache {
 
   set<T>(key: string, data: T, ttlMs: number): void {
     this.cache.set(key, { data, expiry: Date.now() + ttlMs })
+  }
+
+  destroy(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval)
+      this.cleanupInterval = null
+    }
+    this.cache.clear()
   }
 
   clear(): void {
@@ -3498,7 +3522,19 @@ async function parseSessionFile(filePath: string): Promise<ExternalSession | nul
         } else if (type === 'assistant') {
           stats.assistantMessages++
           stats.messageCount++
+
+          // Count tool_use blocks inside assistant message content
+          const message = entry.message as Record<string, unknown> | undefined
+          const content = message?.content
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block && typeof block === 'object' && (block as Record<string, unknown>).type === 'tool_use') {
+                stats.toolCalls++
+              }
+            }
+          }
         } else if (type === 'tool-result') {
+          // Also count standalone tool-result entries (legacy format)
           stats.toolCalls++
         }
 
@@ -3560,6 +3596,10 @@ async function parseSessionFile(filePath: string): Promise<ExternalSession | nul
       version: firstEntry.version as string | undefined,
       gitBranch: firstEntry.gitBranch as string | undefined,
       stats,
+      // Enhanced metadata from JSONL
+      workingDirectory: firstEntry.cwd as string | undefined,
+      userType: firstEntry.userType as string | undefined,
+      isSubagent: (firstEntry.isSidechain as boolean) || false,
     }
 
     return session
@@ -3698,10 +3738,166 @@ async function getSessionMessages(sessionId: string, limit = 100): Promise<Sessi
   }
 }
 
-// Get active sessions (modified in last 5 minutes)
+// Detect active Claude processes and extract their metadata
+interface ClaudeProcessInfo {
+  pid: number
+  tty: string
+  cwd?: string
+  args: string[]
+  profile: string
+  launchMode: 'new' | 'resume'
+  permissionMode?: string
+  wrapper?: string
+  activeMcpServers: string[]
+}
+
+function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
+  const processes: ClaudeProcessInfo[] = []
+
+  try {
+    // Get detailed process info for claude processes
+    const psOutput = execSync(
+      `ps -eo pid,ppid,tty,args --no-headers 2>/dev/null | grep -E "claude\\s|claude-eng\\s|claude-sec\\s|claude\\+\\s" | grep -v grep`,
+      { encoding: 'utf-8', timeout: 5000 }
+    ).trim()
+
+    if (!psOutput) return processes
+
+    const lines = psOutput.split('\n').filter(l => l.trim())
+
+    for (const line of lines) {
+      const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/)
+      if (!match) continue
+
+      const [, pidStr, , tty, cmdLine] = match
+      const pid = parseInt(pidStr, 10)
+      const args = cmdLine.split(/\s+/)
+
+      // Skip if not a main claude process (filter out wrappers and subprocesses)
+      const mainCmd = args[0]
+      if (!mainCmd.includes('claude') || mainCmd.includes('conmon') || mainCmd.includes('podman')) continue
+
+      // Determine profile from --settings path
+      let profile = 'default'
+      const settingsIdx = args.indexOf('--settings')
+      if (settingsIdx >= 0 && args[settingsIdx + 1]) {
+        const settingsPath = args[settingsIdx + 1]
+        const profileMatch = settingsPath.match(/\.claude-profiles\/([^/]+)\//)
+        if (profileMatch) {
+          profile = profileMatch[1]
+        }
+      }
+
+      // Detect wrapper from command
+      let wrapper: string | undefined
+      if (cmdLine.includes('claude+')) wrapper = 'claude+'
+      else if (cmdLine.includes('claude-eng')) wrapper = 'claude-eng'
+      else if (cmdLine.includes('claude-sec')) wrapper = 'claude-sec'
+
+      // Detect launch mode
+      const launchMode: 'new' | 'resume' = args.includes('--resume') ? 'resume' : 'new'
+
+      // Detect permission mode
+      const permIdx = args.indexOf('--permission-mode')
+      const permissionMode = permIdx >= 0 ? args[permIdx + 1] : undefined
+
+      // Detect active MCP servers by looking at child processes
+      const mcpServers: string[] = []
+      try {
+        const childOutput = execSync(
+          `ps --ppid ${pid} -o args --no-headers 2>/dev/null`,
+          { encoding: 'utf-8', timeout: 2000 }
+        ).trim()
+
+        const childLines = childOutput.split('\n')
+        for (const childLine of childLines) {
+          // Extract MCP server names from process commands
+          if (childLine.includes('claude-flow')) mcpServers.push('claude-flow')
+          if (childLine.includes('mcp-server-postgres')) mcpServers.push('postgres')
+          if (childLine.includes('mcp-server-filesystem')) mcpServers.push('filesystem')
+          if (childLine.includes('context7')) mcpServers.push('context7')
+          if (childLine.includes('playwright')) mcpServers.push('playwright')
+          if (childLine.includes('--claude-in-chrome-mcp')) mcpServers.push('chrome')
+        }
+      } catch {
+        // Child process detection failed, continue without MCP info
+      }
+
+      processes.push({
+        pid,
+        tty: tty === '?' ? 'background' : tty,
+        args,
+        profile,
+        launchMode,
+        permissionMode,
+        wrapper,
+        activeMcpServers: [...new Set(mcpServers)], // Dedupe
+      })
+    }
+  } catch {
+    // Process detection failed
+  }
+
+  return processes
+}
+
+// Match a session to its running process by working directory
+function matchSessionToProcess(session: ExternalSession, processes: ClaudeProcessInfo[]): SessionProcessInfo | undefined {
+  // Try to match by working directory
+  const sessionCwd = session.workingDirectory
+  if (!sessionCwd) return undefined
+
+  // Look for a process whose cwd or project path matches
+  for (const proc of processes) {
+    // Check if process is working on this project
+    // The session's workingDirectory should match where the process was launched
+    if (session.projectPath && sessionCwd.includes(session.projectName)) {
+      return {
+        pid: proc.pid,
+        profile: proc.profile,
+        terminal: proc.tty,
+        launchMode: proc.launchMode,
+        permissionMode: proc.permissionMode,
+        wrapper: proc.wrapper,
+        activeMcpServers: proc.activeMcpServers,
+      }
+    }
+  }
+
+  // Fallback: if there's only one active process, match it to any active session
+  if (processes.length === 1) {
+    const proc = processes[0]
+    return {
+      pid: proc.pid,
+      profile: proc.profile,
+      terminal: proc.tty,
+      launchMode: proc.launchMode,
+      permissionMode: proc.permissionMode,
+      wrapper: proc.wrapper,
+      activeMcpServers: proc.activeMcpServers,
+    }
+  }
+
+  return undefined
+}
+
+// Get active sessions (modified in last 5 minutes) with process info
 async function getActiveSessions(): Promise<ExternalSession[]> {
   const sessions = await discoverExternalSessions()
-  return sessions.filter((s) => s.isActive)
+  const activeSessions = sessions.filter((s) => s.isActive)
+
+  // Detect running Claude processes
+  const processes = detectActiveClaudeProcesses()
+
+  // Enrich active sessions with process info
+  for (const session of activeSessions) {
+    const processInfo = matchSessionToProcess(session, processes)
+    if (processInfo) {
+      session.processInfo = processInfo
+    }
+  }
+
+  return activeSessions
 }
 
 // IPC Handlers for External Sessions

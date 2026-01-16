@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Sidebar } from './components/layout/Sidebar'
 import { Header } from './components/layout/Header'
 import { Dashboard } from './components/dashboard/Dashboard'
@@ -18,6 +18,7 @@ import { AgentCanvas } from './components/agents/AgentCanvas'
 import { ChatInterface } from './components/chat/ChatInterface'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { ErrorToast } from './components/common/ErrorNotifications'
+import { CommandPalette, useCommandPalette } from './components/common/CommandPalette'
 import { initializeErrorListener } from './stores/errors'
 
 type View = 'dashboard' | 'projects' | 'sessions' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'globalSettings' | 'preferences'
@@ -25,6 +26,13 @@ type View = 'dashboard' | 'projects' | 'sessions' | 'mcp' | 'memory' | 'profiles
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const commandPalette = useCommandPalette()
+
+  // Memoized navigation handler for command palette
+  const handleNavigate = useCallback((view: string) => {
+    setCurrentView(view as View)
+    commandPalette.close()
+  }, [commandPalette])
 
   // Initialize error listener on mount
   useEffect(() => {
@@ -96,6 +104,13 @@ export default function App() {
 
         {/* Error notifications */}
         <ErrorToast />
+
+        {/* Command Palette (Ctrl+K) */}
+        <CommandPalette
+          isOpen={commandPalette.isOpen}
+          onClose={commandPalette.close}
+          onNavigate={handleNavigate}
+        />
       </div>
     </ErrorBoundary>
   )

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, memo } from 'react'
 import {
   Activity,
   Clock,
@@ -13,6 +13,13 @@ import {
   Eye,
   Radio,
   GitBranch,
+  Terminal,
+  User,
+  Play,
+  RotateCcw,
+  Shield,
+  Plug,
+  Cpu,
 } from 'lucide-react'
 import { useSessionsStore, selectFilteredSessions } from '../../stores/sessions'
 import type { ExternalSession, SessionMessage } from '../../../shared/types'
@@ -227,7 +234,61 @@ export function SessionManager() {
   )
 }
 
-// Session Card Component
+// Context Usage Bar Component
+const MAX_CONTEXT_TOKENS = 200000 // Claude's context window
+
+function ContextBar({
+  inputTokens,
+  outputTokens,
+  cachedTokens,
+}: {
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+}) {
+  const totalTokens = inputTokens + outputTokens
+  const usagePercent = Math.min((totalTokens / MAX_CONTEXT_TOKENS) * 100, 100)
+  const cachedPercent = Math.min((cachedTokens / MAX_CONTEXT_TOKENS) * 100, 100)
+
+  // Color based on usage
+  const getBarColor = () => {
+    if (usagePercent >= 90) return 'bg-accent-red'
+    if (usagePercent >= 70) return 'bg-accent-yellow'
+    return 'bg-accent-purple'
+  }
+
+  // Format compact token display
+  const formatCompact = (tokens: number) => {
+    if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`
+    if (tokens >= 1000) return `${(tokens / 1000).toFixed(0)}K`
+    return tokens.toString()
+  }
+
+  return (
+    <div className="w-full">
+      <div className="flex justify-between text-[10px] text-text-muted mb-0.5">
+        <span>{formatCompact(totalTokens)} / 200K</span>
+        <span>{usagePercent.toFixed(0)}%</span>
+      </div>
+      <div className="h-1.5 bg-surface rounded-full overflow-hidden relative">
+        {/* Cached tokens (shown as lighter shade behind) */}
+        {cachedTokens > 0 && (
+          <div
+            className="absolute h-full bg-accent-blue/30 rounded-full"
+            style={{ width: `${cachedPercent}%` }}
+          />
+        )}
+        {/* Active tokens */}
+        <div
+          className={`h-full rounded-full transition-all ${getBarColor()}`}
+          style={{ width: `${usagePercent}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+// Session Card Component (memoized for performance)
 interface SessionCardProps {
   session: ExternalSession
   isSelected: boolean
@@ -237,7 +298,18 @@ interface SessionCardProps {
   formatCost: (c: number | undefined) => string
 }
 
-function SessionCard({ session, isSelected, onSelect, formatDate, formatTokens, formatCost }: SessionCardProps) {
+const SessionCard = memo(function SessionCard({ session, isSelected, onSelect, formatDate, formatTokens, formatCost }: SessionCardProps) {
+  const processInfo = session.processInfo
+
+  // Get profile badge color
+  const getProfileColor = (profile: string) => {
+    switch (profile) {
+      case 'engineering': return 'bg-accent-blue/20 text-accent-blue'
+      case 'security': return 'bg-accent-red/20 text-accent-red'
+      default: return 'bg-surface text-text-muted'
+    }
+  }
+
   return (
     <button
       onClick={onSelect}
@@ -245,6 +317,7 @@ function SessionCard({ session, isSelected, onSelect, formatDate, formatTokens, 
         isSelected ? 'bg-accent-purple/10 border-l-2 border-l-accent-purple' : 'hover:bg-surface'
       }`}
     >
+      {/* Header: Name + Time */}
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-2">
           {session.isActive && (
@@ -257,15 +330,63 @@ function SessionCard({ session, isSelected, onSelect, formatDate, formatTokens, 
         <span className="text-xs text-text-muted">{formatDate(session.lastActivity)}</span>
       </div>
 
+      {/* Process Info Row (for active sessions) */}
+      {processInfo && (
+        <div className="flex items-center gap-2 text-xs mb-2 flex-wrap">
+          {/* Profile Badge */}
+          <span className={`px-1.5 py-0.5 rounded ${getProfileColor(processInfo.profile)}`}>
+            <User className="w-3 h-3 inline mr-1" />
+            {processInfo.profile}
+          </span>
+          {/* Terminal */}
+          <span className="flex items-center gap-1 text-text-muted">
+            <Terminal className="w-3 h-3" />
+            {processInfo.terminal}
+          </span>
+          {/* Launch Mode */}
+          <span className="flex items-center gap-1 text-text-muted">
+            {processInfo.launchMode === 'resume' ? (
+              <RotateCcw className="w-3 h-3" />
+            ) : (
+              <Play className="w-3 h-3" />
+            )}
+            {processInfo.launchMode}
+          </span>
+          {/* Permission Mode */}
+          {processInfo.permissionMode && (
+            <span className="flex items-center gap-1 text-accent-yellow">
+              <Shield className="w-3 h-3" />
+              {processInfo.permissionMode.replace('Permissions', '')}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* MCP Servers (for active sessions) */}
+      {processInfo && processInfo.activeMcpServers.length > 0 && (
+        <div className="flex items-center gap-1 text-xs text-text-muted mb-2">
+          <Plug className="w-3 h-3 flex-shrink-0" />
+          <span className="truncate">
+            {processInfo.activeMcpServers.join(', ')}
+          </span>
+        </div>
+      )}
+
+      {/* Working Directory */}
       <div className="flex items-center gap-2 text-xs text-text-muted mb-2">
-        <FolderOpen className="w-3 h-3" />
-        <span className="truncate">{session.projectName}</span>
+        <FolderOpen className="w-3 h-3 flex-shrink-0" />
+        <span className="truncate">{session.workingDirectory || session.projectName}</span>
       </div>
 
-      <div className="flex items-center gap-3 text-xs">
+      {/* Stats Row */}
+      <div className="flex items-center gap-3 text-xs mb-2">
         <span className="flex items-center gap-1 text-text-muted">
           <MessageSquare className="w-3 h-3" />
           {session.stats.messageCount}
+        </span>
+        <span className="flex items-center gap-1 text-text-muted">
+          <Hash className="w-3 h-3" />
+          {session.stats.toolCalls} tools
         </span>
         <span className="flex items-center gap-1 text-text-muted">
           <Zap className="w-3 h-3" />
@@ -275,10 +396,23 @@ function SessionCard({ session, isSelected, onSelect, formatDate, formatTokens, 
           <DollarSign className="w-3 h-3" />
           {formatCost(session.stats.estimatedCost)}
         </span>
+        {processInfo && (
+          <span className="flex items-center gap-1 text-text-muted ml-auto">
+            <Cpu className="w-3 h-3" />
+            PID {processInfo.pid}
+          </span>
+        )}
       </div>
+
+      {/* Context Usage Bar */}
+      <ContextBar
+        inputTokens={session.stats.inputTokens}
+        outputTokens={session.stats.outputTokens}
+        cachedTokens={session.stats.cachedTokens}
+      />
     </button>
   )
-}
+})
 
 // Session Detail Component
 interface SessionDetailProps {
@@ -348,8 +482,8 @@ function SessionDetail({ session, messages, formatDate, formatTokens, formatCost
           />
         </div>
 
-        {/* Metadata */}
-        <div className="flex items-center gap-4 mt-3 text-xs text-text-muted">
+        {/* Metadata Row 1 */}
+        <div className="flex items-center gap-4 mt-3 text-xs text-text-muted flex-wrap">
           {session.model && (
             <span className="flex items-center gap-1">
               <span className="font-medium">Model:</span> {session.model}
@@ -378,6 +512,82 @@ function SessionDetail({ session, messages, formatDate, formatTokens, formatCost
             </span>
           )}
         </div>
+
+        {/* Process Info Row (for active sessions) */}
+        {session.processInfo && (
+          <div className="flex items-center gap-4 mt-2 text-xs flex-wrap">
+            {/* Profile */}
+            <span className={`px-2 py-0.5 rounded font-medium ${
+              session.processInfo.profile === 'engineering'
+                ? 'bg-accent-blue/20 text-accent-blue'
+                : session.processInfo.profile === 'security'
+                ? 'bg-accent-red/20 text-accent-red'
+                : 'bg-surface text-text-muted'
+            }`}>
+              <User className="w-3 h-3 inline mr-1" />
+              {session.processInfo.profile}
+            </span>
+            {/* Terminal */}
+            <span className="flex items-center gap-1 text-text-muted">
+              <Terminal className="w-3 h-3" />
+              {session.processInfo.terminal}
+            </span>
+            {/* PID */}
+            <span className="flex items-center gap-1 text-text-muted">
+              <Cpu className="w-3 h-3" />
+              PID {session.processInfo.pid}
+            </span>
+            {/* Launch Mode */}
+            <span className="flex items-center gap-1 text-text-muted">
+              {session.processInfo.launchMode === 'resume' ? (
+                <RotateCcw className="w-3 h-3" />
+              ) : (
+                <Play className="w-3 h-3" />
+              )}
+              {session.processInfo.launchMode}
+            </span>
+            {/* Permission Mode */}
+            {session.processInfo.permissionMode && (
+              <span className="flex items-center gap-1 text-accent-yellow">
+                <Shield className="w-3 h-3" />
+                {session.processInfo.permissionMode}
+              </span>
+            )}
+            {/* Wrapper */}
+            {session.processInfo.wrapper && (
+              <span className="flex items-center gap-1 text-text-muted">
+                <span className="font-medium">via</span> {session.processInfo.wrapper}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* MCP Servers Row */}
+        {session.processInfo && session.processInfo.activeMcpServers.length > 0 && (
+          <div className="flex items-center gap-2 mt-2 text-xs text-text-muted">
+            <Plug className="w-3 h-3" />
+            <span className="font-medium">Active MCPs:</span>
+            <div className="flex gap-1 flex-wrap">
+              {session.processInfo.activeMcpServers.map((mcp) => (
+                <span
+                  key={mcp}
+                  className="px-1.5 py-0.5 rounded bg-accent-green/10 text-accent-green"
+                >
+                  {mcp}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Working Directory */}
+        {session.workingDirectory && (
+          <div className="flex items-center gap-2 mt-2 text-xs text-text-muted">
+            <FolderOpen className="w-3 h-3" />
+            <span className="font-medium">Launched from:</span>
+            <span className="font-mono">{session.workingDirectory}</span>
+          </div>
+        )}
       </div>
 
       {/* Messages */}
@@ -466,8 +676,8 @@ function getDisplayContent(message: SessionMessage): string {
   return '(unknown content format)'
 }
 
-// Message Card Component
-function MessageCard({
+// Message Card Component (memoized for performance)
+const MessageCard = memo(function MessageCard({
   message,
   formatDate,
 }: {
@@ -517,6 +727,6 @@ function MessageCard({
       )}
     </div>
   )
-}
+})
 
 export default SessionManager
