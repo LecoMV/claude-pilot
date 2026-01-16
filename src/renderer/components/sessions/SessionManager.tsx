@@ -13,7 +13,6 @@ import {
   Eye,
   Radio,
   GitBranch,
-  ChevronRight,
 } from 'lucide-react'
 import { useSessionsStore, selectFilteredSessions } from '../../stores/sessions'
 import type { ExternalSession, SessionMessage } from '../../../shared/types'

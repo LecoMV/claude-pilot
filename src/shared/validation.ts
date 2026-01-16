@@ -386,6 +386,7 @@ export function validateIPCInput<T>(
 export function sanitizeString(input: string): string {
   return input
     .replace(/[<>]/g, '') // Remove HTML tags
+    // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x1f]/g, '') // Remove control characters
     .trim()
 }

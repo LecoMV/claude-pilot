@@ -3,7 +3,6 @@ import {
   Server,
   Power,
   PowerOff,
-  Settings,
   RefreshCw,
   Plus,
   Search,
@@ -11,11 +10,9 @@ import {
   XCircle,
   AlertCircle,
   ChevronRight,
-  Terminal,
   Wrench,
   Clock,
   X,
-  ExternalLink,
   Copy,
   FileJson,
   Save,
@@ -115,7 +112,7 @@ export function MCPManager() {
     // Validate JSON before saving
     try {
       JSON.parse(configContent)
-    } catch (e) {
+    } catch {
       setConfigError('Invalid JSON. Please fix syntax errors before saving.')
       return
     }

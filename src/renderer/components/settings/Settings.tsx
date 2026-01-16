@@ -17,7 +17,7 @@ import { useSettingsStore, type AppSettings } from '@/stores/settings'
 type SettingsSection = 'appearance' | 'terminal' | 'memory' | 'notifications' | 'security'
 
 export function Settings() {
-  const { settings, loading, saving, loaded, loadSettings, saveSettings, setSettings, resetSettings } =
+  const { settings, loading, saving, loaded, loadSettings, saveSettings, setSettings } =
     useSettingsStore()
   const [activeSection, setActiveSection] = useState<SettingsSection>('appearance')
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings)

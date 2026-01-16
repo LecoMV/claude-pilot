@@ -16,8 +16,6 @@ export function Terminal() {
     }
   }, [tabs.length, addTab])
 
-  const activeTab = tabs.find((t) => t.id === activeTabId)
-
   return (
     <div
       className={cn(
@@ -99,7 +97,7 @@ interface TerminalPanelProps {
 
 function TerminalPanel({ tabId, visible }: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { fit, focus, isConnected } = useTerminal({ tabId, containerRef })
+  const { fit, focus } = useTerminal({ tabId, containerRef })
 
   // Fit and focus when becoming visible
   useEffect(() => {

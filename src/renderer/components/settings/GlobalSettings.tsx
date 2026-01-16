@@ -13,7 +13,6 @@ import {
   Globe,
   Brain,
   Zap,
-  Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useProfileStore, type ClaudeRule } from '@/stores/profile'
@@ -22,7 +21,6 @@ import { CodeEditor, CodeViewer } from '@/components/common/CodeEditor'
 export function GlobalSettings() {
   const {
     rules,
-    globalSettings,
     loading,
     rulesLoading,
     editingClaudeMd,
@@ -30,7 +28,6 @@ export function GlobalSettings() {
     setRules,
     setGlobalSettings,
     setLoading,
-    setRulesLoading,
     setEditingClaudeMd,
     setClaudeMdContent,
   } = useProfileStore()

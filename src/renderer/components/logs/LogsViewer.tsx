@@ -15,7 +15,6 @@ import {
   Server,
   Brain,
   Cpu,
-  GitBranch,
   Workflow,
   RefreshCw,
 } from 'lucide-react'

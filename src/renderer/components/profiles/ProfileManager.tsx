@@ -17,7 +17,6 @@ import {
   Code,
   Brain,
   Terminal,
-  ExternalLink,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useProfileStore } from '@/stores/profile'
@@ -111,7 +110,6 @@ function CustomProfilesPanel({
   profiles,
   activeProfileId,
   loading,
-  onRefresh,
   onProfilesChange,
   onActiveChange,
 }: CustomProfilesPanelProps) {
@@ -205,6 +203,7 @@ function CustomProfilesPanel({
   }
 
   const handleDelete = async (id: string) => {
+    // eslint-disable-next-line no-alert
     if (!confirm('Are you sure you want to delete this profile?')) return
     try {
       await window.electron.invoke('profiles:delete', id)

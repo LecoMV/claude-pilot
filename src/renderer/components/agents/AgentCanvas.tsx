@@ -17,17 +17,12 @@ import {
   Cpu,
   Network,
   Crown,
-  Hexagon,
   Send,
   Zap,
   GitBranch,
   LayoutGrid,
   Target,
-  MessageSquare,
-  ChevronDown,
   X,
-  Copy,
-  Workflow,
   Layers,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -179,6 +174,7 @@ export function AgentCanvas() {
   }
 
   const handleTerminateAgent = async (agentId: string) => {
+    // eslint-disable-next-line no-alert
     if (!confirm('Terminate this agent?')) return
 
     try {
@@ -234,6 +230,7 @@ export function AgentCanvas() {
   }
 
   const handleShutdownSwarm = async () => {
+    // eslint-disable-next-line no-alert
     if (!confirm('Shutdown the swarm?')) return
 
     try {

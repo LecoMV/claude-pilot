@@ -5,8 +5,11 @@ import { appendFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import {
   AppError,
-  ErrorSeverity,
-  ErrorCategory,
+  IPCError,
+  FilesystemError,
+  NetworkError,
+  DatabaseError,
+  ProcessError,
   isOperationalError,
   getErrorMessage,
 } from '../../shared/errors'
@@ -192,7 +195,6 @@ export function handleIPCError(
   error: unknown,
   metadata?: Record<string, unknown>
 ): AppError {
-  const { IPCError } = require('../../shared/errors')
   const ipcError = new IPCError(getErrorMessage(error), {
     channel,
     cause: error instanceof Error ? error : undefined,
@@ -210,7 +212,6 @@ export function handleFilesystemError(
   operation: 'read' | 'write' | 'delete' | 'stat' | 'list',
   error: unknown
 ): AppError {
-  const { FilesystemError } = require('../../shared/errors')
   const fsError = new FilesystemError(getErrorMessage(error), {
     path,
     operation,
@@ -228,7 +229,6 @@ export function handleNetworkError(
   error: unknown,
   statusCode?: number
 ): AppError {
-  const { NetworkError } = require('../../shared/errors')
   const netError = new NetworkError(getErrorMessage(error), {
     endpoint,
     statusCode,
@@ -246,7 +246,6 @@ export function handleDatabaseError(
   operation: string,
   error: unknown
 ): AppError {
-  const { DatabaseError } = require('../../shared/errors')
   const dbError = new DatabaseError(getErrorMessage(error), {
     database,
     operation,
@@ -264,7 +263,6 @@ export function handleProcessError(
   error: unknown,
   exitCode?: number
 ): AppError {
-  const { ProcessError } = require('../../shared/errors')
   const procError = new ProcessError(getErrorMessage(error), {
     command,
     exitCode,

@@ -6,7 +6,6 @@ import {
   Clock,
   Search,
   Plus,
-  ExternalLink,
   FolderOpen,
   Terminal,
   RefreshCw,

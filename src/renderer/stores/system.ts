@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { SystemStatus, ResourceUsage } from '@shared/types'
+import type { SystemStatus } from '@shared/types'
 
 interface SystemState {
   status: SystemStatus | null

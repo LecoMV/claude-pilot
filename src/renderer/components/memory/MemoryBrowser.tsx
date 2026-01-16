@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useState, useMemo } from 'react'
 import {
   Database,
   Search,
@@ -12,8 +12,6 @@ import {
   ChevronUp,
   AlertCircle,
   Filter,
-  X,
-  Code,
   Terminal,
   User,
   Clock,
@@ -30,16 +28,15 @@ import {
   Command,
   Table,
   Eye,
-  Download,
-  MoreHorizontal,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMemoryStore, type MemorySource } from '@/stores/memory'
 import { GraphViewer } from './GraphViewer'
 import type { Learning } from '@shared/types'
 
-// Available categories for filtering
-const CATEGORIES = ['all', 'bugbounty', 'project', 'architecture', 'security', 'general', 'htb', 'memory']
+// Available categories for filtering (reserved for future use)
+const _CATEGORIES = ['all', 'bugbounty', 'project', 'architecture', 'security', 'general', 'htb', 'memory']
+void _CATEGORIES // Suppress unused warning
 
 // Qdrant collections
 const QDRANT_COLLECTIONS = ['mem0_memories', 'claude_memories']
@@ -136,7 +133,6 @@ export function MemoryBrowser() {
   // UI state
   const [copied, setCopied] = useState(false)
   const [showGraph, setShowGraph] = useState(false)
-  const queryInputRef = useRef<HTMLTextAreaElement>(null)
 
   // Animated counter for stats
   const [animatedStats, setAnimatedStats] = useState({
@@ -424,6 +420,8 @@ export function MemoryBrowser() {
         return 'MATCH (n) RETURN n.name, labels(n) LIMIT 10'
       case 'qdrant':
         return 'GET /collections/mem0_memories'
+      default:
+        return ''
     }
   }
 

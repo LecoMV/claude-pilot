@@ -36,6 +36,6 @@ if (process.contextIsolated) {
     console.error('Failed to expose electron API:', error)
   }
 } else {
-  // @ts-ignore: fallback for non-isolated contexts
+  // @ts-expect-error fallback for non-isolated contexts
   window.electron = electronAPI
 }

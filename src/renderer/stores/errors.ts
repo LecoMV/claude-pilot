@@ -33,7 +33,7 @@ interface ErrorStore {
 
 let errorIdCounter = 0
 
-export const useErrorStore = create<ErrorStore>((set, get) => ({
+export const useErrorStore = create<ErrorStore>((set) => ({
   errors: [],
   unreadCount: 0,
 

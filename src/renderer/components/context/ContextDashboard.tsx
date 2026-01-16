@@ -8,19 +8,14 @@ import {
   Wrench,
   RefreshCw,
   Archive,
-  Trash2,
-  ChevronRight,
   Folder,
   Calendar,
   Hash,
   AlertCircle,
-  CheckCircle,
   XCircle,
   Radio,
   ExternalLink,
   Terminal,
-  TrendingUp,
-  DollarSign,
   AlertTriangle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -33,13 +28,11 @@ export function ContextDashboard() {
     tokenUsage,
     compactionSettings,
     loading,
-    sessionsLoading,
     selectedSession,
     setSessions,
     setTokenUsage,
     setCompactionSettings,
     setLoading,
-    setSessionsLoading,
     setSelectedSession,
   } = useContextStore()
 
@@ -202,7 +195,7 @@ interface ActiveSessionsPanelProps {
   onRefresh: () => void
 }
 
-function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession, onRefresh }: ActiveSessionsPanelProps) {
+function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: ActiveSessionsPanelProps) {
   const formatTokens = (num: number) => {
     if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
     if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
@@ -527,7 +520,7 @@ interface UsagePanelProps {
   onToggleAutoCompact: () => void
 }
 
-function UsagePanel({ tokenUsage, compactionSettings, onCompact, onToggleAutoCompact }: UsagePanelProps) {
+function UsagePanel({ tokenUsage, compactionSettings, onToggleAutoCompact }: UsagePanelProps) {
   const formatNumber = (num: number) => {
     if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
     if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`

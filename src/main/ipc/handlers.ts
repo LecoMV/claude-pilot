@@ -36,6 +36,46 @@ import type {
 const HOME = homedir()
 const CLAUDE_DIR = join(HOME, '.claude')
 
+// Database configuration from environment variables
+const DB_CONFIG = {
+  postgresql: {
+    host: process.env.CLAUDE_PG_HOST || 'localhost',
+    port: process.env.CLAUDE_PG_PORT || '5433',
+    user: process.env.CLAUDE_PG_USER || 'deploy',
+    database: process.env.CLAUDE_PG_DATABASE || 'claude_memory',
+    password: process.env.CLAUDE_PG_PASSWORD || '',
+  },
+}
+
+// Helper to build psql command with credentials from environment
+function buildPsqlCommand(sql: string): string {
+  const { host, port, user, database, password } = DB_CONFIG.postgresql
+  const passwordEnv = password ? `PGPASSWORD="${password}" ` : ''
+  return `${passwordEnv}psql -h ${host} -p ${port} -U ${user} -d ${database} -t -A -c '${sql.replace(/'/g, "'\\''")}'`
+}
+
+function buildPsqlCommandWithDelimiter(sql: string, delimiter = '|'): string {
+  const { host, port, user, database, password } = DB_CONFIG.postgresql
+  const passwordEnv = password ? `PGPASSWORD="${password}" ` : ''
+  return `${passwordEnv}psql -h ${host} -p ${port} -U ${user} -d ${database} -t -A -F '${delimiter}' -c '${sql.replace(/'/g, "'\\''")}'`
+}
+
+// Input sanitization functions to prevent shell injection
+function sanitizeServiceName(name: string): string {
+  // Systemd service names: alphanumeric, hyphens, dots, underscores, at-signs
+  return name.replace(/[^a-zA-Z0-9._@-]/g, '')
+}
+
+function sanitizeContainerId(id: string): string {
+  // Container IDs are hex strings or alphanumeric names
+  return id.replace(/[^a-zA-Z0-9._-]/g, '')
+}
+
+function sanitizeModelName(model: string): string {
+  // Ollama model names: alphanumeric, colons (for tags), hyphens, dots, underscores, forward slashes (for namespaces)
+  return model.replace(/[^a-zA-Z0-9._:/-]/g, '')
+}
+
 // Simple cache for expensive operations
 class DataCache {
   private cache: Map<string, { data: unknown; expiry: number }> = new Map()
@@ -763,7 +803,7 @@ async function getResourceUsage(): Promise<ResourceUsage> {
   }
 
   // Get disk usage
-  let disk = { used: 0, total: 0, claudeData: 0 }
+  const disk = { used: 0, total: 0, claudeData: 0 }
   try {
     const dfResult = execSync("df -B1 / | tail -1 | awk '{print $3, $2}'", {
       encoding: 'utf-8',
@@ -994,9 +1034,9 @@ async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
       sql = `SELECT id, category, topic, content, created_at FROM learnings ORDER BY created_at DESC LIMIT ${safeLimit}`
     }
 
-    // Execute query - use correct credentials for deploy user
+    // Execute query using database configuration
     const result = execSync(
-      `PGPASSWORD="claude_deploy_2024" psql -h localhost -p 5433 -U deploy -d claude_memory -t -A -F '|' -c '${sql.replace(/'/g, "'\\''")}'`,
+      buildPsqlCommandWithDelimiter(sql),
       { encoding: 'utf-8', timeout: 5000 }
     )
 
@@ -1037,7 +1077,7 @@ async function getMemoryStats(): Promise<{
   // PostgreSQL count
   try {
     const pgResult = execSync(
-      'PGPASSWORD="claude_deploy_2024" psql -h localhost -p 5433 -U deploy -d claude_memory -t -A -c "SELECT COUNT(*) FROM learnings"',
+      buildPsqlCommand('SELECT COUNT(*) FROM learnings'),
       { encoding: 'utf-8', timeout: 3000 }
     )
     stats.postgresql.count = parseInt(pgResult.trim(), 10) || 0
@@ -1085,7 +1125,8 @@ async function getMemoryStats(): Promise<{
 }
 
 // Parse mgconsole tabular output into array of objects
-function parseMgconsoleOutput(output: string): Array<Record<string, unknown>> {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _parseMgconsoleOutput(output: string): Array<Record<string, unknown>> {
   const lines = output.trim().split('\n')
   if (lines.length < 4) return [] // Need at least header separator, header, separator, and data
 
@@ -1144,7 +1185,8 @@ function parseMgconsoleOutput(output: string): Array<Record<string, unknown>> {
 }
 
 // Parse Cypher node/relationship format: (:Label {prop: value, ...}) or [:TYPE {prop: value, ...}]
-function parseCypherNodeProps(value: unknown): Record<string, unknown> {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _parseCypherNodeProps(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'string') return {}
 
   const str = String(value)
@@ -1376,9 +1418,8 @@ async function executeRawQuery(
   try {
     switch (source) {
       case 'postgresql': {
-        const sanitizedQuery = query.replace(/'/g, "''")
         const cmdResult = execSync(
-          `PGPASSWORD="claude_deploy_2024" psql -h localhost -p 5433 -U deploy -d claude_memory -t -A -F '|' -c '${sanitizedQuery}'`,
+          buildPsqlCommandWithDelimiter(query),
           { encoding: 'utf-8', timeout: 30000, shell: '/bin/bash' }
         )
         return {
@@ -2206,7 +2247,7 @@ function getRecentSessions(): SessionSummary[] {
               model,
             })
           }
-        } catch (error) {
+        } catch {
           // Skip sessions that can't be read
         }
       }
@@ -2330,7 +2371,12 @@ function getPodmanContainers(): PodmanContainer[] {
 
 function systemdAction(name: string, action: 'start' | 'stop' | 'restart'): boolean {
   try {
-    execSync(`sudo systemctl ${action} ${name}`, { encoding: 'utf-8', timeout: 30000 })
+    const safeName = sanitizeServiceName(name)
+    if (!safeName) {
+      console.error('Invalid service name:', name)
+      return false
+    }
+    execSync(`sudo systemctl ${action} ${safeName}`, { encoding: 'utf-8', timeout: 30000 })
     return true
   } catch (error) {
     console.error(`Failed to ${action} service ${name}:`, error)
@@ -2340,7 +2386,12 @@ function systemdAction(name: string, action: 'start' | 'stop' | 'restart'): bool
 
 function podmanAction(id: string, action: 'start' | 'stop' | 'restart'): boolean {
   try {
-    execSync(`podman ${action} ${id}`, { encoding: 'utf-8', timeout: 30000 })
+    const safeId = sanitizeContainerId(id)
+    if (!safeId) {
+      console.error('Invalid container ID:', id)
+      return false
+    }
+    execSync(`podman ${action} ${safeId}`, { encoding: 'utf-8', timeout: 30000 })
     return true
   } catch (error) {
     console.error(`Failed to ${action} container ${id}:`, error)
@@ -2349,7 +2400,8 @@ function podmanAction(id: string, action: 'start' | 'stop' | 'restart'): boolean
 }
 
 // Logs functions
-type LogSource = 'claude' | 'mcp' | 'system' | 'agent' | 'workflow'
+// LogSource defined for future use when log filtering is implemented
+type _LogSource = 'claude' | 'mcp' | 'system' | 'agent' | 'workflow'
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 function generateLogId(): string {
@@ -2569,8 +2621,13 @@ function getRunningModels(): OllamaRunningModel[] {
 
 function pullOllamaModel(model: string): boolean {
   try {
+    const safeModel = sanitizeModelName(model)
+    if (!safeModel) {
+      console.error('Invalid model name:', model)
+      return false
+    }
     // Start pull in background (will stream progress)
-    execSync(`ollama pull ${model}`, {
+    execSync(`ollama pull ${safeModel}`, {
       encoding: 'utf-8',
       timeout: 600000, // 10 minutes max
       stdio: 'pipe',
@@ -2584,7 +2641,12 @@ function pullOllamaModel(model: string): boolean {
 
 function deleteOllamaModel(model: string): boolean {
   try {
-    execSync(`ollama rm ${model}`, {
+    const safeModel = sanitizeModelName(model)
+    if (!safeModel) {
+      console.error('Invalid model name:', model)
+      return false
+    }
+    execSync(`ollama rm ${safeModel}`, {
       encoding: 'utf-8',
       timeout: 30000,
     })
@@ -2597,8 +2659,13 @@ function deleteOllamaModel(model: string): boolean {
 
 function runOllamaModel(model: string): boolean {
   try {
+    const safeModel = sanitizeModelName(model)
+    if (!safeModel) {
+      console.error('Invalid model name:', model)
+      return false
+    }
     // Run model in background (just loads it into memory)
-    const body = JSON.stringify({ model, keep_alive: '10m' })
+    const body = JSON.stringify({ model: safeModel, keep_alive: '10m' })
     execSync(`curl -s -X POST ${OLLAMA_API}/api/generate -d '${body}'`, {
       encoding: 'utf-8',
       timeout: 60000,
@@ -2612,8 +2679,13 @@ function runOllamaModel(model: string): boolean {
 
 function stopOllamaModel(model: string): boolean {
   try {
+    const safeModel = sanitizeModelName(model)
+    if (!safeModel) {
+      console.error('Invalid model name:', model)
+      return false
+    }
     // Stop model by setting keep_alive to 0
-    const body = JSON.stringify({ model, keep_alive: 0 })
+    const body = JSON.stringify({ model: safeModel, keep_alive: 0 })
     execSync(`curl -s -X POST ${OLLAMA_API}/api/generate -d '${body}'`, {
       encoding: 'utf-8',
       timeout: 30000,
@@ -2627,7 +2699,7 @@ function stopOllamaModel(model: string): boolean {
 
 // Agent functions - local simulation (Claude Flow MCP integration removed for responsiveness)
 // In-memory agent state
-let agentState: {
+const agentState: {
   agents: Agent[]
   swarm: SwarmInfo | null
   hiveMind: HiveMindInfo | null
@@ -2956,7 +3028,6 @@ async function parseSessionFile(filePath: string): Promise<ExternalSession | nul
     const sessionId = fileName.replace('.jsonl', '')
 
     // Check if session is active (file modified in last 5 minutes)
-    const { statSync } = require('fs')
     const stat = statSync(filePath)
     const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
     const isActive = stat.mtimeMs > fiveMinutesAgo

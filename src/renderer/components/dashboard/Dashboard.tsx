@@ -18,7 +18,7 @@ import {
 import { formatBytes, cn } from '@/lib/utils'
 import { useSystemStatus } from '@/hooks/useSystemStatus'
 import { MetricsChart } from './MetricsChart'
-import type { SystemStatus, GPUUsage } from '@shared/types'
+import type { GPUUsage } from '@shared/types'
 
 interface DashboardProps {
   onNavigate?: (view: string) => void

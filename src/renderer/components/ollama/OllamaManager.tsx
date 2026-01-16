@@ -18,7 +18,6 @@ import {
   Database,
   Brain,
   Layers,
-  Settings,
   Zap,
   Server,
 } from 'lucide-react'
@@ -118,6 +117,7 @@ export function OllamaManager() {
   }
 
   const handleDelete = async (modelName: string) => {
+    // eslint-disable-next-line no-alert
     if (!confirm(`Delete model ${modelName}?`)) return
 
     try {

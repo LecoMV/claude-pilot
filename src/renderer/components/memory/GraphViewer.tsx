@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import cytoscape, { Core, ElementDefinition } from 'cytoscape'
 import { RefreshCw, ZoomIn, ZoomOut, Maximize2, Home, Play } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 interface GraphNode {
   id: string

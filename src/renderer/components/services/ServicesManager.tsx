@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect } from 'react'
 import {
   Server,
   Box,
@@ -12,9 +12,6 @@ import {
   AlertCircle,
   Pause,
   Activity,
-  HardDrive,
-  Cpu,
-  Clock,
   Network,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'

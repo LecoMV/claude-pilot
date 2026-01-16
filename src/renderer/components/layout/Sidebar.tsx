@@ -4,7 +4,6 @@ import {
   Server,
   Brain,
   Terminal,
-  Settings,
   ChevronLeft,
   ChevronRight,
   User,
