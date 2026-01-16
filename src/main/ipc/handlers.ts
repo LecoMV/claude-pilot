@@ -55,10 +55,12 @@ function buildPsqlCommand(sql: string): string {
   return `${passwordEnv}psql -h ${host} -p ${port} -U ${user} -d ${database} -t -A -c '${sql.replace(/'/g, "'\\''")}'`
 }
 
-function buildPsqlCommandWithDelimiter(sql: string, delimiter = '|'): string {
+function buildPsqlCommandWithDelimiter(sql: string, delimiter = '|', recordSeparator?: string): string {
   const { host, port, user, database, password } = DB_CONFIG.postgresql
   const passwordEnv = password ? `PGPASSWORD="${password}" ` : ''
-  return `${passwordEnv}psql -h ${host} -p ${port} -U ${user} -d ${database} -t -A -F '${delimiter}' -c '${sql.replace(/'/g, "'\\''")}'`
+  // Use -R for record separator (row delimiter) to handle multiline content
+  const recordSep = recordSeparator ? ` -R '${recordSeparator}'` : ''
+  return `${passwordEnv}psql -h ${host} -p ${port} -U ${user} -d ${database} -t -A -F '${delimiter}'${recordSep} -c '${sql.replace(/'/g, "'\\''")}'`
 }
 
 // Input sanitization functions to prevent shell injection
@@ -442,6 +444,26 @@ export function registerIpcHandlers(): void {
       ['source', 'query']
     )
     return executeRawQuery(validated.source as 'postgresql' | 'memgraph' | 'qdrant', validated.query)
+  })
+
+  // Unified federated search across all memory sources with RRF merging
+  ipcMain.handle('memory:unified-search', async (_event, query: string, limit = 20): Promise<{
+    results: Array<{
+      id: string
+      source: 'postgresql' | 'memgraph' | 'qdrant'
+      title: string
+      content: string
+      score: number
+      metadata: Record<string, unknown>
+    }>
+    stats: {
+      postgresql: number
+      memgraph: number
+      qdrant: number
+      totalTime: number
+    }
+  }> => {
+    return unifiedSearch(query, limit)
   })
 
   // Profile handlers
@@ -1092,6 +1114,9 @@ function getMCPServers(): MCPServer[] {
   return servers
 }
 
+// Record separator character for parsing multiline content
+const RECORD_SEPARATOR = '\x1E'
+
 async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
   try {
     // Sanitize and validate limit to prevent injection
@@ -1108,15 +1133,114 @@ async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
         .replace(/'/g, "''") // Escape single quotes for SQL
         .replace(/\\/g, '\\\\') // Escape backslashes
 
-      // Use dollar-quoting for safer string handling in PostgreSQL
+      // Enhanced search using PostgreSQL full-text search + pg_trgm fuzzy matching
+      // This provides:
+      // 1. Full-text search with ts_rank for relevance scoring
+      // 2. Trigram similarity for fuzzy/typo-tolerant matching
+      // 3. Combined scoring for best results
+      sql = `
+        WITH search_results AS (
+          SELECT
+            id, category, topic, content, created_at,
+            -- Full-text search score (higher weight for exact phrase matches)
+            COALESCE(ts_rank_cd(
+              to_tsvector('english', COALESCE(content, '') || ' ' || COALESCE(topic, '') || ' ' || COALESCE(category, '')),
+              plainto_tsquery('english', $$${sanitizedQuery}$$)
+            ), 0) AS fts_score,
+            -- Trigram similarity score for fuzzy matching
+            GREATEST(
+              COALESCE(similarity(content, $$${sanitizedQuery}$$), 0),
+              COALESCE(similarity(topic, $$${sanitizedQuery}$$), 0),
+              COALESCE(similarity(category, $$${sanitizedQuery}$$), 0)
+            ) AS trgm_score
+          FROM learnings
+          WHERE
+            -- Full-text search match
+            to_tsvector('english', COALESCE(content, '') || ' ' || COALESCE(topic, '') || ' ' || COALESCE(category, ''))
+              @@ plainto_tsquery('english', $$${sanitizedQuery}$$)
+            -- OR trigram similarity match (fuzzy matching with 0.1 threshold for typo tolerance)
+            OR content % $$${sanitizedQuery}$$
+            OR topic % $$${sanitizedQuery}$$
+            OR category % $$${sanitizedQuery}$$
+            -- OR fallback to ILIKE for substring matches
+            OR content ILIKE $$%${sanitizedQuery}%$$
+            OR topic ILIKE $$%${sanitizedQuery}%$$
+            OR category ILIKE $$%${sanitizedQuery}%$$
+        )
+        SELECT id, category, topic, content, created_at,
+               ROUND((COALESCE(fts_score * 0.4, 0) + COALESCE(trgm_score * 0.6, 0))::numeric, 3) AS relevance
+        FROM search_results
+        ORDER BY relevance DESC, created_at DESC
+        LIMIT ${safeLimit}
+      `
+    } else {
+      sql = `SELECT id, category, topic, content, created_at, 1.0 AS relevance FROM learnings ORDER BY created_at DESC LIMIT ${safeLimit}`
+    }
+
+    // Execute query using database configuration
+    // Use record separator to handle multiline content in fields
+    const result = execSync(
+      buildPsqlCommandWithDelimiter(sql, '|', RECORD_SEPARATOR),
+      { encoding: 'utf-8', timeout: 10000 } // Increased timeout for complex query
+    )
+
+    if (!result.trim()) return []
+
+    // Split by record separator instead of newline to handle multiline content
+    return result
+      .trim()
+      .split(RECORD_SEPARATOR)
+      .filter((record) => record.trim())
+      .map((record) => {
+        // Split by field separator - content can contain pipes, so we need to be careful
+        // The format is: id|category|topic|content|created_at|relevance
+        // Since content can contain |, we split from both ends
+        const parts = record.split('|')
+        const id = parts[0]
+        const category = parts[1]
+        const topic = parts[2]
+        const relevance = parts[parts.length - 1]
+        const created_at = parts[parts.length - 2]
+        // Content is everything between topic and created_at
+        const content = parts.slice(3, parts.length - 2).join('|')
+
+        return {
+          id: parseInt(id, 10),
+          category: category || 'general',
+          content: content || '',
+          confidence: parseFloat(relevance) || 1, // Use relevance score as confidence
+          createdAt: created_at || new Date().toISOString(),
+          source: topic || undefined,
+        }
+      })
+      .filter((learning) => !isNaN(learning.id)) // Filter out invalid records
+  } catch (error) {
+    console.error('Failed to query learnings:', error)
+    // Fallback to simple ILIKE query if advanced search fails (pg_trgm might not be installed)
+    return queryLearningsSimple(query, limit)
+  }
+}
+
+// Fallback simple search without pg_trgm (in case extension is not installed)
+async function queryLearningsSimple(query?: string, limit = 50): Promise<Learning[]> {
+  try {
+    const safeLimit = Math.min(Math.max(1, Math.floor(Number(limit) || 50)), 1000)
+    let sql: string
+
+    if (query && query.trim()) {
+      const sanitizedQuery = query
+        .replace(/\0/g, '')
+        .slice(0, 500)
+        .replace(/'/g, "''")
+        .replace(/\\/g, '\\\\')
+
       sql = `SELECT id, category, topic, content, created_at FROM learnings WHERE content ILIKE $$%${sanitizedQuery}%$$ OR topic ILIKE $$%${sanitizedQuery}%$$ OR category ILIKE $$%${sanitizedQuery}%$$ ORDER BY created_at DESC LIMIT ${safeLimit}`
     } else {
       sql = `SELECT id, category, topic, content, created_at FROM learnings ORDER BY created_at DESC LIMIT ${safeLimit}`
     }
 
-    // Execute query using database configuration
     const result = execSync(
-      buildPsqlCommandWithDelimiter(sql),
+      buildPsqlCommandWithDelimiter(sql, '|', RECORD_SEPARATOR),
       { encoding: 'utf-8', timeout: 5000 }
     )
 
@@ -1124,10 +1248,16 @@ async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
 
     return result
       .trim()
-      .split('\n')
-      .filter((line) => line.trim())
-      .map((line) => {
-        const [id, category, topic, content, created_at] = line.split('|')
+      .split(RECORD_SEPARATOR)
+      .filter((record) => record.trim())
+      .map((record) => {
+        const parts = record.split('|')
+        const id = parts[0]
+        const category = parts[1]
+        const topic = parts[2]
+        const created_at = parts[parts.length - 1]
+        const content = parts.slice(3, parts.length - 1).join('|')
+
         return {
           id: parseInt(id, 10),
           category: category || 'general',
@@ -1137,8 +1267,9 @@ async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
           source: topic || undefined,
         }
       })
+      .filter((learning) => !isNaN(learning.id))
   } catch (error) {
-    console.error('Failed to query learnings:', error)
+    console.error('Failed to query learnings (simple):', error)
     return []
   }
 }
@@ -1401,7 +1532,30 @@ async function browseQdrantMemories(
   return result
 }
 
-// Qdrant search function (keyword-based since we don't have embeddings locally)
+// Generate embeddings using Ollama's nomic-embed-text model
+async function generateEmbedding(text: string): Promise<number[] | null> {
+  try {
+    const response = await fetch('http://localhost:11434/api/embeddings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'nomic-embed-text:latest',
+        prompt: text,
+      }),
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      return data.embedding || null
+    }
+  } catch (error) {
+    console.error('Failed to generate embedding with Ollama:', error)
+  }
+  return null
+}
+
+// Qdrant semantic search function using Ollama embeddings
+// Falls back to keyword search if Ollama is unavailable
 async function searchQdrantMemories(
   query: string,
   collection: string,
@@ -1414,8 +1568,39 @@ async function searchQdrantMemories(
   }
 
   try {
-    // Use scroll and filter by payload data field containing query
-    const response = await fetch(`http://localhost:6333/collections/${collection}/points/scroll`, {
+    // Try semantic search first using Ollama embeddings
+    const embedding = await generateEmbedding(query)
+
+    if (embedding && embedding.length > 0) {
+      // Use vector similarity search with Qdrant
+      const searchResponse = await fetch(`http://localhost:6333/collections/${collection}/points/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vector: embedding,
+          limit,
+          with_payload: true,
+          with_vector: false,
+          score_threshold: 0.3, // Minimum similarity threshold
+        }),
+      })
+
+      if (searchResponse.ok) {
+        const data = await searchResponse.json()
+        if (data.result) {
+          result.results = data.result.map((p: { id: string; score: number; payload: Record<string, unknown> }) => ({
+            id: p.id,
+            score: p.score,
+            payload: p.payload,
+          }))
+          return result
+        }
+      }
+    }
+
+    // Fallback to keyword-based search if embedding fails or Ollama unavailable
+    console.log('[Qdrant] Falling back to keyword search')
+    const scrollResponse = await fetch(`http://localhost:6333/collections/${collection}/points/scroll`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1425,8 +1610,8 @@ async function searchQdrantMemories(
       }),
     })
 
-    if (response.ok) {
-      const data = await response.json()
+    if (scrollResponse.ok) {
+      const data = await scrollResponse.json()
       const queryLower = query.toLowerCase()
 
       if (data.result?.points) {
@@ -1439,7 +1624,7 @@ async function searchQdrantMemories(
           .slice(0, limit)
           .map((p: { id: string; payload: Record<string, unknown> }, index: number) => ({
             id: p.id,
-            score: 1 - index * 0.01, // Pseudo score based on position
+            score: 0.5 - index * 0.01, // Lower pseudo score to indicate keyword match
             payload: p.payload,
           }))
 
@@ -1453,7 +1638,141 @@ async function searchQdrantMemories(
   return result
 }
 
+// Unified federated search across all memory sources
+// Uses Reciprocal Rank Fusion (RRF) to merge results from different sources
+async function unifiedSearch(
+  query: string,
+  limit: number
+): Promise<{
+  results: Array<{
+    id: string
+    source: 'postgresql' | 'memgraph' | 'qdrant'
+    title: string
+    content: string
+    score: number
+    metadata: Record<string, unknown>
+  }>
+  stats: {
+    postgresql: number
+    memgraph: number
+    qdrant: number
+    totalTime: number
+  }
+}> {
+  const startTime = Date.now()
+  const k = 60 // RRF constant (standard value from research papers)
+
+  interface RankedResult {
+    id: string
+    source: 'postgresql' | 'memgraph' | 'qdrant'
+    title: string
+    content: string
+    originalScore: number
+    rank: number
+    metadata: Record<string, unknown>
+  }
+
+  // Search all sources in parallel
+  const [pgResults, mgResults, qdResults] = await Promise.all([
+    queryLearnings(query, limit * 2),
+    searchMemgraphNodes(query, undefined, limit * 2),
+    searchQdrantMemories(query, 'mem0_memories', limit * 2),
+  ])
+
+  // Convert PostgreSQL results
+  const pgRanked: RankedResult[] = pgResults.map((learning, index) => ({
+    id: `pg-${learning.id}`,
+    source: 'postgresql' as const,
+    title: learning.source || learning.category,
+    content: learning.content.slice(0, 300) + (learning.content.length > 300 ? '...' : ''),
+    originalScore: learning.confidence,
+    rank: index + 1,
+    metadata: {
+      category: learning.category,
+      createdAt: learning.createdAt,
+      fullContent: learning.content,
+    },
+  }))
+
+  // Convert Memgraph results
+  const mgRanked: RankedResult[] = mgResults.results.map((node, index) => ({
+    id: `mg-${node.id}`,
+    source: 'memgraph' as const,
+    title: node.label,
+    content: String(node.properties.instruction || node.properties.description || node.properties.output || '').slice(0, 300),
+    originalScore: node.score || 0.5,
+    rank: index + 1,
+    metadata: {
+      type: node.type,
+      properties: node.properties,
+    },
+  }))
+
+  // Convert Qdrant results
+  const qdRanked: RankedResult[] = qdResults.results.map((point, index) => ({
+    id: `qd-${point.id}`,
+    source: 'qdrant' as const,
+    title: String(point.payload?.user_id || 'Memory'),
+    content: String(point.payload?.data || '').slice(0, 300) + (String(point.payload?.data || '').length > 300 ? '...' : ''),
+    originalScore: point.score,
+    rank: index + 1,
+    metadata: {
+      payload: point.payload,
+      createdAt: point.payload?.created_at,
+    },
+  }))
+
+  // Apply Reciprocal Rank Fusion (RRF) scoring
+  // RRF score = sum(1 / (k + rank_i)) for each ranking list
+  const rrfScores = new Map<string, { result: RankedResult; rrfScore: number }>()
+
+  // Helper to add RRF score
+  const addRRFScore = (results: RankedResult[]) => {
+    for (const result of results) {
+      const existing = rrfScores.get(result.id)
+      const rrfContribution = 1 / (k + result.rank)
+
+      if (existing) {
+        existing.rrfScore += rrfContribution
+      } else {
+        rrfScores.set(result.id, {
+          result,
+          rrfScore: rrfContribution,
+        })
+      }
+    }
+  }
+
+  addRRFScore(pgRanked)
+  addRRFScore(mgRanked)
+  addRRFScore(qdRanked)
+
+  // Sort by RRF score and take top results
+  const sortedResults = Array.from(rrfScores.values())
+    .sort((a, b) => b.rrfScore - a.rrfScore)
+    .slice(0, limit)
+    .map(({ result, rrfScore }) => ({
+      id: result.id,
+      source: result.source,
+      title: result.title,
+      content: result.content,
+      score: Math.round(rrfScore * 1000) / 1000, // Normalized RRF score
+      metadata: result.metadata,
+    }))
+
+  return {
+    results: sortedResults,
+    stats: {
+      postgresql: pgResults.length,
+      memgraph: mgResults.results.length,
+      qdrant: qdResults.results.length,
+      totalTime: Date.now() - startTime,
+    },
+  }
+}
+
 // Memgraph keyword search function
+// Uses text indexes for fast search on CyberTechnique nodes (1.7M+ records)
 async function searchMemgraphNodes(
   keyword: string,
   nodeType: string | undefined,
@@ -1463,7 +1782,9 @@ async function searchMemgraphNodes(
 }> {
   try {
     await memgraphService.connect()
-    const searchResults = await memgraphService.searchNodes(
+
+    // Use text index search for better performance
+    const searchResults = await memgraphService.textSearch(
       keyword,
       nodeType === 'all' ? undefined : nodeType,
       limit
@@ -1475,12 +1796,79 @@ async function searchMemgraphNodes(
         label: r.label,
         type: r.type,
         properties: r.properties,
+        score: r.score,
       })),
     }
   } catch (error) {
     console.error('Failed to search Memgraph:', error)
     return { results: [] }
   }
+}
+
+// Valid Cypher keywords that can start a query
+const VALID_CYPHER_STARTS = [
+  'MATCH', 'RETURN', 'CREATE', 'MERGE', 'DELETE', 'DETACH', 'SET', 'REMOVE',
+  'WITH', 'UNWIND', 'CALL', 'SHOW', 'OPTIONAL', 'EXPLAIN', 'PROFILE',
+  'LOAD', 'FOREACH', 'USING', 'DROP', 'ALTER', 'GRANT', 'REVOKE', 'DENY'
+]
+
+// Validate Cypher query syntax before sending to Memgraph
+function validateCypherQuery(query: string): { valid: boolean; error?: string; suggestion?: string } {
+  const trimmed = query.trim()
+  if (!trimmed) {
+    return { valid: false, error: 'Query is empty' }
+  }
+
+  // Get first word
+  const firstWord = trimmed.split(/[\s(]/)[0].toUpperCase()
+
+  // Check if it starts with a valid Cypher keyword
+  if (!VALID_CYPHER_STARTS.includes(firstWord)) {
+    const suggestions: Record<string, string> = {
+      'SELECT': 'Cypher uses MATCH/RETURN instead of SELECT. Try: MATCH (n) RETURN n LIMIT 10',
+      'FROM': 'Cypher uses MATCH instead of FROM. Try: MATCH (n:NodeType) RETURN n',
+      'WHERE': 'WHERE must follow MATCH. Try: MATCH (n) WHERE n.name = "value" RETURN n',
+      'INSERT': 'Cypher uses CREATE instead of INSERT. Try: CREATE (n:Label {prop: "value"})',
+      'UPDATE': 'Cypher uses SET instead of UPDATE. Try: MATCH (n) SET n.prop = "value"',
+    }
+
+    return {
+      valid: false,
+      error: `Invalid Cypher syntax: "${firstWord}" is not a valid starting keyword`,
+      suggestion: suggestions[firstWord] ||
+        `Valid Cypher queries start with: ${VALID_CYPHER_STARTS.slice(0, 8).join(', ')}...\nExample: MATCH (n:CyberTechnique) RETURN n LIMIT 10`
+    }
+  }
+
+  return { valid: true }
+}
+
+// Parse Memgraph errors into user-friendly messages
+function parseMemgraphError(error: Error): string {
+  const msg = error.message
+
+  // Parse common error patterns
+  if (msg.includes('mismatched input')) {
+    const match = msg.match(/mismatched input '([^']+)'/)
+    if (match) {
+      return `Syntax error: Unexpected "${match[1]}". Check your Cypher syntax.`
+    }
+  }
+
+  if (msg.includes('Unknown exception')) {
+    return 'Query execution failed. This may be a bug in text_search - try regex_search instead.'
+  }
+
+  if (msg.includes('not found') || msg.includes("doesn't exist")) {
+    return 'Function or procedure not found. Check the name and available procedures.'
+  }
+
+  if (msg.includes('Invalid input')) {
+    return 'Invalid input in query. Check property names and values.'
+  }
+
+  // Return cleaned error
+  return msg.replace(/\{[^}]+\}/g, '').trim() || 'Query execution failed'
 }
 
 // Raw query execution function
@@ -1491,6 +1879,7 @@ async function executeRawQuery(
   success: boolean
   data: unknown
   error?: string
+  suggestion?: string
   executionTime: number
 }> {
   const startTime = Date.now()
@@ -1498,6 +1887,17 @@ async function executeRawQuery(
   try {
     switch (source) {
       case 'postgresql': {
+        // Validate SQL query doesn't contain dangerous operations
+        const upperQuery = query.toUpperCase().trim()
+        if (upperQuery.includes('DROP ') || upperQuery.includes('TRUNCATE ') || upperQuery.includes('DELETE FROM ') && !upperQuery.includes('WHERE')) {
+          return {
+            success: false,
+            data: null,
+            error: 'Dangerous operation detected. DROP, TRUNCATE, and DELETE without WHERE are not allowed.',
+            executionTime: Date.now() - startTime,
+          }
+        }
+
         const cmdResult = execSync(
           buildPsqlCommandWithDelimiter(query),
           { encoding: 'utf-8', timeout: 30000, shell: '/bin/bash' }
@@ -1510,6 +1910,18 @@ async function executeRawQuery(
       }
 
       case 'memgraph': {
+        // Validate Cypher query before sending
+        const validation = validateCypherQuery(query)
+        if (!validation.valid) {
+          return {
+            success: false,
+            data: null,
+            error: validation.error,
+            suggestion: validation.suggestion,
+            executionTime: Date.now() - startTime,
+          }
+        }
+
         // Use direct Bolt connection instead of podman exec
         await memgraphService.connect()
         const results = await memgraphService.query(query)
@@ -1573,10 +1985,23 @@ async function executeRawQuery(
         }
     }
   } catch (error) {
+    // Parse error based on source for better user messages
+    let errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    let suggestion: string | undefined
+
+    if (source === 'memgraph' && error instanceof Error) {
+      errorMessage = parseMemgraphError(error)
+      // Add helpful suggestion for common errors
+      if (errorMessage.includes('Syntax error')) {
+        suggestion = 'Tip: Use MATCH (n:Label) RETURN n LIMIT 10 for basic queries'
+      }
+    }
+
     return {
       success: false,
       data: null,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMessage,
+      suggestion,
       executionTime: Date.now() - startTime,
     }
   }

@@ -166,6 +166,9 @@ class MemgraphService {
   }
 
   // Search nodes by keyword
+  // Handles different node types with their specific property structures:
+  // - CyberTechnique: instruction, input, output, category
+  // - Technology/Feature/etc: name, description, title
   async searchNodes(
     keyword: string,
     nodeType?: string,
@@ -177,9 +180,21 @@ class MemgraphService {
     properties: Record<string, unknown>
   }>> {
     const typeFilter = nodeType ? `AND labels(n)[0] = $nodeType` : ''
+    // Case-insensitive search across multiple property fields
+    // Different node types have different properties:
+    // - CyberTechnique: instruction, input, output, category
+    // - Technology, Feature, etc: name, description, title
+    const keywordLower = keyword.toLowerCase()
     const cypher = `
       MATCH (n)
-      WHERE (n.name CONTAINS $keyword OR n.title CONTAINS $keyword OR n.description CONTAINS $keyword)
+      WHERE (
+        toLower(coalesce(n.name, '')) CONTAINS $keyword
+        OR toLower(coalesce(n.title, '')) CONTAINS $keyword
+        OR toLower(coalesce(n.description, '')) CONTAINS $keyword
+        OR toLower(coalesce(n.instruction, '')) CONTAINS $keyword
+        OR toLower(coalesce(n.category, '')) CONTAINS $keyword
+        OR toLower(coalesce(n.output, '')) CONTAINS $keyword
+      )
       ${typeFilter}
       RETURN id(n) as id, labels(n)[0] as type, n as node
       LIMIT $limit
@@ -189,14 +204,133 @@ class MemgraphService {
       id: number
       type: string
       node: { properties: Record<string, unknown> }
-    }>(cypher, { keyword, nodeType, limit: neo4j.int(limit) })
+    }>(cypher, { keyword: keywordLower, nodeType, limit: neo4j.int(limit) })
 
-    return results.map(r => ({
-      id: r.id,
-      label: (r.node.properties.name || r.node.properties.title || `Node ${r.id}`) as string,
-      type: r.type || 'Unknown',
-      properties: r.node.properties,
-    }))
+    return results.map(r => {
+      const props = r.node.properties
+      // Get a meaningful label based on node type
+      let label: string
+      if (props.name) {
+        label = props.name as string
+      } else if (props.title) {
+        label = props.title as string
+      } else if (props.instruction) {
+        // For CyberTechnique nodes, use instruction (truncated)
+        const instr = props.instruction as string
+        label = instr.length > 80 ? instr.slice(0, 80) + '...' : instr
+      } else if (props.category) {
+        label = `[${props.category}] ${props.id || `Node ${r.id}`}`
+      } else {
+        label = `Node ${r.id}`
+      }
+
+      return {
+        id: r.id,
+        label,
+        type: r.type || 'Unknown',
+        properties: props,
+      }
+    })
+  }
+
+  // Fast text search using Memgraph text indexes (Tantivy-powered)
+  // Uses text_search.regex_search for CyberTechnique nodes
+  // Falls back to CONTAINS for other node types
+  async textSearch(
+    keyword: string,
+    nodeType?: string,
+    limit = 50
+  ): Promise<Array<{
+    id: number
+    label: string
+    type: string
+    properties: Record<string, unknown>
+    score: number
+  }>> {
+    const results: Array<{
+      id: number
+      label: string
+      type: string
+      properties: Record<string, unknown>
+      score: number
+    }> = []
+
+    // Escape regex special characters in keyword
+    const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').toLowerCase()
+    const regexPattern = `.*${escapedKeyword}.*`
+
+    try {
+      // Search CyberTechnique instruction index
+      if (!nodeType || nodeType === 'CyberTechnique') {
+        const instrResults = await this.query<{
+          node: { id: number; labels: string[]; properties: Record<string, unknown> }
+          score: number
+        }>(`
+          CALL text_search.regex_search('cyber_instr', $pattern)
+          YIELD node, score
+          RETURN node, score
+          LIMIT $limit
+        `, { pattern: regexPattern, limit: neo4j.int(limit) })
+
+        for (const r of instrResults) {
+          const props = r.node.properties
+          const instr = (props.instruction as string) || ''
+          results.push({
+            id: r.node.id,
+            label: instr.length > 80 ? instr.slice(0, 80) + '...' : instr,
+            type: 'CyberTechnique',
+            properties: props,
+            score: r.score,
+          })
+        }
+      }
+
+      // Also search category index for more diverse results
+      if (!nodeType || nodeType === 'CyberTechnique') {
+        const remaining = limit - results.length
+        if (remaining > 0) {
+          const catResults = await this.query<{
+            node: { id: number; labels: string[]; properties: Record<string, unknown> }
+            score: number
+          }>(`
+            CALL text_search.regex_search('cyber_cat', $pattern)
+            YIELD node, score
+            RETURN node, score
+            LIMIT $limit
+          `, { pattern: regexPattern, limit: neo4j.int(remaining) })
+
+          // Add unique results only
+          const existingIds = new Set(results.map(r => r.id))
+          for (const r of catResults) {
+            if (!existingIds.has(r.node.id)) {
+              const props = r.node.properties
+              results.push({
+                id: r.node.id,
+                label: `[${props.category}] ${(props.instruction as string || '').slice(0, 60)}...`,
+                type: 'CyberTechnique',
+                properties: props,
+                score: r.score,
+              })
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // Text search failed, fall back to CONTAINS-based search
+      console.warn('[Memgraph] Text index search failed, using fallback:', error)
+      const fallbackResults = await this.searchNodes(keyword, nodeType, limit)
+      return fallbackResults.map(r => ({ ...r, score: 1.0 }))
+    }
+
+    // For non-CyberTechnique types, use CONTAINS-based search
+    if (nodeType && nodeType !== 'CyberTechnique') {
+      const fallbackResults = await this.searchNodes(keyword, nodeType, limit)
+      return fallbackResults.map(r => ({ ...r, score: 1.0 }))
+    }
+
+    // Sort by score descending
+    results.sort((a, b) => b.score - a.score)
+    return results.slice(0, limit)
   }
 
   // Get sample graph for visualization
@@ -230,6 +364,20 @@ class MemgraphService {
     const nodes = new Map<string, { id: string; label: string; type: string; properties: Record<string, unknown> }>()
     const edges = new Map<string, { id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>()
 
+    // Helper to get a meaningful label for a node
+    const getNodeLabel = (props: Record<string, unknown>, nodeId: string): string => {
+      if (props.name) return props.name as string
+      if (props.title) return props.title as string
+      if (props.instruction) {
+        const instr = props.instruction as string
+        return instr.length > 60 ? instr.slice(0, 60) + '...' : instr
+      }
+      if (props.category) {
+        return `[${props.category}]`
+      }
+      return `Node ${nodeId}`
+    }
+
     for (const row of results) {
       // Add source node
       const sourceId = String(row.sourceId)
@@ -237,7 +385,7 @@ class MemgraphService {
         const props = row.sourceNode?.properties || {}
         nodes.set(sourceId, {
           id: sourceId,
-          label: (props.name || props.title || `Node ${sourceId}`) as string,
+          label: getNodeLabel(props, sourceId),
           type: row.sourceType || 'Unknown',
           properties: props,
         })
@@ -250,7 +398,7 @@ class MemgraphService {
           const props = row.targetNode?.properties || {}
           nodes.set(targetId, {
             id: targetId,
-            label: (props.name || props.title || `Node ${targetId}`) as string,
+            label: getNodeLabel(props, targetId),
             type: row.targetType || 'Unknown',
             properties: props,
           })

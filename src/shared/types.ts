@@ -448,7 +448,24 @@ export type IPCChannels = {
     success: boolean
     data: unknown
     error?: string
+    suggestion?: string
     executionTime: number
+  }>
+  'memory:unified-search': (query: string, limit?: number) => Promise<{
+    results: Array<{
+      id: string
+      source: 'postgresql' | 'memgraph' | 'qdrant'
+      title: string
+      content: string
+      score: number
+      metadata: Record<string, unknown>
+    }>
+    stats: {
+      postgresql: number
+      memgraph: number
+      qdrant: number
+      totalTime: number
+    }
   }>
 
   // Terminal

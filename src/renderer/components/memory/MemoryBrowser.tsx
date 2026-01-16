@@ -76,12 +76,14 @@ interface MemgraphSearchResult {
   label: string
   type: string
   properties: Record<string, unknown>
+  score?: number
 }
 
 interface RawQueryResult {
   success: boolean
   data: unknown
   error?: string
+  suggestion?: string
   executionTime: number
 }
 
@@ -311,45 +313,43 @@ export function MemoryBrowser() {
     }
   }
 
-  // Handle natural language search
+  // Handle natural language search using unified federated search with RRF
   const handleNaturalSearch = async () => {
     if (!naturalQuery.trim()) return
     setNaturalLoading(true)
     setNaturalResponse(null)
 
     try {
-      // Search all sources and compile response
-      const results: string[] = []
-
-      // PostgreSQL
-      const learningsResult = await window.electron.invoke('memory:learnings', naturalQuery, 5)
-      if (learningsResult.length > 0) {
-        results.push('📚 **Learnings Found:**\n' + learningsResult.map((l: Learning, i: number) =>
-          `${i + 1}. [${l.category}] ${l.content.slice(0, 200)}${l.content.length > 200 ? '...' : ''}`
-        ).join('\n'))
-      }
-
-      // Memgraph
-      const memgraphResult = await window.electron.invoke('memory:memgraph:search', naturalQuery, undefined, 5)
-      if (memgraphResult.results.length > 0) {
-        results.push('🔗 **Knowledge Graph Nodes:**\n' + memgraphResult.results.map((n: MemgraphSearchResult, i: number) =>
-          `${i + 1}. [${n.type}] ${n.label}`
-        ).join('\n'))
-      }
-
-      // Qdrant
-      const qdrantResult = await window.electron.invoke('memory:qdrant:search', naturalQuery, 'mem0_memories', 5)
-      if (qdrantResult.results.length > 0) {
-        results.push('🧠 **Vector Memories:**\n' + qdrantResult.results.map((p: { id: string; payload: Record<string, unknown>; score: number }, i: number) => {
-          const data = String(p.payload?.data || '').slice(0, 200)
-          return `${i + 1}. ${data}${data.length >= 200 ? '...' : ''} (Score: ${(p.score * 100).toFixed(1)}%)`
-        }).join('\n'))
-      }
+      // Use unified search with RRF (Reciprocal Rank Fusion) for better results
+      const { results, stats } = await window.electron.invoke('memory:unified-search', naturalQuery, 15)
 
       if (results.length > 0) {
-        setNaturalResponse(`### Search Results for: "${naturalQuery}"\n\n${results.join('\n\n---\n\n')}`)
+        // Group results by source
+        const sourceIcons: Record<string, string> = {
+          postgresql: '📚',
+          memgraph: '🔗',
+          qdrant: '🧠',
+        }
+        const sourceLabels: Record<string, string> = {
+          postgresql: 'Learnings',
+          memgraph: 'Knowledge Graph',
+          qdrant: 'Vector Memories',
+        }
+
+        // Build response with unified ranking
+        const formattedResults = results.map((r, i) => {
+          const icon = sourceIcons[r.source] || '📄'
+          const source = sourceLabels[r.source] || r.source
+          const score = (r.score * 100).toFixed(1)
+          return `${i + 1}. ${icon} **[${source}]** ${r.title}\n   ${r.content}\n   _Score: ${score}% | ID: ${r.id}_`
+        }).join('\n\n')
+
+        // Stats summary
+        const statsLine = `_Searched ${stats.postgresql} learnings, ${stats.memgraph} graph nodes, ${stats.qdrant} vector memories in ${stats.totalTime}ms_`
+
+        setNaturalResponse(`### 🔍 Results for: "${naturalQuery}"\n\n${statsLine}\n\n---\n\n${formattedResults}`)
       } else {
-        setNaturalResponse(`### No results found for: "${naturalQuery}"\n\nTry different keywords or check the raw query mode for advanced searches.`)
+        setNaturalResponse(`### No results found for: "${naturalQuery}"\n\nTry different keywords or check the raw query mode for advanced searches.\n\n_Searched all ${stats.totalTime}ms_`)
       }
     } catch (error) {
       setNaturalResponse(`### Error\n\nFailed to search: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -1022,6 +1022,17 @@ function RawQueryPanel({
                 {rawResult.error || JSON.stringify(rawResult.data, null, 2)}
               </pre>
             </div>
+
+            {/* Suggestion box for errors */}
+            {rawResult.suggestion && (
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-accent-blue/10 border border-accent-blue/30">
+                <Sparkles className="w-4 h-4 text-accent-blue flex-shrink-0 mt-0.5" />
+                <div className="flex-1 text-sm">
+                  <p className="text-accent-blue font-medium mb-1">Suggestion</p>
+                  <p className="text-text-secondary whitespace-pre-wrap">{rawResult.suggestion}</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1117,8 +1128,19 @@ function NaturalQueryPanel({
           <div className="flex items-center justify-center py-8 text-text-muted">
             <div className="text-center">
               <Sparkles className="w-8 h-8 mx-auto mb-3 opacity-50" />
-              <p className="text-sm">Search across all memory systems with natural language</p>
-              <p className="text-xs mt-1 opacity-70">Results from PostgreSQL, Memgraph, and Qdrant combined</p>
+              <p className="text-sm">Unified Federated Search with RRF</p>
+              <p className="text-xs mt-1 opacity-70">Searches PostgreSQL, Memgraph, and Qdrant in parallel, then merges results using Reciprocal Rank Fusion for optimal relevance</p>
+              <div className="flex items-center justify-center gap-3 mt-3 text-xs">
+                <span className="flex items-center gap-1 px-2 py-1 rounded bg-accent-blue/10 text-accent-blue">
+                  <Database className="w-3 h-3" /> FTS + Fuzzy
+                </span>
+                <span className="flex items-center gap-1 px-2 py-1 rounded bg-accent-purple/10 text-accent-purple">
+                  <GitBranch className="w-3 h-3" /> Text Index
+                </span>
+                <span className="flex items-center gap-1 px-2 py-1 rounded bg-accent-green/10 text-accent-green">
+                  <Brain className="w-3 h-3" /> Semantic
+                </span>
+              </div>
             </div>
           </div>
         )}
@@ -1314,7 +1336,7 @@ function LearningCard({ learning, expanded, onToggle, formatDate }: LearningCard
         className="w-full p-4 flex items-start justify-between gap-3 text-left"
       >
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <span className={cn('px-2 py-0.5 rounded border text-xs font-medium', color)}>
               {learning.category}
             </span>
@@ -1322,6 +1344,13 @@ function LearningCard({ learning, expanded, onToggle, formatDate }: LearningCard
               <span className="text-xs text-text-muted flex items-center gap-1">
                 <Tag className="w-3 h-3" />
                 {learning.source}
+              </span>
+            )}
+            {/* Show relevance score when search was performed (confidence !== 1) */}
+            {learning.confidence !== 1 && learning.confidence > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-accent-purple/20 text-accent-purple text-xs font-medium flex items-center gap-1">
+                <Zap className="w-3 h-3" />
+                {(learning.confidence * 100).toFixed(0)}%
               </span>
             )}
             <span className="text-xs text-text-muted/60">
@@ -1379,6 +1408,7 @@ interface MemgraphNodeCardProps {
 
 function MemgraphNodeCard({ node }: MemgraphNodeCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const [showFullContent, setShowFullContent] = useState(false)
 
   const typeColors: Record<string, string> = {
     CyberTechnique: 'bg-accent-purple/20 text-accent-purple border-accent-purple/30',
@@ -1387,10 +1417,26 @@ function MemgraphNodeCard({ node }: MemgraphNodeCardProps) {
     Pattern: 'bg-accent-blue/20 text-accent-blue border-accent-blue/30',
     Technology: 'bg-accent-teal/20 text-accent-teal border-accent-teal/30',
     Project: 'bg-accent-green/20 text-accent-green border-accent-green/30',
+    Feature: 'bg-accent-blue/20 text-accent-blue border-accent-blue/30',
     Target: 'bg-accent-yellow/20 text-accent-yellow border-accent-yellow/30',
   }
 
   const color = typeColors[node.type] || 'bg-text-muted/20 text-text-muted border-text-muted/30'
+
+  // Priority order for displaying properties (especially for CyberTechnique nodes)
+  const priorityFields = ['name', 'title', 'description', 'category', 'instruction', 'input', 'output', 'source']
+  const sortedProperties = Object.entries(node.properties).sort((a, b) => {
+    const aIndex = priorityFields.indexOf(a[0])
+    const bIndex = priorityFields.indexOf(b[0])
+    if (aIndex === -1 && bIndex === -1) return 0
+    if (aIndex === -1) return 1
+    if (bIndex === -1) return -1
+    return aIndex - bIndex
+  })
+
+  // Get description or output for preview
+  const preview = node.properties.description || node.properties.output || node.properties.instruction
+  const previewText = preview ? String(preview).slice(0, 150) : null
 
   return (
     <div className={cn(
@@ -1401,42 +1447,99 @@ function MemgraphNodeCard({ node }: MemgraphNodeCardProps) {
     )}>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full p-4 flex items-center justify-between gap-3 text-left"
+        className="w-full p-4 flex items-start justify-between gap-3 text-left"
       >
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <span className={cn('px-2 py-0.5 rounded border text-xs font-medium flex-shrink-0', color)}>
-            {node.type}
-          </span>
-          <span className="text-sm text-text-primary truncate font-medium">{node.label}</span>
+        <div className="flex flex-col gap-2 min-w-0 flex-1">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className={cn('px-2 py-0.5 rounded border text-xs font-medium flex-shrink-0', color)}>
+              {node.type}
+            </span>
+            {node.properties.category && (
+              <span className="text-xs text-text-muted bg-surface-hover px-1.5 py-0.5 rounded">
+                {String(node.properties.category)}
+              </span>
+            )}
+            {/* Show search relevance score when available */}
+            {node.score !== undefined && node.score > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-accent-purple/20 text-accent-purple text-xs font-medium flex items-center gap-1">
+                <Activity className="w-3 h-3" />
+                {(node.score * 100).toFixed(0)}%
+              </span>
+            )}
+          </div>
+          <span className="text-sm text-text-primary font-medium">{node.label}</span>
+          {previewText && !expanded && (
+            <span className="text-xs text-text-muted line-clamp-2">{previewText}...</span>
+          )}
         </div>
         <ChevronRight
           className={cn(
-            'w-4 h-4 text-text-muted transition-transform duration-200',
+            'w-4 h-4 text-text-muted transition-transform duration-200 flex-shrink-0 mt-1',
             expanded && 'rotate-90 text-accent-purple'
           )}
         />
       </button>
       {expanded && (
         <div className="px-4 pb-4 border-t border-border/50">
-          <div className="mt-3 p-3 bg-background rounded-lg">
-            <div className="text-xs text-text-muted mb-2 flex items-center gap-2">
-              <Table className="w-3 h-3" />
-              Properties
-            </div>
-            <div className="space-y-1.5 text-sm">
-              {Object.entries(node.properties).slice(0, 12).map(([key, value]) => (
-                <div key={key} className="flex gap-2">
-                  <span className="text-text-muted font-mono text-xs min-w-[100px]">{key}:</span>
-                  <span className="text-text-primary text-sm truncate flex-1">
-                    {String(value).slice(0, 300)}
-                  </span>
-                </div>
-              ))}
-              {Object.keys(node.properties).length > 12 && (
-                <div className="text-xs text-text-muted pt-1">
-                  +{Object.keys(node.properties).length - 12} more properties
-                </div>
-              )}
+          <div className="mt-3 space-y-3">
+            {/* CyberTechnique special display */}
+            {node.type === 'CyberTechnique' && (
+              <>
+                {node.properties.instruction && (
+                  <div className="p-3 bg-surface-hover rounded-lg">
+                    <div className="text-xs text-accent-purple font-medium mb-1">Instruction</div>
+                    <div className="text-sm text-text-primary whitespace-pre-wrap">
+                      {String(node.properties.instruction)}
+                    </div>
+                  </div>
+                )}
+                {node.properties.output && (
+                  <div className="p-3 bg-background rounded-lg">
+                    <div className="text-xs text-accent-green font-medium mb-1 flex items-center justify-between">
+                      <span>Output</span>
+                      {String(node.properties.output).length > 500 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowFullContent(!showFullContent) }}
+                          className="text-accent-blue hover:underline"
+                        >
+                          {showFullContent ? 'Show less' : 'Show full'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-sm text-text-primary whitespace-pre-wrap font-mono text-xs leading-relaxed">
+                      {showFullContent
+                        ? String(node.properties.output)
+                        : String(node.properties.output).slice(0, 500) + (String(node.properties.output).length > 500 ? '...' : '')}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* General properties display */}
+            <div className="p-3 bg-background rounded-lg">
+              <div className="text-xs text-text-muted mb-2 flex items-center gap-2">
+                <Table className="w-3 h-3" />
+                Properties
+              </div>
+              <div className="space-y-1.5 text-sm">
+                {sortedProperties
+                  .filter(([key]) => !['instruction', 'output'].includes(key) || node.type !== 'CyberTechnique')
+                  .slice(0, 10)
+                  .map(([key, value]) => (
+                    <div key={key} className="flex gap-2">
+                      <span className="text-text-muted font-mono text-xs min-w-[100px] flex-shrink-0">{key}:</span>
+                      <span className="text-text-primary text-sm break-words flex-1">
+                        {String(value).slice(0, 200)}{String(value).length > 200 ? '...' : ''}
+                      </span>
+                    </div>
+                  ))}
+                {sortedProperties.length > 10 && (
+                  <div className="text-xs text-text-muted pt-1">
+                    +{sortedProperties.length - 10} more properties
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <div className="mt-2 text-xs text-text-muted font-mono">
