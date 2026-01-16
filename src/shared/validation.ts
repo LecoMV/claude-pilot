@@ -246,6 +246,10 @@ export const ipcSchemas: Record<string, Schema> = {
     name: validators.nonEmptyString(),
   },
 
+  'mcp:saveConfig': {
+    content: validators.string({ required: true, maxLength: 500000 }),
+  },
+
   // Memory channels
   'memory:learnings': {
     query: validators.string(),
@@ -253,12 +257,40 @@ export const ipcSchemas: Record<string, Schema> = {
   },
 
   'memory:graph': {
-    query: validators.nonEmptyString(),
+    query: validators.string(),
+    limit: validators.number({ min: 1, max: 500 }),
   },
 
   'memory:vectors': {
     query: validators.nonEmptyString(),
     limit: validators.number({ min: 1, max: 100 }),
+  },
+
+  'memory:qdrant:browse': {
+    collection: validators.string({ pattern: /^[\w-]+$/ }),
+    limit: validators.number({ min: 1, max: 500 }),
+    offset: validators.string(),
+  },
+
+  'memory:qdrant:search': {
+    query: validators.nonEmptyString(),
+    collection: validators.string({ pattern: /^[\w-]+$/ }),
+    limit: validators.number({ min: 1, max: 100 }),
+  },
+
+  'memory:memgraph:search': {
+    keyword: validators.nonEmptyString(),
+    nodeType: validators.string({ pattern: /^[\w-]+$/ }),
+    limit: validators.number({ min: 1, max: 500 }),
+  },
+
+  'memory:raw': {
+    source: {
+      type: 'string',
+      required: true,
+      enum: ['postgresql', 'memgraph', 'qdrant'],
+    },
+    query: validators.nonEmptyString(),
   },
 
   // Profile channels
@@ -278,6 +310,24 @@ export const ipcSchemas: Record<string, Schema> = {
     enabled: { type: 'boolean', required: true },
   },
 
+  'profile:saveRule': {
+    path: validators.filePath(),
+    content: validators.string({ maxLength: 100000 }),
+  },
+
+  // Profiles (multi-profile management)
+  'profiles:get': {
+    id: validators.id(),
+  },
+
+  'profiles:delete': {
+    id: validators.id(),
+  },
+
+  'profiles:activate': {
+    id: validators.id(),
+  },
+
   // Context channels
   'context:setAutoCompact': {
     enabled: { type: 'boolean', required: true },
@@ -292,6 +342,15 @@ export const ipcSchemas: Record<string, Schema> = {
   'services:podmanAction': {
     id: validators.id(),
     action: { type: 'string', required: true, enum: ['start', 'stop', 'restart'] },
+  },
+
+  // Logs channels
+  'logs:recent': {
+    limit: validators.number({ min: 1, max: 10000 }),
+  },
+
+  'logs:stream': {
+    sources: validators.array(validators.nonEmptyString()),
   },
 
   // Ollama channels
@@ -340,6 +399,20 @@ export const ipcSchemas: Record<string, Schema> = {
     messageId: validators.id(),
   },
 
+  // Settings channels
+  'settings:save': {
+    settings: validators.object(undefined, { required: true }),
+  },
+
+  // Shell channels
+  'shell:openPath': {
+    path: validators.filePath(),
+  },
+
+  'shell:openExternal': {
+    url: validators.url(),
+  },
+
   // Terminal channels
   'terminal:write': {
     id: validators.id(),
@@ -354,6 +427,24 @@ export const ipcSchemas: Record<string, Schema> = {
 
   'terminal:close': {
     id: validators.id(),
+  },
+
+  'terminal:openAt': {
+    path: validators.filePath(),
+  },
+
+  // Sessions channels
+  'sessions:get': {
+    sessionId: validators.nonEmptyString(),
+  },
+
+  'sessions:getMessages': {
+    sessionId: validators.nonEmptyString(),
+    limit: validators.number({ min: 1, max: 10000 }),
+  },
+
+  'sessions:watch': {
+    enable: { type: 'boolean', required: true },
   },
 }
 

@@ -4,6 +4,7 @@ import { memgraphService } from '../services/memgraph'
 import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync, statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import { ipcSchemas, validate } from '../../shared/validation'
 import type {
   SystemStatus,
   ResourceUsage,
@@ -100,6 +101,29 @@ class DataCache {
 }
 
 const dataCache = new DataCache()
+
+/**
+ * Validate IPC handler input against schema
+ * Throws ValidationError if invalid
+ */
+function validateInput<T>(channel: string, args: Record<string, unknown>): T {
+  const schema = ipcSchemas[channel]
+  if (!schema) {
+    return args as T
+  }
+  return validate<T>(args, schema, channel)
+}
+
+/**
+ * Helper to safely get validated args from handler parameters
+ */
+function getValidatedArgs<T>(channel: string, argValues: unknown[], argNames: string[]): T {
+  const args: Record<string, unknown> = {}
+  argNames.forEach((name, i) => {
+    args[name] = argValues[i]
+  })
+  return validateInput<T>(channel, args)
+}
 
 // Log stream manager for real-time log streaming
 class LogStreamManager {
@@ -340,15 +364,21 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('mcp:saveConfig', async (_event, content: string): Promise<boolean> => {
+    // Validate content length and type
+    const validated = getValidatedArgs<{ content: string }>(
+      'mcp:saveConfig',
+      [content],
+      ['content']
+    )
     const settingsPath = join(CLAUDE_DIR, 'settings.json')
     try {
       // Validate JSON before saving
-      JSON.parse(content)
+      JSON.parse(validated.content)
       // Ensure .claude directory exists
       if (!existsSync(CLAUDE_DIR)) {
         mkdirSync(CLAUDE_DIR, { recursive: true })
       }
-      writeFileSync(settingsPath, content, 'utf-8')
+      writeFileSync(settingsPath, validated.content, 'utf-8')
       return true
     } catch (error) {
       console.error('Failed to save MCP config:', error)
@@ -405,7 +435,13 @@ export function registerIpcHandlers(): void {
     error?: string
     executionTime: number
   }> => {
-    return executeRawQuery(source, query)
+    // Validate input
+    const validated = getValidatedArgs<{ source: string; query: string }>(
+      'memory:raw',
+      [source, query],
+      ['source', 'query']
+    )
+    return executeRawQuery(validated.source as 'postgresql' | 'memgraph' | 'qdrant', validated.query)
   })
 
   // Profile handlers
@@ -435,7 +471,13 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('profile:saveRule', async (_event, path: string, content: string): Promise<boolean> => {
     try {
-      writeFileSync(path, content, 'utf-8')
+      // Validate path and content - prevents path traversal attacks
+      const validated = getValidatedArgs<{ path: string; content: string }>(
+        'profile:saveRule',
+        [path, content],
+        ['path', 'content']
+      )
+      writeFileSync(validated.path, validated.content, 'utf-8')
       return true
     } catch (error) {
       console.error('Failed to save rule:', error)
@@ -519,11 +561,23 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('services:systemdAction', async (_event, name: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
-    return systemdAction(name, action)
+    // Validate service name and action type
+    const validated = getValidatedArgs<{ name: string; action: string }>(
+      'services:systemdAction',
+      [name, action],
+      ['name', 'action']
+    )
+    return systemdAction(validated.name, validated.action as 'start' | 'stop' | 'restart')
   })
 
   ipcMain.handle('services:podmanAction', async (_event, id: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
-    return podmanAction(id, action)
+    // Validate container ID and action type
+    const validated = getValidatedArgs<{ id: string; action: string }>(
+      'services:podmanAction',
+      [id, action],
+      ['id', 'action']
+    )
+    return podmanAction(validated.id, validated.action as 'start' | 'stop' | 'restart')
   })
 
   // Logs handlers
@@ -553,19 +607,27 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('ollama:pull', async (_event, model: string): Promise<boolean> => {
-    return pullOllamaModel(model)
+    // Validate model name
+    const validated = getValidatedArgs<{ model: string }>('ollama:pull', [model], ['model'])
+    return pullOllamaModel(validated.model)
   })
 
   ipcMain.handle('ollama:delete', async (_event, model: string): Promise<boolean> => {
-    return deleteOllamaModel(model)
+    // Validate model name
+    const validated = getValidatedArgs<{ model: string }>('ollama:delete', [model], ['model'])
+    return deleteOllamaModel(validated.model)
   })
 
   ipcMain.handle('ollama:run', async (_event, model: string): Promise<boolean> => {
-    return runOllamaModel(model)
+    // Validate model name
+    const validated = getValidatedArgs<{ model: string }>('ollama:run', [model], ['model'])
+    return runOllamaModel(validated.model)
   })
 
   ipcMain.handle('ollama:stop', async (_event, model: string): Promise<boolean> => {
-    return stopOllamaModel(model)
+    // Validate model name
+    const validated = getValidatedArgs<{ model: string }>('ollama:stop', [model], ['model'])
+    return stopOllamaModel(validated.model)
   })
 
   // Agent handlers
@@ -618,11 +680,23 @@ export function registerIpcHandlers(): void {
 
   // Shell operations
   ipcMain.handle('shell:openPath', async (_event, path: string): Promise<string> => {
-    return shell.openPath(path)
+    // Validate input - prevents path traversal attacks
+    const validated = getValidatedArgs<{ path: string }>(
+      'shell:openPath',
+      [path],
+      ['path']
+    )
+    return shell.openPath(validated.path)
   })
 
   ipcMain.handle('shell:openExternal', async (_event, url: string): Promise<void> => {
-    await shell.openExternal(url)
+    // Validate URL format
+    const validated = getValidatedArgs<{ url: string }>(
+      'shell:openExternal',
+      [url],
+      ['url']
+    )
+    await shell.openExternal(validated.url)
   })
 
   // Dialog operations
@@ -640,10 +714,16 @@ export function registerIpcHandlers(): void {
   // Terminal at specific path - sends message to renderer to open terminal at path
   ipcMain.handle('terminal:openAt', async (event, path: string): Promise<boolean> => {
     try {
+      // Validate path - prevents path traversal attacks
+      const validated = getValidatedArgs<{ path: string }>(
+        'terminal:openAt',
+        [path],
+        ['path']
+      )
       // Get the webContents that sent this message
       const webContents = event.sender
       // Send message back to renderer to navigate to terminal and set cwd
-      webContents.send('terminal:setCwd', path)
+      webContents.send('terminal:setCwd', validated.path)
       return true
     } catch {
       return false
