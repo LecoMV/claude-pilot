@@ -2,6 +2,7 @@
 // Replaces shell-based execSync calls for security and performance
 
 import { Pool, PoolConfig, QueryResult, QueryResultRow } from 'pg'
+import { credentialService } from './credentials'
 
 export interface PostgresConfig {
   host: string
@@ -16,6 +17,19 @@ class PostgresService {
   private config: PostgresConfig | null = null
 
   /**
+   * Get password from secure storage or environment variable
+   */
+  private getPassword(): string | undefined {
+    // Try credential service first, fall back to environment variable
+    try {
+      return credentialService.getWithFallback('postgresql.password', 'CLAUDE_PG_PASSWORD')
+    } catch {
+      // Credential service not initialized yet - use env var directly
+      return process.env.CLAUDE_PG_PASSWORD || undefined
+    }
+  }
+
+  /**
    * Connect to PostgreSQL with the given configuration
    * Uses connection pooling for efficient resource usage
    */
@@ -27,7 +41,7 @@ class PostgresService {
         port: parseInt(process.env.CLAUDE_PG_PORT || '5433', 10),
         user: process.env.CLAUDE_PG_USER || 'deploy',
         database: process.env.CLAUDE_PG_DATABASE || 'claude_memory',
-        password: process.env.CLAUDE_PG_PASSWORD || undefined,
+        password: config?.password ?? this.getPassword(),
       }
 
       // If already connected with same config, reuse pool

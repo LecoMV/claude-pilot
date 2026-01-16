@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, type WebContents, shell, dialog } from 'electro
 import { execSync, spawn, ChildProcess } from 'child_process'
 import { memgraphService } from '../services/memgraph'
 import { postgresService } from '../services/postgresql'
+import { credentialService } from '../services/credentials'
 import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync, statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -692,6 +693,55 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('settings:save', async (_event, settings: AppSettings): Promise<boolean> => {
     return saveAppSettings(settings)
+  })
+
+  // Credential handlers - secure credential storage using OS keychain
+  ipcMain.handle('credentials:store', async (_event, key: string, value: string): Promise<boolean> => {
+    try {
+      return credentialService.store(key, value)
+    } catch (error) {
+      console.error('Failed to store credential:', error)
+      return false
+    }
+  })
+
+  ipcMain.handle('credentials:retrieve', async (_event, key: string): Promise<string | null> => {
+    try {
+      return credentialService.retrieve(key)
+    } catch (error) {
+      console.error('Failed to retrieve credential:', error)
+      return null
+    }
+  })
+
+  ipcMain.handle('credentials:delete', async (_event, key: string): Promise<boolean> => {
+    try {
+      credentialService.delete(key)
+      return true
+    } catch (error) {
+      console.error('Failed to delete credential:', error)
+      return false
+    }
+  })
+
+  ipcMain.handle('credentials:has', async (_event, key: string): Promise<boolean> => {
+    try {
+      return credentialService.has(key)
+    } catch {
+      return false
+    }
+  })
+
+  ipcMain.handle('credentials:list', async (): Promise<string[]> => {
+    try {
+      return credentialService.listKeys()
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('credentials:isEncryptionAvailable', async (): Promise<boolean> => {
+    return credentialService.isEncryptionAvailable()
   })
 
   // System helpers

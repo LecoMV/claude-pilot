@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers, logStreamManager } from './ipc/handlers'
 import { terminalManager, registerTerminalHandlers } from './services/terminal'
+import { credentialService } from './services/credentials'
 import { setupGlobalErrorHandlers, configureErrorHandler, handleError } from './utils/error-handler'
 
 /**
@@ -162,6 +163,17 @@ app.whenReady().then(() => {
 
   // Configure security settings (CSP, permissions, headers)
   configureSessionSecurity()
+
+  // Initialize credential service for secure storage
+  // Must be done after app.whenReady() for safeStorage to work
+  credentialService.initialize()
+
+  // Migrate legacy credentials from environment variables
+  credentialService.migrateFromEnv({
+    'CLAUDE_PG_PASSWORD': 'postgresql.password',
+    'MEMGRAPH_PASSWORD': 'memgraph.password',
+    'ANTHROPIC_API_KEY': 'anthropic.apiKey',
+  })
 
   // Default open or close DevTools by F12 in development
   app.on('browser-window-created', (_, window) => {
