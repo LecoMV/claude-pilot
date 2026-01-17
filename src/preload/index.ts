@@ -68,6 +68,12 @@ const ALLOWED_CHANNELS = new Set<string>([
   'context:compact',
   'context:setAutoCompact',
 
+  // Transcript
+  'transcript:parse',
+  'transcript:stats',
+  'transcript:last',
+  'transcript:watch',
+
   // Services
   'services:systemd',
   'services:podman',
@@ -399,6 +405,15 @@ const claudeAPI = {
     stepFail: (planId: string, stepId: string, error: string) =>
       electronAPI.invoke('plans:stepFail', planId, stepId, error),
     getStats: () => electronAPI.invoke('plans:stats'),
+  },
+
+  // Transcript parsing
+  transcript: {
+    parse: (filePath: string, options?: Parameters<IPCChannels['transcript:parse']>[1]) =>
+      electronAPI.invoke('transcript:parse', filePath, options),
+    stats: (filePath: string) => electronAPI.invoke('transcript:stats', filePath),
+    last: (filePath: string, count: number) => electronAPI.invoke('transcript:last', filePath, count),
+    watch: (filePath: string, enable: boolean) => electronAPI.invoke('transcript:watch', filePath, enable),
   },
 
   // Branches (conversation branching)

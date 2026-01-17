@@ -788,6 +788,73 @@ export interface PlanExecutionStats {
 }
 
 // ============================================================================
+// TRANSCRIPT PARSING - Streaming parser for Claude Code transcript.jsonl files
+// ============================================================================
+
+export type TranscriptMessageType =
+  | 'file-history-snapshot'
+  | 'progress'
+  | 'user'
+  | 'assistant'
+  | 'tool_use'
+  | 'tool_result'
+  | 'summary'
+  | 'system'
+
+export interface TranscriptContentBlock {
+  type: 'text' | 'tool_use' | 'tool_result'
+  text?: string
+  id?: string
+  name?: string
+  input?: unknown
+  content?: string
+  is_error?: boolean
+}
+
+export interface TranscriptMessage {
+  type: TranscriptMessageType
+  parentUuid?: string | null
+  isSidechain?: boolean
+  userType?: 'external' | 'internal'
+  cwd?: string
+  sessionId?: string
+  version?: string
+  gitBranch?: string
+  uuid?: string
+  timestamp?: string
+  message?: {
+    role: 'user' | 'assistant'
+    content: string | TranscriptContentBlock[]
+  }
+  data?: unknown
+  toolUseID?: string
+  parentToolUseID?: string
+  snapshot?: {
+    messageId: string
+    trackedFileBackups: Record<string, unknown>
+    timestamp: string
+  }
+}
+
+export interface TranscriptStats {
+  totalMessages: number
+  userMessages: number
+  assistantMessages: number
+  toolCalls: number
+  fileSize: number
+  parseTime: number
+}
+
+export interface TranscriptParseOptions {
+  types?: TranscriptMessageType[]
+  limit?: number
+  offset?: number
+  after?: Date
+  before?: Date
+  search?: string
+}
+
+// ============================================================================
 // CONVERSATION BRANCHING - Git-like branching for conversations
 // ============================================================================
 
@@ -1067,6 +1134,12 @@ export type IPCChannels = {
   'context:setConfig': (config: PredictiveContextConfig) => Promise<boolean>
   'context:clearCache': () => Promise<boolean>
 
+  // Transcript parsing
+  'transcript:parse': (filePath: string, options?: TranscriptParseOptions) => Promise<TranscriptMessage[]>
+  'transcript:stats': (filePath: string) => Promise<TranscriptStats>
+  'transcript:last': (filePath: string, count: number) => Promise<TranscriptMessage[]>
+  'transcript:watch': (filePath: string, enable: boolean) => Promise<boolean>
+
   // Plans (autonomous execution)
   'plans:list': (projectPath?: string) => Promise<Plan[]>
   'plans:get': (id: string) => Promise<Plan | null>
@@ -1195,6 +1268,12 @@ export interface ClaudeAPI {
     stepComplete: (planId: string, stepId: string, output?: string) => ReturnType<IPCChannels['plans:stepComplete']>
     stepFail: (planId: string, stepId: string, error: string) => ReturnType<IPCChannels['plans:stepFail']>
     getStats: () => ReturnType<IPCChannels['plans:stats']>
+  }
+  transcript: {
+    parse: (filePath: string, options?: TranscriptParseOptions) => ReturnType<IPCChannels['transcript:parse']>
+    stats: (filePath: string) => ReturnType<IPCChannels['transcript:stats']>
+    last: (filePath: string, count: number) => ReturnType<IPCChannels['transcript:last']>
+    watch: (filePath: string, enable: boolean) => ReturnType<IPCChannels['transcript:watch']>
   }
   branches: {
     list: (sessionId: string) => ReturnType<IPCChannels['branches:list']>
