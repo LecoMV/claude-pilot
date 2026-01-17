@@ -25,7 +25,13 @@ import { useSettingsStore, type AppSettings } from '@/stores/settings'
 import { useBudgetStore } from '@/stores/budget'
 import type { BudgetSettings as BudgetSettingsType } from '@shared/types'
 
-type SettingsSection = 'appearance' | 'terminal' | 'memory' | 'notifications' | 'security' | 'budget'
+type SettingsSection =
+  | 'appearance'
+  | 'terminal'
+  | 'memory'
+  | 'notifications'
+  | 'security'
+  | 'budget'
 
 export function Settings() {
   const { settings, loading, saving, loaded, loadSettings, saveSettings, setSettings } =
@@ -240,7 +246,9 @@ function TerminalSettings({ settings, onChange }: SettingsProps) {
           <select
             className="input w-48"
             value={settings.terminalFont}
-            onChange={(e) => onChange('terminalFont', e.target.value as AppSettings['terminalFont'])}
+            onChange={(e) =>
+              onChange('terminalFont', e.target.value as AppSettings['terminalFont'])
+            }
           >
             <option value="jetbrains">JetBrains Mono</option>
             <option value="fira">Fira Code</option>
@@ -342,14 +350,22 @@ function NotificationSettings({ settings, onChange }: SettingsProps) {
 
 // Credential key definitions
 const CREDENTIAL_KEYS = [
-  { key: 'postgresql.password', label: 'PostgreSQL Password', description: 'Database password for claude_memory' },
+  {
+    key: 'postgresql.password',
+    label: 'PostgreSQL Password',
+    description: 'Database password for claude_memory',
+  },
   { key: 'memgraph.password', label: 'Memgraph Password', description: 'Graph database password' },
   { key: 'qdrant.apiKey', label: 'Qdrant API Key', description: 'Vector database API key' },
-  { key: 'anthropic.apiKey', label: 'Anthropic API Key', description: 'Claude API key for direct chat' },
+  {
+    key: 'anthropic.apiKey',
+    label: 'Anthropic API Key',
+    description: 'Claude API key for direct chat',
+  },
   { key: 'github.token', label: 'GitHub Token', description: 'Personal access token' },
 ] as const
 
-type _CredentialKey = typeof CREDENTIAL_KEYS[number]['key']
+type _CredentialKey = (typeof CREDENTIAL_KEYS)[number]['key']
 
 interface CredentialState {
   [key: string]: {
@@ -405,29 +421,32 @@ function SecuritySettings({ settings, onChange }: SettingsProps) {
     }))
   }, [])
 
-  const handleCredentialSave = useCallback(async (key: string) => {
-    const cred = credentials[key]
-    if (!cred || !cred.value) return
+  const handleCredentialSave = useCallback(
+    async (key: string) => {
+      const cred = credentials[key]
+      if (!cred || !cred.value) return
 
-    setCredentials((prev) => ({
-      ...prev,
-      [key]: { ...prev[key], saving: true },
-    }))
-
-    try {
-      await window.electron.invoke('credentials:store', key, cred.value)
       setCredentials((prev) => ({
         ...prev,
-        [key]: { ...prev[key], hasValue: true, editing: false, value: '', saving: false },
+        [key]: { ...prev[key], saving: true },
       }))
-    } catch (error) {
-      console.error(`Failed to save credential ${key}:`, error)
-      setCredentials((prev) => ({
-        ...prev,
-        [key]: { ...prev[key], saving: false },
-      }))
-    }
-  }, [credentials])
+
+      try {
+        await window.electron.invoke('credentials:store', key, cred.value)
+        setCredentials((prev) => ({
+          ...prev,
+          [key]: { ...prev[key], hasValue: true, editing: false, value: '', saving: false },
+        }))
+      } catch (error) {
+        console.error(`Failed to save credential ${key}:`, error)
+        setCredentials((prev) => ({
+          ...prev,
+          [key]: { ...prev[key], saving: false },
+        }))
+      }
+    },
+    [credentials]
+  )
 
   const handleCredentialDelete = useCallback(async (key: string) => {
     try {
@@ -460,20 +479,24 @@ function SecuritySettings({ settings, onChange }: SettingsProps) {
     <div className="space-y-6">
       {/* Encryption Status */}
       <SettingGroup title="Encryption Status">
-        <div className={cn(
-          'flex items-center gap-3 p-3 rounded-lg',
-          encryptionAvailable ? 'bg-accent-green/10' : 'bg-accent-yellow/10'
-        )}>
+        <div
+          className={cn(
+            'flex items-center gap-3 p-3 rounded-lg',
+            encryptionAvailable ? 'bg-accent-green/10' : 'bg-accent-yellow/10'
+          )}
+        >
           {encryptionAvailable ? (
             <Lock className="w-5 h-5 text-accent-green" />
           ) : (
             <Unlock className="w-5 h-5 text-accent-yellow" />
           )}
           <div className="flex-1">
-            <p className={cn(
-              'font-medium',
-              encryptionAvailable ? 'text-accent-green' : 'text-accent-yellow'
-            )}>
+            <p
+              className={cn(
+                'font-medium',
+                encryptionAvailable ? 'text-accent-green' : 'text-accent-yellow'
+              )}
+            >
               {encryptionAvailable ? 'OS Keychain Encryption Active' : 'Encryption Unavailable'}
             </p>
             <p className="text-sm text-text-muted">
@@ -518,10 +541,12 @@ function SecuritySettings({ settings, onChange }: SettingsProps) {
 
                 {cred.hasValue && !cred.editing ? (
                   <button
-                    onClick={() => setCredentials((prev) => ({
-                      ...prev,
-                      [key]: { ...prev[key], editing: true },
-                    }))}
+                    onClick={() =>
+                      setCredentials((prev) => ({
+                        ...prev,
+                        [key]: { ...prev[key], editing: true },
+                      }))
+                    }
                     className="text-sm text-accent-blue hover:underline"
                   >
                     Update credential
@@ -562,10 +587,12 @@ function SecuritySettings({ settings, onChange }: SettingsProps) {
                     </button>
                     {cred.hasValue && cred.editing && (
                       <button
-                        onClick={() => setCredentials((prev) => ({
-                          ...prev,
-                          [key]: { ...prev[key], editing: false, value: '' },
-                        }))}
+                        onClick={() =>
+                          setCredentials((prev) => ({
+                            ...prev,
+                            [key]: { ...prev[key], editing: false, value: '' },
+                          }))
+                        }
                         className="btn btn-secondary btn-sm"
                       >
                         Cancel
@@ -719,9 +746,9 @@ function BudgetSettingsPanel() {
   }
 
   const budgetPercentage =
-    localBudget.monthlyLimit > 0
-      ? (currentMonthCost / localBudget.monthlyLimit) * 100
-      : 0
+    localBudget.monthlyLimit > 0 ? (currentMonthCost / localBudget.monthlyLimit) * 100 : 0
+
+  const isSubscription = localBudget.billingType === 'subscription'
 
   return (
     <div className="space-y-6">
@@ -730,41 +757,55 @@ function BudgetSettingsPanel() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <DollarSign className="w-5 h-5 text-accent-purple" />
-            <span className="font-medium text-text-primary">Current Month Usage</span>
+            <span className="font-medium text-text-primary">
+              {isSubscription ? 'Estimated API Equivalent' : 'Current Month Cost'}
+            </span>
+            {isSubscription && (
+              <span className="text-xs px-2 py-0.5 bg-accent-green/10 text-accent-green rounded">
+                {localBudget.subscriptionPlan === 'pro' ? 'Pro' : 'Max'}
+              </span>
+            )}
           </div>
-          <span className="text-2xl font-bold text-text-primary">
-            ${currentMonthCost.toFixed(2)}
-          </span>
+          <div className="text-right">
+            <span className="text-2xl font-bold text-text-primary">
+              ${currentMonthCost.toFixed(2)}
+            </span>
+            {isSubscription && <p className="text-xs text-text-muted">Reference only</p>}
+          </div>
         </div>
-        <div className="w-full h-3 rounded-full bg-surface-hover overflow-hidden">
-          <div
-            className={cn(
-              'h-full rounded-full transition-all duration-500',
-              budgetPercentage >= 100
-                ? 'bg-accent-red'
-                : budgetPercentage >= localBudget.warningThreshold
-                  ? 'bg-accent-yellow'
-                  : 'bg-accent-green'
-            )}
-            style={{ width: `${Math.min(budgetPercentage, 100)}%` }}
-          />
-        </div>
-        <div className="flex justify-between mt-2 text-sm text-text-muted">
-          <span>$0</span>
-          <span
-            className={cn(
-              'font-medium',
-              budgetPercentage >= 100
-                ? 'text-accent-red'
-                : budgetPercentage >= localBudget.warningThreshold
-                  ? 'text-accent-yellow'
-                  : 'text-text-muted'
-            )}
-          >
-            {budgetPercentage.toFixed(0)}% used
-          </span>
-          <span>${localBudget.monthlyLimit}</span>
-        </div>
+        {!isSubscription && (
+          <>
+            <div className="w-full h-3 rounded-full bg-surface-hover overflow-hidden">
+              <div
+                className={cn(
+                  'h-full rounded-full transition-all duration-500',
+                  budgetPercentage >= 100
+                    ? 'bg-accent-red'
+                    : budgetPercentage >= localBudget.warningThreshold
+                      ? 'bg-accent-yellow'
+                      : 'bg-accent-green'
+                )}
+                style={{ width: `${Math.min(budgetPercentage, 100)}%` }}
+              />
+            </div>
+            <div className="flex justify-between mt-2 text-sm text-text-muted">
+              <span>$0</span>
+              <span
+                className={cn(
+                  'font-medium',
+                  budgetPercentage >= 100
+                    ? 'text-accent-red'
+                    : budgetPercentage >= localBudget.warningThreshold
+                      ? 'text-accent-yellow'
+                      : 'text-text-muted'
+                )}
+              >
+                {budgetPercentage.toFixed(0)}% used
+              </span>
+              <span>${localBudget.monthlyLimit}</span>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Save/Reset buttons */}
@@ -787,90 +828,156 @@ function BudgetSettingsPanel() {
         </div>
       )}
 
-      {/* Budget Limits */}
-      <SettingGroup title="Budget Limits">
-        <SettingRow
-          label="Monthly Budget"
-          description="Maximum spending limit per month (USD)"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-text-muted">$</span>
-            <input
-              type="number"
-              className="input w-28"
-              value={localBudget.monthlyLimit}
-              min={0}
-              step={10}
-              onChange={(e) =>
-                handleChange('monthlyLimit', Math.max(0, parseFloat(e.target.value) || 0))
+      {/* Billing Type */}
+      <SettingGroup title="Billing Type">
+        <SettingRow label="How do you pay for Claude?" description="Choose your billing model">
+          <select
+            className="input w-48"
+            value={localBudget.billingType}
+            onChange={(e) => {
+              const value = e.target.value as 'subscription' | 'api'
+              handleChange('billingType', value)
+              // Auto-set appropriate defaults
+              if (value === 'subscription') {
+                handleChange('subscriptionPlan', 'max')
+                handleChange('monthlyLimit', 100)
+              } else {
+                handleChange('subscriptionPlan', undefined)
               }
-            />
-          </div>
+            }}
+          >
+            <option value="subscription">Subscription (Pro/Max)</option>
+            <option value="api">API (Pay-per-token)</option>
+          </select>
         </SettingRow>
-        <SettingRow
-          label="Warning Threshold"
-          description="Show warning when reaching this percentage"
-        >
-          <div className="flex items-center gap-2">
-            <input
-              type="range"
-              className="w-32"
-              value={localBudget.warningThreshold}
-              min={50}
-              max={100}
-              step={5}
-              onChange={(e) => handleChange('warningThreshold', parseInt(e.target.value))}
-            />
-            <span className="text-sm text-text-muted w-12 text-right">
-              {localBudget.warningThreshold}%
-            </span>
-          </div>
-        </SettingRow>
-      </SettingGroup>
 
-      {/* Alerts */}
-      <SettingGroup title="Alerts">
-        <SettingRow
-          label="Budget Alerts"
-          description="Show alerts when approaching or exceeding budget"
-        >
-          <Toggle
-            checked={localBudget.alertsEnabled}
-            onChange={(checked) => handleChange('alertsEnabled', checked)}
-          />
-        </SettingRow>
-      </SettingGroup>
-
-      {/* Preset Budgets */}
-      <SettingGroup title="Quick Presets">
-        <div className="flex flex-wrap gap-2">
-          {[25, 50, 100, 200, 500].map((amount) => (
-            <button
-              key={amount}
-              onClick={() => handleChange('monthlyLimit', amount)}
-              className={cn(
-                'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                localBudget.monthlyLimit === amount
-                  ? 'bg-accent-purple text-white'
-                  : 'bg-surface hover:bg-surface-hover text-text-secondary'
-              )}
+        {localBudget.billingType === 'subscription' && (
+          <SettingRow label="Subscription Plan" description="Your Claude subscription tier">
+            <select
+              className="input w-40"
+              value={localBudget.subscriptionPlan || 'max'}
+              onChange={(e) => {
+                const plan = e.target.value as 'pro' | 'max' | 'custom'
+                handleChange('subscriptionPlan', plan)
+                if (plan === 'pro') handleChange('monthlyLimit', 20)
+                else if (plan === 'max') handleChange('monthlyLimit', 100)
+              }}
             >
-              ${amount}/mo
-            </button>
-          ))}
-        </div>
+              <option value="pro">Pro ($20/mo)</option>
+              <option value="max">Max ($100/mo)</option>
+              <option value="custom">Custom</option>
+            </select>
+          </SettingRow>
+        )}
+
+        {localBudget.billingType === 'subscription' && (
+          <div className="p-3 bg-accent-green/10 rounded-lg">
+            <p className="text-sm text-accent-green">
+              💡 Subscription users have unlimited usage within their plan. Token tracking shows
+              estimated equivalent API costs for reference only.
+            </p>
+          </div>
+        )}
       </SettingGroup>
+
+      {/* Budget Limits - Only show for API billing */}
+      {!isSubscription && (
+        <>
+          <SettingGroup title="Budget Limits">
+            <SettingRow label="Monthly Budget" description="Maximum spending limit per month (USD)">
+              <div className="flex items-center gap-2">
+                <span className="text-text-muted">$</span>
+                <input
+                  type="number"
+                  className="input w-28"
+                  value={localBudget.monthlyLimit}
+                  min={0}
+                  step={10}
+                  onChange={(e) =>
+                    handleChange('monthlyLimit', Math.max(0, parseFloat(e.target.value) || 0))
+                  }
+                />
+              </div>
+            </SettingRow>
+            <SettingRow
+              label="Warning Threshold"
+              description="Show warning when reaching this percentage"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  className="w-32"
+                  value={localBudget.warningThreshold}
+                  min={50}
+                  max={100}
+                  step={5}
+                  onChange={(e) => handleChange('warningThreshold', parseInt(e.target.value))}
+                />
+                <span className="text-sm text-text-muted w-12 text-right">
+                  {localBudget.warningThreshold}%
+                </span>
+              </div>
+            </SettingRow>
+          </SettingGroup>
+
+          {/* Alerts */}
+          <SettingGroup title="Alerts">
+            <SettingRow
+              label="Budget Alerts"
+              description="Show alerts when approaching or exceeding budget"
+            >
+              <Toggle
+                checked={localBudget.alertsEnabled}
+                onChange={(checked) => handleChange('alertsEnabled', checked)}
+              />
+            </SettingRow>
+          </SettingGroup>
+
+          {/* Preset Budgets */}
+          <SettingGroup title="Quick Presets">
+            <div className="flex flex-wrap gap-2">
+              {[25, 50, 100, 200, 500].map((amount) => (
+                <button
+                  key={amount}
+                  onClick={() => handleChange('monthlyLimit', amount)}
+                  className={cn(
+                    'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                    localBudget.monthlyLimit === amount
+                      ? 'bg-accent-purple text-white'
+                      : 'bg-surface hover:bg-surface-hover text-text-secondary'
+                  )}
+                >
+                  ${amount}/mo
+                </button>
+              ))}
+            </div>
+          </SettingGroup>
+        </>
+      )}
 
       {/* Information */}
       <div className="p-4 bg-accent-blue/10 rounded-lg">
         <div className="flex items-start gap-3">
           <DollarSign className="w-5 h-5 text-accent-blue flex-shrink-0 mt-0.5" />
           <div>
-            <p className="font-medium text-accent-blue">Cost Tracking</p>
+            <p className="font-medium text-accent-blue">
+              {localBudget.billingType === 'subscription' ? 'Usage Tracking' : 'Cost Tracking'}
+            </p>
             <p className="text-sm text-text-muted mt-1">
-              Costs are calculated based on token usage from your Claude Code sessions.
-              Pricing is estimated using standard API rates: Opus ($15/$75), Sonnet ($3/$15),
-              Haiku ($0.80/$4) per million input/output tokens.
+              {localBudget.billingType === 'subscription' ? (
+                <>
+                  As a subscription user, your Claude usage is unlimited within your plan. The costs
+                  shown are estimated API equivalents based on token usage - useful for
+                  understanding your usage patterns, but you will not actually be charged these
+                  amounts.
+                </>
+              ) : (
+                <>
+                  Costs are calculated based on token usage from your Claude Code sessions. Pricing
+                  uses standard API rates: Opus ($15/$75), Sonnet ($3/$15), Haiku ($0.80/$4) per
+                  million input/output tokens.
+                </>
+              )}
             </p>
           </div>
         </div>

@@ -3158,6 +3158,25 @@ function getRecentSessions(): SessionSummary[] {
                 if (entry.usage?.input_tokens) tokenCount += entry.usage.input_tokens
                 if (entry.usage?.output_tokens) tokenCount += entry.usage.output_tokens
               }
+              // Extract model from assistant messages (Claude Code format)
+              if (entry.type === 'assistant' && entry.message?.model && !model) {
+                model = entry.message.model
+              }
+              // Count messages for Claude Code format
+              if (entry.type === 'user' || entry.type === 'assistant') {
+                if (entry.type === 'user') messageCount++
+                if (entry.type === 'assistant') messageCount++
+                if (entry.timestamp) {
+                  const ts = new Date(entry.timestamp).getTime()
+                  if (!startTime || ts < startTime) startTime = ts
+                  if (ts > endTime) endTime = ts
+                }
+                // Token usage from message.usage
+                if (entry.message?.usage) {
+                  tokenCount += entry.message.usage.input_tokens || 0
+                  tokenCount += entry.message.usage.output_tokens || 0
+                }
+              }
               if (entry.type === 'tool_use' || entry.tool_calls) {
                 toolCalls++
               }
@@ -3903,7 +3922,8 @@ function parseSessionFile(filePath: string): ExternalSession | null {
 
     // Parse first and last entries for metadata
     let firstEntry: Record<string, unknown> | null = null
-    let lastEntry: Record<string, unknown> | null = null
+    let _lastEntry: Record<string, unknown> | null = null
+    let detectedModel: string | undefined
     const stats: SessionStats = {
       messageCount: 0,
       userMessages: 0,
@@ -3918,7 +3938,8 @@ function parseSessionFile(filePath: string): ExternalSession | null {
       try {
         const entry = JSON.parse(line) as Record<string, unknown>
         if (!firstEntry) firstEntry = entry
-        lastEntry = entry
+        // Track last entry for potential future use (e.g., model detection)
+        _lastEntry = entry
 
         // Count messages and tokens
         const type = entry.type as string
@@ -3929,8 +3950,13 @@ function parseSessionFile(filePath: string): ExternalSession | null {
           stats.assistantMessages++
           stats.messageCount++
 
-          // Count tool_use blocks inside assistant message content
+          // Extract model from assistant message (where it's actually stored)
           const message = entry.message as Record<string, unknown> | undefined
+          if (message?.model && !detectedModel) {
+            detectedModel = message.model as string
+          }
+
+          // Count tool_use blocks inside assistant message content
           const content = message?.content
           if (Array.isArray(content)) {
             for (const block of content) {
@@ -3987,20 +4013,27 @@ function parseSessionFile(filePath: string): ExternalSession | null {
     // Claude 3.5 Sonnet: ~$3/MTok input, ~$15/MTok output
     stats.estimatedCost = stats.inputTokens * 0.000003 + stats.outputTokens * 0.000015
 
+    // Parse timestamps with validation - fall back to file stats if invalid
+    const parseTimestamp = (ts: unknown, fallback: number): number => {
+      if (!ts || typeof ts !== 'string') return fallback
+      const parsed = new Date(ts).getTime()
+      return isNaN(parsed) ? fallback : parsed
+    }
+
+    // Use file modification time as primary source for lastActivity
+    // This is more reliable than JSONL timestamps which may be missing or malformed
+    const lastActivity = stat.mtimeMs
+
     const session: ExternalSession = {
       id: sessionId,
       slug: firstEntry.slug as string | undefined,
       projectPath,
       projectName,
       filePath,
-      startTime: firstEntry.timestamp
-        ? new Date(firstEntry.timestamp as string).getTime()
-        : stat.birthtimeMs,
-      lastActivity: lastEntry?.timestamp
-        ? new Date(lastEntry.timestamp as string).getTime()
-        : stat.mtimeMs,
+      startTime: parseTimestamp(firstEntry.timestamp, stat.birthtimeMs),
+      lastActivity,
       isActive,
-      model: (firstEntry.message as Record<string, unknown>)?.model as string | undefined,
+      model: detectedModel,
       version: firstEntry.version as string | undefined,
       gitBranch: firstEntry.gitBranch as string | undefined,
       stats,

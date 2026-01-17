@@ -52,7 +52,9 @@ interface BudgetState {
 }
 
 const defaultBudgetSettings: BudgetSettings = {
-  monthlyLimit: 100, // $100/month default
+  billingType: 'subscription', // Default to subscription (Claude Pro/Max)
+  subscriptionPlan: 'max', // Claude Max ($100/mo)
+  monthlyLimit: 100, // $100/month default (matches Max subscription)
   warningThreshold: 80, // Warn at 80%
   alertsEnabled: true,
 }
@@ -90,10 +92,7 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
     // Filter to current month sessions
     const monthSessions = sessions.filter((s) => {
       const sessionDate = new Date(s.startTime)
-      return (
-        sessionDate.getMonth() === currentMonth &&
-        sessionDate.getFullYear() === currentYear
-      )
+      return sessionDate.getMonth() === currentMonth && sessionDate.getFullYear() === currentYear
     })
 
     // Calculate total costs
@@ -151,9 +150,9 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
     }
 
     // Active sessions with live costs
-    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
+    // Use the isActive flag from main process (based on file modification time)
     const activeSessions = sessions
-      .filter((s) => s.lastActivity > fiveMinutesAgo)
+      .filter((s) => s.isActive)
       .map((s) => ({
         sessionId: s.id,
         projectName: s.projectName,
@@ -177,9 +176,7 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
       todayCost,
       activeSessions,
       costByModel: Array.from(modelCosts.values()).sort((a, b) => b.cost - a.cost),
-      dailyCosts: Array.from(dailyCostsMap.values()).sort((a, b) =>
-        a.date.localeCompare(b.date)
-      ),
+      dailyCosts: Array.from(dailyCostsMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
       lastUpdate: Date.now(),
       budgetWarning: percentage >= budgetSettings.warningThreshold,
       budgetExceeded: percentage >= 100,

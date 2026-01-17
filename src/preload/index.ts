@@ -116,6 +116,7 @@ const ALLOWED_CHANNELS = new Set<string>([
   'agents:hiveMindStatus',
   'agents:initSwarm',
   'agents:shutdownSwarm',
+  'agents:submitTask',
 
   // Chat
   'chat:send',
@@ -277,19 +278,21 @@ const ALLOWED_CHANNELS = new Set<string>([
  * More restricted than invoke channels
  */
 const ALLOWED_EVENT_CHANNELS = new Set<string>([
-  // Terminal data streams
+  // Terminal data streams (static channels)
   'terminal:data',
   'terminal:exit',
 
   // Session events
   'sessions:event',
   'sessions:message',
+  'session:updated',
 
   // Log streams
   'logs:entry',
 
   // Chat streams
   'chat:stream',
+  'chat:response',
   'chat:complete',
   'chat:error',
 
@@ -313,17 +316,35 @@ const ALLOWED_EVENT_CHANNELS = new Set<string>([
 ])
 
 /**
+ * SECURITY: Prefixes allowed for dynamic event channels
+ * These allow channels like terminal:data:session-123 where the suffix is dynamic
+ */
+const ALLOWED_DYNAMIC_EVENT_PREFIXES = ['terminal:data:', 'terminal:exit:']
+
+/**
  * Validates that a channel is allowed before invoking
  * @throws Error if channel is not whitelisted
  */
 function validateChannel(channel: string, type: 'invoke' | 'on' | 'send'): void {
   const allowedSet = type === 'on' ? ALLOWED_EVENT_CHANNELS : ALLOWED_CHANNELS
 
-  if (!allowedSet.has(channel)) {
-    const error = `[Security] Blocked ${type} on unauthorized channel: ${channel}`
-    console.error(error)
-    throw new Error(error)
+  // Check exact match first
+  if (allowedSet.has(channel)) {
+    return
   }
+
+  // For event channels, also check dynamic prefixes (e.g., terminal:data:session-123)
+  if (type === 'on') {
+    for (const prefix of ALLOWED_DYNAMIC_EVENT_PREFIXES) {
+      if (channel.startsWith(prefix)) {
+        return
+      }
+    }
+  }
+
+  const error = `[Security] Blocked ${type} on unauthorized channel: ${channel}`
+  console.error(error)
+  throw new Error(error)
 }
 
 // Expose protected methods that allow the renderer process to use

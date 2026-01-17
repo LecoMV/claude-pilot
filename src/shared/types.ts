@@ -666,7 +666,9 @@ export interface AppSettings {
 }
 
 export interface BudgetSettings {
-  monthlyLimit: number // USD
+  billingType: 'subscription' | 'api' // subscription = Claude Pro/Max, api = pay-per-token
+  subscriptionPlan?: 'pro' | 'max' | 'custom' // Claude Pro ($20/mo) or Max ($100/mo) or custom amount
+  monthlyLimit: number // USD - for API: token cost limit; for subscription: monthly fee reference
   warningThreshold: number // Percentage (0-100) to trigger warning
   alertsEnabled: boolean
 }
@@ -1041,7 +1043,11 @@ export interface SpanData {
   endTime?: number
   status: { code: 'unset' | 'ok' | 'error'; message?: string }
   attributes: Record<string, SpanAttributeValue>
-  events: Array<{ name: string; timestamp: number; attributes?: Record<string, SpanAttributeValue> }>
+  events: Array<{
+    name: string
+    timestamp: number
+    attributes?: Record<string, SpanAttributeValue>
+  }>
   links: Array<{ traceId: string; spanId: string; attributes?: Record<string, SpanAttributeValue> }>
 }
 
@@ -1583,8 +1589,15 @@ export type IPCChannels = {
     status?: { code: 'unset' | 'ok' | 'error'; message?: string },
     attributes?: Record<string, SpanAttributeValue>
   ) => Promise<void>
-  'observability:recordException': (spanId: string, error: { name: string; message: string; stack?: string }) => Promise<void>
-  'observability:addEvent': (spanId: string, name: string, attributes?: Record<string, SpanAttributeValue>) => Promise<void>
+  'observability:recordException': (
+    spanId: string,
+    error: { name: string; message: string; stack?: string }
+  ) => Promise<void>
+  'observability:addEvent': (
+    spanId: string,
+    name: string,
+    attributes?: Record<string, SpanAttributeValue>
+  ) => Promise<void>
   'observability:getMetrics': () => Promise<ObservabilityMetrics>
   'observability:getStats': () => Promise<ObservabilityStats>
   'observability:getConfig': () => Promise<ObservabilityConfig>
