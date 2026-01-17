@@ -1,10 +1,19 @@
 // Transcript Parser Service - Streaming parser for Claude Code transcript.jsonl files
 // Uses Node.js streams for memory-efficient parsing of large transcripts
 
-import { createReadStream, statSync, existsSync, watch, FSWatcher } from 'fs'
-import { pipeline } from 'stream/promises'
+import {
+  createReadStream,
+  statSync,
+  existsSync,
+  watch,
+  FSWatcher,
+  promises as fsPromises,
+} from 'fs'
 import split2 from 'split2'
 import { EventEmitter } from 'events'
+
+// Chunk size for reverse reading (64KB is a good balance)
+const REVERSE_READ_CHUNK_SIZE = 64 * 1024
 
 // Transcript message types based on Claude Code's transcript format
 export type TranscriptMessageType =
@@ -95,14 +104,15 @@ class TranscriptService extends EventEmitter {
     let count = 0
     let yielded = 0
 
-    const stream = createReadStream(filePath, { encoding: 'utf8' })
-      .pipe(split2((line: string) => {
+    const stream = createReadStream(filePath, { encoding: 'utf8' }).pipe(
+      split2((line: string) => {
         try {
           return JSON.parse(line) as TranscriptMessage
         } catch {
           return null // Skip invalid lines
         }
-      }))
+      })
+    )
 
     for await (const message of stream) {
       if (!message) continue
@@ -187,30 +197,133 @@ class TranscriptService extends EventEmitter {
 
   /**
    * Get the last N messages from a transcript (efficiently)
-   * Reads from the end of the file using a ring buffer approach
+   * Uses reverse reading for large files to avoid loading entire file into memory
+   *
+   * For files < 1MB: read all and take last N (simple and fast)
+   * For files >= 1MB: read from end in chunks (memory efficient)
    */
-  async getLastMessages(filePath: string, count: number): Promise<TranscriptMessage[]> {
-    // For now, use a simple approach - read all and take last N
-    // TODO: Implement reverse reading for very large files
+  getLastMessages(filePath: string, count: number): Promise<TranscriptMessage[]> {
+    if (!existsSync(filePath)) {
+      return Promise.resolve([])
+    }
+
+    const stats = statSync(filePath)
+    const fileSize = stats.size
+
+    // For small files, use simple approach
+    const SMALL_FILE_THRESHOLD = 1024 * 1024 // 1MB
+    if (fileSize < SMALL_FILE_THRESHOLD) {
+      return this.getLastMessagesSimple(filePath, count)
+    }
+
+    // For large files, use reverse reading
+    return this.getLastMessagesReverse(filePath, count, fileSize)
+  }
+
+  /**
+   * Simple approach for small files - read all and take last N
+   */
+  private async getLastMessagesSimple(
+    filePath: string,
+    count: number
+  ): Promise<TranscriptMessage[]> {
     const messages: TranscriptMessage[] = []
 
     for await (const message of this.parseStream(filePath)) {
       messages.push(message)
-      // Keep only last 'count * 2' to handle skipping non-message types
+      // Keep only last 'count * 3' to handle skipping non-message types
       if (messages.length > count * 3) {
         messages.splice(0, messages.length - count * 2)
       }
     }
 
     // Filter to actual messages and take last N
-    return messages
-      .filter((m) =>
+    return this.filterToUserAssistantMessages(messages).slice(-count)
+  }
+
+  /**
+   * Efficient reverse reading for large files
+   * Reads from the end of the file in chunks, parsing JSONL lines in reverse
+   */
+  private async getLastMessagesReverse(
+    filePath: string,
+    count: number,
+    fileSize: number
+  ): Promise<TranscriptMessage[]> {
+    const messages: TranscriptMessage[] = []
+    const targetCount = count * 3 // Collect more since some may be filtered out
+
+    let position = fileSize
+    let leftoverBuffer = ''
+
+    const fd = await fsPromises.open(filePath, 'r')
+
+    try {
+      while (position > 0 && messages.length < targetCount) {
+        // Calculate chunk position
+        const chunkSize = Math.min(REVERSE_READ_CHUNK_SIZE, position)
+        position -= chunkSize
+
+        // Read chunk
+        const buffer = Buffer.alloc(chunkSize)
+        await fd.read(buffer, 0, chunkSize, position)
+        const chunk = buffer.toString('utf8')
+
+        // Combine with leftover from previous iteration
+        const combined = chunk + leftoverBuffer
+
+        // Split into lines
+        const lines = combined.split('\n')
+
+        // The first line may be partial (if we're in the middle of a line)
+        // Save it for the next iteration
+        leftoverBuffer = lines[0]
+
+        // Process lines in reverse order (skip first which may be partial)
+        for (let i = lines.length - 1; i > 0; i--) {
+          const line = lines[i].trim()
+          if (!line) continue
+
+          try {
+            const message = JSON.parse(line) as TranscriptMessage
+            messages.unshift(message) // Add to front to maintain order
+          } catch {
+            // Skip invalid JSON lines
+          }
+
+          // Stop early if we have enough messages
+          if (messages.length >= targetCount) break
+        }
+      }
+
+      // Process any remaining leftover (first line of file)
+      if (leftoverBuffer.trim()) {
+        try {
+          const message = JSON.parse(leftoverBuffer) as TranscriptMessage
+          messages.unshift(message)
+        } catch {
+          // Skip invalid JSON
+        }
+      }
+    } finally {
+      await fd.close()
+    }
+
+    // Filter to user/assistant messages and take last N
+    return this.filterToUserAssistantMessages(messages).slice(-count)
+  }
+
+  /**
+   * Helper to filter messages to only user and assistant types
+   */
+  private filterToUserAssistantMessages(messages: TranscriptMessage[]): TranscriptMessage[] {
+    return messages.filter(
+      (m) =>
         m.type === 'user' ||
         m.type === 'assistant' ||
         m.message?.role === 'user' ||
         m.message?.role === 'assistant'
-      )
-      .slice(-count)
+    )
   }
 
   /**
@@ -236,13 +349,15 @@ class TranscriptService extends EventEmitter {
         const stream = createReadStream(filePath, {
           encoding: 'utf8',
           start: lastSize,
-        }).pipe(split2((line: string) => {
-          try {
-            return JSON.parse(line) as TranscriptMessage
-          } catch {
-            return null
-          }
-        }))
+        }).pipe(
+          split2((line: string) => {
+            try {
+              return JSON.parse(line) as TranscriptMessage
+            } catch {
+              return null
+            }
+          })
+        )
 
         for await (const message of stream) {
           if (message) {
@@ -290,9 +405,7 @@ class TranscriptService extends EventEmitter {
         return message.message.content
       }
       // Array of content blocks
-      return message.message.content
-        .map((block) => block.text || block.content || '')
-        .join(' ')
+      return message.message.content.map((block) => block.text || block.content || '').join(' ')
     }
 
     // Check progress data
