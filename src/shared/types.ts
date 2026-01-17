@@ -583,6 +583,15 @@ export interface AppSettings {
   // Security
   autoLock: boolean
   clearOnExit: boolean
+
+  // Budget tracking
+  budget?: BudgetSettings
+}
+
+export interface BudgetSettings {
+  monthlyLimit: number // USD
+  warningThreshold: number // Percentage (0-100) to trigger warning
+  alertsEnabled: boolean
 }
 
 // ============================================================================

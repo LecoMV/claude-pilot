@@ -38,6 +38,7 @@ import type {
   SwarmInfo,
   HiveMindInfo,
   AppSettings,
+  BudgetSettings,
   ExternalSession,
   SessionStats,
   SessionMessage,
@@ -729,6 +730,12 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('settings:save', async (_event, settings: AppSettings): Promise<boolean> => {
+    return saveAppSettings(settings)
+  })
+
+  ipcMain.handle('settings:setBudget', async (_event, budget: BudgetSettings): Promise<boolean> => {
+    const settings = getAppSettings()
+    settings.budget = budget
     return saveAppSettings(settings)
   })
 

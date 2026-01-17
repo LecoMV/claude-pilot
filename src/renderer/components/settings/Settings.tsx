@@ -17,11 +17,15 @@ import {
   Unlock,
   Trash2,
   AlertTriangle,
+  DollarSign,
+  Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSettingsStore, type AppSettings } from '@/stores/settings'
+import { useBudgetStore } from '@/stores/budget'
+import type { BudgetSettings as BudgetSettingsType } from '@shared/types'
 
-type SettingsSection = 'appearance' | 'terminal' | 'memory' | 'notifications' | 'security'
+type SettingsSection = 'appearance' | 'terminal' | 'memory' | 'notifications' | 'security' | 'budget'
 
 export function Settings() {
   const { settings, loading, saving, loaded, loadSettings, saveSettings, setSettings } =
@@ -72,6 +76,7 @@ export function Settings() {
     { id: 'appearance', icon: Palette, label: 'Appearance' },
     { id: 'terminal', icon: Terminal, label: 'Terminal' },
     { id: 'memory', icon: Database, label: 'Memory' },
+    { id: 'budget', icon: Wallet, label: 'Budget' },
     { id: 'notifications', icon: Bell, label: 'Notifications' },
     { id: 'security', icon: Shield, label: 'Security' },
   ]
@@ -149,6 +154,7 @@ export function Settings() {
             {activeSection === 'memory' && (
               <MemorySettings settings={localSettings} onChange={handleChange} />
             )}
+            {activeSection === 'budget' && <BudgetSettingsPanel />}
             {activeSection === 'notifications' && (
               <NotificationSettings settings={localSettings} onChange={handleChange} />
             )}
@@ -343,7 +349,7 @@ const CREDENTIAL_KEYS = [
   { key: 'github.token', label: 'GitHub Token', description: 'Personal access token' },
 ] as const
 
-type CredentialKey = typeof CREDENTIAL_KEYS[number]['key']
+type _CredentialKey = typeof CREDENTIAL_KEYS[number]['key']
 
 interface CredentialState {
   [key: string]: {
@@ -658,5 +664,217 @@ function Toggle({ checked, onChange }: ToggleProps) {
         )}
       />
     </button>
+  )
+}
+
+function BudgetSettingsPanel() {
+  const {
+    budgetSettings,
+    currentMonthCost,
+    setBudgetSettings,
+    loadBudgetSettings,
+    saveBudgetSettings,
+  } = useBudgetStore()
+
+  const [localBudget, setLocalBudget] = useState<BudgetSettingsType>(budgetSettings)
+  const [hasChanges, setHasChanges] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  useEffect(() => {
+    loadBudgetSettings()
+  }, [loadBudgetSettings])
+
+  useEffect(() => {
+    setLocalBudget(budgetSettings)
+    setHasChanges(false)
+  }, [budgetSettings])
+
+  useEffect(() => {
+    const changed = JSON.stringify(localBudget) !== JSON.stringify(budgetSettings)
+    setHasChanges(changed)
+  }, [localBudget, budgetSettings])
+
+  const handleChange = <K extends keyof BudgetSettingsType>(
+    key: K,
+    value: BudgetSettingsType[K]
+  ) => {
+    setLocalBudget((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setBudgetSettings(localBudget)
+    const success = await saveBudgetSettings()
+    setSaving(false)
+    if (success) {
+      setSaveSuccess(true)
+      setTimeout(() => setSaveSuccess(false), 2000)
+    }
+  }
+
+  const handleReset = () => {
+    setLocalBudget(budgetSettings)
+    setHasChanges(false)
+  }
+
+  const budgetPercentage =
+    localBudget.monthlyLimit > 0
+      ? (currentMonthCost / localBudget.monthlyLimit) * 100
+      : 0
+
+  return (
+    <div className="space-y-6">
+      {/* Current Usage Overview */}
+      <div className="p-4 bg-surface rounded-lg">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <DollarSign className="w-5 h-5 text-accent-purple" />
+            <span className="font-medium text-text-primary">Current Month Usage</span>
+          </div>
+          <span className="text-2xl font-bold text-text-primary">
+            ${currentMonthCost.toFixed(2)}
+          </span>
+        </div>
+        <div className="w-full h-3 rounded-full bg-surface-hover overflow-hidden">
+          <div
+            className={cn(
+              'h-full rounded-full transition-all duration-500',
+              budgetPercentage >= 100
+                ? 'bg-accent-red'
+                : budgetPercentage >= localBudget.warningThreshold
+                  ? 'bg-accent-yellow'
+                  : 'bg-accent-green'
+            )}
+            style={{ width: `${Math.min(budgetPercentage, 100)}%` }}
+          />
+        </div>
+        <div className="flex justify-between mt-2 text-sm text-text-muted">
+          <span>$0</span>
+          <span
+            className={cn(
+              'font-medium',
+              budgetPercentage >= 100
+                ? 'text-accent-red'
+                : budgetPercentage >= localBudget.warningThreshold
+                  ? 'text-accent-yellow'
+                  : 'text-text-muted'
+            )}
+          >
+            {budgetPercentage.toFixed(0)}% used
+          </span>
+          <span>${localBudget.monthlyLimit}</span>
+        </div>
+      </div>
+
+      {/* Save/Reset buttons */}
+      {hasChanges && (
+        <div className="flex items-center justify-end gap-2">
+          {saveSuccess && (
+            <span className="text-sm text-accent-green flex items-center gap-1">
+              <Check className="w-4 h-4" />
+              Saved
+            </span>
+          )}
+          <button onClick={handleReset} className="btn btn-secondary btn-sm">
+            <RotateCcw className="w-4 h-4" />
+            Reset
+          </button>
+          <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save
+          </button>
+        </div>
+      )}
+
+      {/* Budget Limits */}
+      <SettingGroup title="Budget Limits">
+        <SettingRow
+          label="Monthly Budget"
+          description="Maximum spending limit per month (USD)"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-text-muted">$</span>
+            <input
+              type="number"
+              className="input w-28"
+              value={localBudget.monthlyLimit}
+              min={0}
+              step={10}
+              onChange={(e) =>
+                handleChange('monthlyLimit', Math.max(0, parseFloat(e.target.value) || 0))
+              }
+            />
+          </div>
+        </SettingRow>
+        <SettingRow
+          label="Warning Threshold"
+          description="Show warning when reaching this percentage"
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              className="w-32"
+              value={localBudget.warningThreshold}
+              min={50}
+              max={100}
+              step={5}
+              onChange={(e) => handleChange('warningThreshold', parseInt(e.target.value))}
+            />
+            <span className="text-sm text-text-muted w-12 text-right">
+              {localBudget.warningThreshold}%
+            </span>
+          </div>
+        </SettingRow>
+      </SettingGroup>
+
+      {/* Alerts */}
+      <SettingGroup title="Alerts">
+        <SettingRow
+          label="Budget Alerts"
+          description="Show alerts when approaching or exceeding budget"
+        >
+          <Toggle
+            checked={localBudget.alertsEnabled}
+            onChange={(checked) => handleChange('alertsEnabled', checked)}
+          />
+        </SettingRow>
+      </SettingGroup>
+
+      {/* Preset Budgets */}
+      <SettingGroup title="Quick Presets">
+        <div className="flex flex-wrap gap-2">
+          {[25, 50, 100, 200, 500].map((amount) => (
+            <button
+              key={amount}
+              onClick={() => handleChange('monthlyLimit', amount)}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                localBudget.monthlyLimit === amount
+                  ? 'bg-accent-purple text-white'
+                  : 'bg-surface hover:bg-surface-hover text-text-secondary'
+              )}
+            >
+              ${amount}/mo
+            </button>
+          ))}
+        </div>
+      </SettingGroup>
+
+      {/* Information */}
+      <div className="p-4 bg-accent-blue/10 rounded-lg">
+        <div className="flex items-start gap-3">
+          <DollarSign className="w-5 h-5 text-accent-blue flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium text-accent-blue">Cost Tracking</p>
+            <p className="text-sm text-text-muted mt-1">
+              Costs are calculated based on token usage from your Claude Code sessions.
+              Pricing is estimated using standard API rates: Opus ($15/$75), Sonnet ($3/$15),
+              Haiku ($0.80/$4) per million input/output tokens.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

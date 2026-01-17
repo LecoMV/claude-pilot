@@ -11,7 +11,7 @@ Based on Gemini Deep Research audit dated 2026-01-17.
 | MCP Protocol     | 2           | 1       | 4       |
 | Desktop/Electron | 3           | 1       | 2       |
 | Data Persistence | 3           | 0       | 3       |
-| Hybrid Inference | 1           | 0       | 3       |
+| Hybrid Inference | 2           | 0       | 2       |
 | Observability    | 2           | 1       | 2       |
 
 ---
@@ -52,6 +52,7 @@ Based on Gemini Deep Research audit dated 2026-01-17.
 - [x] Plan execution
 - [x] Conversation branching
 - [x] GPU monitoring (NVIDIA)
+- [x] **Cost Ticker & Budget Controls** - Real-time cost tracking, budget limits, alerts, model breakdown
 
 ---
 
@@ -134,10 +135,10 @@ Based on Gemini Deep Research audit dated 2026-01-17.
    - Route complex tasks to Claude API
    - Configurable routing rules
 
-8. **Cost Ticker/Budget Controls**
-   - Real-time cost display per session
-   - max_budget_usd circuit breaker
-   - Extended thinking controls
+8. ~~**Cost Ticker/Budget Controls**~~ ✅ **IMPLEMENTED**
+   - ~~Real-time cost display per session~~ → Dashboard CostTracker component
+   - ~~max_budget_usd circuit breaker~~ → Budget settings with alerts
+   - ~~Extended thinking controls~~ → Partial (model pricing tracked)
 
 ### Priority 4: Visualization (Section 6)
 

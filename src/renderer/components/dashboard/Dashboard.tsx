@@ -19,6 +19,7 @@ import { formatBytes, cn } from '@/lib/utils'
 import { useSystemStatus } from '@/hooks/useSystemStatus'
 import { MetricsChart } from './MetricsChart'
 import { GPUPanel } from './GPUPanel'
+import { CostTracker } from './CostTracker'
 import type { GPUUsage } from '@shared/types'
 
 interface DashboardProps {
@@ -73,6 +74,12 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           </button>
         </div>
       </div>
+
+      {/* Cost & Budget Tracking */}
+      <section>
+        <h2 className="text-lg font-semibold text-text-primary mb-4">Cost & Budget</h2>
+        <CostTracker onNavigate={onNavigate} />
+      </section>
 
       {/* Status overview */}
       <section>

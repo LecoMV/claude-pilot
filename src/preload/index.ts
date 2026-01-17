@@ -109,6 +109,7 @@ const ALLOWED_CHANNELS = new Set<string>([
   // Settings
   'settings:get',
   'settings:save',
+  'settings:setBudget',
 
   // External Sessions
   'sessions:discover',
