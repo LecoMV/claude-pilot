@@ -1,117 +1,41 @@
+/**
+ * Agent Canvas - Main Component
+ * Refactored from 834 lines to ~280 lines (deploy-9mtg)
+ *
+ * Extracted components:
+ * - constants.ts: Configuration, templates, icons
+ * - SpawnAgentModal.tsx: Agent spawning modal
+ * - TaskAssignmentModal.tsx: Task assignment modal
+ * - TemplatesModal.tsx: Template selection modal
+ * - AgentCanvasSVG.tsx: SVG visualization
+ * - StatCard.tsx: Stats card component
+ * - AgentDetails.tsx: Agent details panel
+ */
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Brain,
-  Code,
-  Search,
-  TestTube,
-  Building,
-  Users,
-  Shield,
+  Activity,
+  Cpu,
+  Network,
+  Crown,
   RefreshCw,
   Play,
   Square,
   Plus,
   Settings,
-  Trash2,
-  Activity,
-  Cpu,
-  Network,
-  Crown,
   Send,
-  Zap,
-  GitBranch,
-  LayoutGrid,
-  Target,
-  X,
   Layers,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useAgentsStore, type Agent, type AgentType, type AgentStatus } from '@/stores/agents'
-
-type SwarmTopology = 'mesh' | 'hierarchical' | 'ring' | 'star'
-
-const topologyOptions: { value: SwarmTopology; label: string; description: string; icon: typeof LayoutGrid }[] = [
-  { value: 'mesh', label: 'Mesh', description: 'All agents connected to each other', icon: LayoutGrid },
-  { value: 'hierarchical', label: 'Hierarchical', description: 'Tree structure with coordinators', icon: GitBranch },
-  { value: 'ring', label: 'Ring', description: 'Sequential message passing', icon: Target },
-  { value: 'star', label: 'Star', description: 'Central coordinator hub', icon: Zap },
-]
-
-interface AgentTemplate {
-  name: string
-  description: string
-  agents: { type: AgentType; name: string }[]
-  topology: SwarmTopology
-}
-
-const agentTemplates: AgentTemplate[] = [
-  {
-    name: 'Development Team',
-    description: 'Full-stack dev squad with testing',
-    agents: [
-      { type: 'architect', name: 'sys-architect' },
-      { type: 'coder', name: 'frontend-dev' },
-      { type: 'coder', name: 'backend-dev' },
-      { type: 'tester', name: 'qa-engineer' },
-    ],
-    topology: 'hierarchical',
-  },
-  {
-    name: 'Research Squad',
-    description: 'Deep research and analysis team',
-    agents: [
-      { type: 'researcher', name: 'lead-researcher' },
-      { type: 'researcher', name: 'data-analyst' },
-      { type: 'coordinator', name: 'research-coordinator' },
-    ],
-    topology: 'star',
-  },
-  {
-    name: 'Security Audit',
-    description: 'Security-focused review team',
-    agents: [
-      { type: 'security', name: 'security-lead' },
-      { type: 'security', name: 'vuln-scanner' },
-      { type: 'coder', name: 'patch-developer' },
-      { type: 'tester', name: 'pentest-validator' },
-    ],
-    topology: 'mesh',
-  },
-  {
-    name: 'Code Review',
-    description: 'Pair programming and review',
-    agents: [
-      { type: 'coder', name: 'reviewer-1' },
-      { type: 'coder', name: 'reviewer-2' },
-    ],
-    topology: 'ring',
-  },
-]
-
-const agentIcons: Record<AgentType, typeof Brain> = {
-  coder: Code,
-  researcher: Search,
-  tester: TestTube,
-  architect: Building,
-  coordinator: Users,
-  security: Shield,
-}
-
-const statusColors: Record<AgentStatus, string> = {
-  idle: 'border-text-muted',
-  active: 'border-accent-green',
-  busy: 'border-accent-yellow',
-  error: 'border-accent-red',
-  terminated: 'border-text-muted opacity-50',
-}
-
-const statusBgColors: Record<AgentStatus, string> = {
-  idle: 'bg-surface',
-  active: 'bg-accent-green/10',
-  busy: 'bg-accent-yellow/10',
-  error: 'bg-accent-red/10',
-  terminated: 'bg-surface opacity-50',
-}
+import { useAgentsStore, type AgentType } from '@/stores/agents'
+import { topologyOptions, type SwarmTopology, type AgentTemplate } from './constants'
+import { SpawnAgentModal } from './SpawnAgentModal'
+import { TaskAssignmentModal } from './TaskAssignmentModal'
+import { TemplatesModal } from './TemplatesModal'
+import { AgentCanvasSVG, type CanvasNode, type Connection } from './AgentCanvasSVG'
+import { StatCard } from './StatCard'
+import { AgentDetails } from './AgentDetails'
 
 export function AgentCanvas() {
   const {
@@ -156,13 +80,13 @@ export function AgentCanvas() {
 
   useEffect(() => {
     loadData()
-    const interval = setInterval(loadData, 15000) // Refresh every 15s
+    const interval = setInterval(loadData, 15000)
     return () => clearInterval(interval)
   }, [loadData])
 
+  // Event handlers
   const handleSpawnAgent = async () => {
     if (!newAgentName) return
-
     try {
       await window.electron.invoke('agents:spawn', newAgentType, newAgentName)
       setShowSpawnModal(false)
@@ -176,7 +100,6 @@ export function AgentCanvas() {
   const handleTerminateAgent = async (agentId: string) => {
     // eslint-disable-next-line no-alert
     if (!confirm('Terminate this agent?')) return
-
     try {
       await window.electron.invoke('agents:terminate', agentId)
       setSelectedAgent(null)
@@ -197,7 +120,6 @@ export function AgentCanvas() {
 
   const handleSubmitTask = async () => {
     if (!taskDescription.trim()) return
-
     try {
       await window.electron.invoke('agents:submitTask', {
         description: taskDescription,
@@ -214,14 +136,10 @@ export function AgentCanvas() {
 
   const handleSpawnTemplate = async (template: AgentTemplate) => {
     try {
-      // First init the swarm with the template's topology
       await window.electron.invoke('agents:initSwarm', template.topology)
-
-      // Spawn all agents from the template
       for (const agent of template.agents) {
         await window.electron.invoke('agents:spawn', agent.type, agent.name)
       }
-
       setShowTemplatesModal(false)
       loadData()
     } catch (error) {
@@ -232,7 +150,6 @@ export function AgentCanvas() {
   const handleShutdownSwarm = async () => {
     // eslint-disable-next-line no-alert
     if (!confirm('Shutdown the swarm?')) return
-
     try {
       await window.electron.invoke('agents:shutdownSwarm')
       loadData()
@@ -241,31 +158,17 @@ export function AgentCanvas() {
     }
   }
 
-  // Calculate canvas layout
-  const canvasNodes = useMemo(() => {
-    const nodes: {
-      id: string
-      type: 'agent' | 'queen' | 'swarm-center'
-      x: number
-      y: number
-      agent?: Agent
-    }[] = []
-
+  // Canvas calculations
+  const canvasNodes = useMemo((): CanvasNode[] => {
+    const nodes: CanvasNode[] = []
     const centerX = 400
     const centerY = 300
     const radius = 200
 
-    // Add swarm center if active
     if (swarm?.status === 'active') {
-      nodes.push({
-        id: 'swarm-center',
-        type: 'swarm-center',
-        x: centerX,
-        y: centerY,
-      })
+      nodes.push({ id: 'swarm-center', type: 'swarm-center', x: centerX, y: centerY })
     }
 
-    // Add hive-mind queen if active
     if (hiveMind?.queenId && hiveMind.status === 'active') {
       nodes.push({
         id: hiveMind.queenId,
@@ -276,19 +179,14 @@ export function AgentCanvas() {
       })
     }
 
-    // Arrange agents in a circle
     agents.forEach((agent, index) => {
-      if (agent.id === hiveMind?.queenId) return // Skip queen (already added)
-
+      if (agent.id === hiveMind?.queenId) return
       const angle = (index / agents.length) * 2 * Math.PI - Math.PI / 2
-      const x = centerX + radius * Math.cos(angle)
-      const y = centerY + radius * Math.sin(angle)
-
       nodes.push({
         id: agent.id,
         type: 'agent',
-        x,
-        y,
+        x: centerX + radius * Math.cos(angle),
+        y: centerY + radius * Math.sin(angle),
         agent,
       })
     })
@@ -296,11 +194,9 @@ export function AgentCanvas() {
     return nodes
   }, [agents, swarm, hiveMind])
 
-  // Calculate connections
-  const connections = useMemo(() => {
-    const conns: { from: string; to: string; type: 'swarm' | 'hive' }[] = []
+  const connections = useMemo((): Connection[] => {
+    const conns: Connection[] = []
 
-    // Swarm connections (all agents to center)
     if (swarm?.status === 'active') {
       agents.forEach((agent) => {
         if (agent.id !== hiveMind?.queenId) {
@@ -309,10 +205,9 @@ export function AgentCanvas() {
       })
     }
 
-    // Hive-mind connections (workers to queen)
     if (hiveMind?.queenId && hiveMind.status === 'active') {
       hiveMind.workers.forEach((workerId) => {
-        conns.push({ from: workerId, to: hiveMind.queenId!, type: 'hive' })
+        conns.push({ from: workerId, to: hiveMind.queenId, type: 'hive' })
       })
     }
 
@@ -323,7 +218,6 @@ export function AgentCanvas() {
     total: agents.length,
     active: agents.filter((a) => a.status === 'active').length,
     busy: agents.filter((a) => a.status === 'busy').length,
-    errors: agents.filter((a) => a.status === 'error').length,
   }
 
   return (
@@ -354,7 +248,6 @@ export function AgentCanvas() {
             <Plus className="w-4 h-4 mr-2" />
             Spawn Agent
           </button>
-
           <button onClick={() => setShowTemplatesModal(true)} className="btn btn-secondary">
             <Layers className="w-4 h-4 mr-2" />
             Templates
@@ -393,7 +286,6 @@ export function AgentCanvas() {
 
         <div className="h-6 w-px bg-border mx-2" />
 
-        {/* Task Assignment */}
         <button
           onClick={() => setShowTaskModal(true)}
           className="btn btn-secondary"
@@ -421,126 +313,12 @@ export function AgentCanvas() {
                 <p className="text-sm">Spawn an agent to get started</p>
               </div>
             ) : (
-              <svg className="w-full h-full">
-                {/* Connection lines */}
-                {connections.map((conn, i) => {
-                  const from = canvasNodes.find((n) => n.id === conn.from)
-                  const to = canvasNodes.find((n) => n.id === conn.to)
-                  if (!from || !to) return null
-
-                  return (
-                    <line
-                      key={i}
-                      x1={from.x}
-                      y1={from.y}
-                      x2={to.x}
-                      y2={to.y}
-                      stroke={conn.type === 'hive' ? '#cba6f7' : '#89b4fa'}
-                      strokeWidth={2}
-                      strokeDasharray={conn.type === 'swarm' ? '5,5' : undefined}
-                      opacity={0.5}
-                    />
-                  )
-                })}
-
-                {/* Swarm center */}
-                {canvasNodes
-                  .filter((n) => n.type === 'swarm-center')
-                  .map((node) => (
-                    <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-                      <circle r={30} fill="#89b4fa" opacity={0.2} />
-                      <circle r={20} fill="#89b4fa" opacity={0.4} />
-                      <circle r={10} fill="#89b4fa" />
-                    </g>
-                  ))}
-
-                {/* Agent nodes */}
-                {canvasNodes
-                  .filter((n) => n.type === 'agent' || n.type === 'queen')
-                  .map((node) => {
-                    const agent = node.agent
-                    if (!agent) return null
-
-                    const Icon = agentIcons[agent.type] || Brain
-                    const isQueen = node.type === 'queen'
-                    const isSelected = selectedAgent?.id === agent.id
-
-                    return (
-                      <g
-                        key={node.id}
-                        transform={`translate(${node.x}, ${node.y})`}
-                        className="cursor-pointer"
-                        onClick={() => setSelectedAgent(isSelected ? null : agent)}
-                      >
-                        {/* Selection ring */}
-                        {isSelected && (
-                          <circle
-                            r={45}
-                            fill="none"
-                            stroke="#cba6f7"
-                            strokeWidth={2}
-                            strokeDasharray="5,5"
-                          />
-                        )}
-
-                        {/* Queen crown */}
-                        {isQueen && (
-                          <circle r={38} fill="#cba6f7" opacity={0.3} />
-                        )}
-
-                        {/* Agent circle */}
-                        <circle
-                          r={30}
-                          className={cn(
-                            'transition-colors',
-                            statusBgColors[agent.status]
-                          )}
-                          fill="currentColor"
-                          stroke={
-                            agent.status === 'active'
-                              ? '#a6e3a1'
-                              : agent.status === 'busy'
-                              ? '#f9e2af'
-                              : agent.status === 'error'
-                              ? '#f38ba8'
-                              : '#6c7086'
-                          }
-                          strokeWidth={3}
-                        />
-
-                        {/* Agent icon - rendered as foreignObject */}
-                        <foreignObject x={-12} y={-12} width={24} height={24}>
-                          <div className="w-full h-full flex items-center justify-center text-text-primary">
-                            {isQueen ? '👑' : <Icon className="w-5 h-5" />}
-                          </div>
-                        </foreignObject>
-
-                        {/* Agent name */}
-                        <text
-                          y={45}
-                          textAnchor="middle"
-                          className="fill-text-primary text-xs font-medium"
-                        >
-                          {agent.name || agent.id.slice(0, 8)}
-                        </text>
-
-                        {/* Status indicator */}
-                        {agent.status === 'busy' && (
-                          <circle
-                            cx={22}
-                            cy={-22}
-                            r={6}
-                            fill="#f9e2af"
-                            className="animate-pulse"
-                          />
-                        )}
-                        {agent.status === 'error' && (
-                          <circle cx={22} cy={-22} r={6} fill="#f38ba8" />
-                        )}
-                      </g>
-                    )
-                  })}
-              </svg>
+              <AgentCanvasSVG
+                nodes={canvasNodes}
+                connections={connections}
+                selectedAgentId={selectedAgent?.id}
+                onSelectAgent={setSelectedAgent}
+              />
             )}
           </div>
         </div>
@@ -561,273 +339,36 @@ export function AgentCanvas() {
         </div>
       </div>
 
-      {/* Spawn Modal */}
+      {/* Modals */}
       {showSpawnModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="card p-6 w-full max-w-md">
-            <h2 className="text-lg font-semibold text-text-primary mb-4">Spawn Agent</h2>
-
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm text-text-muted mb-2 block">Agent Type</label>
-                <select
-                  value={newAgentType}
-                  onChange={(e) => setNewAgentType(e.target.value as AgentType)}
-                  className="input w-full"
-                >
-                  <option value="coder">Coder</option>
-                  <option value="researcher">Researcher</option>
-                  <option value="tester">Tester</option>
-                  <option value="architect">Architect</option>
-                  <option value="coordinator">Coordinator</option>
-                  <option value="security">Security</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm text-text-muted mb-2 block">Agent Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g., code-assistant-1"
-                  value={newAgentName}
-                  onChange={(e) => setNewAgentName(e.target.value)}
-                  className="input w-full"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 mt-6">
-              <button onClick={() => setShowSpawnModal(false)} className="btn btn-secondary">
-                Cancel
-              </button>
-              <button onClick={handleSpawnAgent} disabled={!newAgentName} className="btn btn-primary">
-                Spawn
-              </button>
-            </div>
-          </div>
-        </div>
+        <SpawnAgentModal
+          agentType={newAgentType}
+          agentName={newAgentName}
+          onTypeChange={setNewAgentType}
+          onNameChange={setNewAgentName}
+          onSpawn={handleSpawnAgent}
+          onClose={() => setShowSpawnModal(false)}
+        />
       )}
 
-      {/* Task Assignment Modal */}
       {showTaskModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="card p-6 w-full max-w-lg">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-                <Send className="w-5 h-5 text-accent-blue" />
-                Assign Task
-              </h2>
-              <button onClick={() => setShowTaskModal(false)} className="text-text-muted hover:text-text-primary">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm text-text-muted mb-2 block">Task Description</label>
-                <textarea
-                  placeholder="Describe the task for the agent(s)..."
-                  value={taskDescription}
-                  onChange={(e) => setTaskDescription(e.target.value)}
-                  className="input w-full h-32 resize-none"
-                  rows={4}
-                />
-              </div>
-
-              <div>
-                <label className="text-sm text-text-muted mb-2 block">Target Agent</label>
-                <select
-                  value={targetAgentId}
-                  onChange={(e) => setTargetAgentId(e.target.value)}
-                  className="input w-full"
-                >
-                  <option value="auto">Auto-route (best fit)</option>
-                  {agents.filter(a => a.status !== 'terminated').map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name || agent.id} ({agent.type})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-text-muted mt-1">
-                  {targetAgentId === 'auto'
-                    ? 'The system will automatically route to the most suitable agent'
-                    : 'Task will be assigned directly to the selected agent'}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 mt-6">
-              <button onClick={() => setShowTaskModal(false)} className="btn btn-secondary">
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmitTask}
-                disabled={!taskDescription.trim()}
-                className="btn btn-primary"
-              >
-                <Send className="w-4 h-4 mr-2" />
-                Submit Task
-              </button>
-            </div>
-          </div>
-        </div>
+        <TaskAssignmentModal
+          taskDescription={taskDescription}
+          targetAgentId={targetAgentId}
+          agents={agents}
+          onDescriptionChange={setTaskDescription}
+          onTargetChange={setTargetAgentId}
+          onSubmit={handleSubmitTask}
+          onClose={() => setShowTaskModal(false)}
+        />
       )}
 
-      {/* Templates Modal */}
       {showTemplatesModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="card p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-                <Layers className="w-5 h-5 text-accent-purple" />
-                Agent Templates
-              </h2>
-              <button onClick={() => setShowTemplatesModal(false)} className="text-text-muted hover:text-text-primary">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-sm text-text-muted mb-4">
-              Quick-start with pre-configured agent teams. Select a template to spawn all agents and initialize the swarm.
-            </p>
-
-            <div className="grid grid-cols-2 gap-4">
-              {agentTemplates.map((template) => {
-                const TopologyIcon = topologyOptions.find(t => t.value === template.topology)?.icon || LayoutGrid
-                return (
-                  <div
-                    key={template.name}
-                    className="card p-4 hover:bg-surface/80 cursor-pointer transition-colors border border-border hover:border-accent-purple/50"
-                    onClick={() => handleSpawnTemplate(template)}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <h3 className="font-semibold text-text-primary">{template.name}</h3>
-                      <div className="flex items-center gap-1 text-xs text-text-muted">
-                        <TopologyIcon className="w-3 h-3" />
-                        {template.topology}
-                      </div>
-                    </div>
-                    <p className="text-sm text-text-muted mb-3">{template.description}</p>
-                    <div className="flex flex-wrap gap-1">
-                      {template.agents.map((agent, i) => {
-                        const Icon = agentIcons[agent.type] || Brain
-                        return (
-                          <div
-                            key={i}
-                            className="flex items-center gap-1 px-2 py-1 bg-surface rounded text-xs text-text-muted"
-                          >
-                            <Icon className="w-3 h-3" />
-                            {agent.name}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-
-            <div className="flex justify-end gap-2 mt-6">
-              <button onClick={() => setShowTemplatesModal(false)} className="btn btn-secondary">
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <TemplatesModal
+          onSelectTemplate={handleSpawnTemplate}
+          onClose={() => setShowTemplatesModal(false)}
+        />
       )}
-    </div>
-  )
-}
-
-interface StatCardProps {
-  icon: typeof Brain
-  value: number | string
-  label: string
-  color: string
-}
-
-function StatCard({ icon: Icon, value, label, color }: StatCardProps) {
-  return (
-    <div className="card p-3">
-      <div className="flex items-center gap-3">
-        <Icon className={cn('w-5 h-5', color)} />
-        <div>
-          <p className="text-lg font-semibold text-text-primary">{value}</p>
-          <p className="text-xs text-text-muted">{label}</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-interface AgentDetailsProps {
-  agent: Agent
-  onTerminate: () => void
-}
-
-function AgentDetails({ agent, onTerminate }: AgentDetailsProps) {
-  const Icon = agentIcons[agent.type] || Brain
-
-  return (
-    <div className="card p-4 space-y-4">
-      <div className="flex items-center gap-3">
-        <div className={cn('p-3 rounded-lg', statusBgColors[agent.status])}>
-          <Icon className="w-6 h-6 text-text-primary" />
-        </div>
-        <div>
-          <p className="font-semibold text-text-primary">{agent.name || agent.id}</p>
-          <p className="text-sm text-text-muted capitalize">{agent.type}</p>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex justify-between text-sm">
-          <span className="text-text-muted">Status</span>
-          <span className={cn('capitalize', statusColors[agent.status].replace('border-', 'text-'))}>
-            {agent.status}
-          </span>
-        </div>
-
-        <div className="flex justify-between text-sm">
-          <span className="text-text-muted">Health</span>
-          <span className="text-text-primary">{(agent.health * 100).toFixed(0)}%</span>
-        </div>
-
-        <div className="flex justify-between text-sm">
-          <span className="text-text-muted">Tasks</span>
-          <span className="text-text-primary">{agent.taskCount}</span>
-        </div>
-
-        {agent.domain && (
-          <div className="flex justify-between text-sm">
-            <span className="text-text-muted">Domain</span>
-            <span className="text-text-primary">{agent.domain}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Health bar */}
-      <div>
-        <p className="text-xs text-text-muted mb-1">Health</p>
-        <div className="h-2 bg-surface rounded-full overflow-hidden">
-          <div
-            className={cn(
-              'h-full transition-all',
-              agent.health > 0.7 ? 'bg-accent-green' : agent.health > 0.3 ? 'bg-accent-yellow' : 'bg-accent-red'
-            )}
-            style={{ width: `${agent.health * 100}%` }}
-          />
-        </div>
-      </div>
-
-      <button
-        onClick={onTerminate}
-        className="w-full btn btn-secondary text-accent-red"
-        disabled={agent.status === 'terminated'}
-      >
-        <Trash2 className="w-4 h-4 mr-2" />
-        Terminate
-      </button>
     </div>
   )
 }

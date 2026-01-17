@@ -130,6 +130,13 @@ const ALLOWED_CHANNELS = new Set<string>([
   'audit:query',
   'audit:stats',
   'audit:export',
+  // SIEM log shipping (deploy-e1fc)
+  'audit:siem:register',
+  'audit:siem:unregister',
+  'audit:siem:setEnabled',
+  'audit:siem:getEndpoints',
+  'audit:siem:getStats',
+  'audit:siem:flush',
 
   // Watchdog (auto-recovery)
   'watchdog:start',
@@ -346,6 +353,17 @@ const claudeAPI = {
     getStats: () => electronAPI.invoke('audit:stats'),
     export: (format: 'json' | 'csv', params?: { startTime?: number; endTime?: number }) =>
       electronAPI.invoke('audit:export', format, params),
+    // SIEM log shipping (deploy-e1fc)
+    siem: {
+      register: (endpoint: Parameters<IPCChannels['audit:siem:register']>[0]) =>
+        electronAPI.invoke('audit:siem:register', endpoint),
+      unregister: (endpointId: string) => electronAPI.invoke('audit:siem:unregister', endpointId),
+      setEnabled: (endpointId: string, enabled: boolean) =>
+        electronAPI.invoke('audit:siem:setEnabled', endpointId, enabled),
+      getEndpoints: () => electronAPI.invoke('audit:siem:getEndpoints'),
+      getStats: (endpointId?: string) => electronAPI.invoke('audit:siem:getStats', endpointId),
+      flush: (endpointId?: string) => electronAPI.invoke('audit:siem:flush', endpointId),
+    },
   },
 
   // Beads (work tracking)

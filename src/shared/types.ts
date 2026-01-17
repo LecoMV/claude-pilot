@@ -469,6 +469,31 @@ export interface AuditStats {
   dbSizeMB: number
 }
 
+// SIEM Log Shipping (deploy-e1fc)
+export interface SIEMEndpoint {
+  id: string
+  name: string
+  type: 'webhook' | 'syslog' | 'http'
+  url?: string // For webhook/http
+  host?: string // For syslog
+  port?: number // For syslog
+  protocol?: 'tcp' | 'udp' // For syslog
+  apiKey?: string // Optional auth header
+  enabled: boolean
+  batchSize: number // Events to batch before sending
+  flushInterval: number // ms between flushes
+  retryAttempts: number
+  retryDelay: number // ms between retries
+}
+
+export interface SIEMShipperStats {
+  totalShipped: number
+  totalFailed: number
+  lastShipTime?: number
+  lastError?: string
+  queueSize: number
+}
+
 // Logs types
 export type LogSource = 'claude' | 'mcp' | 'system' | 'agent' | 'workflow' | 'all'
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -1169,6 +1194,15 @@ export type IPCChannels = {
     format: 'json' | 'csv',
     params?: { startTime?: number; endTime?: number }
   ) => Promise<string>
+  // SIEM log shipping (deploy-e1fc)
+  'audit:siem:register': (endpoint: SIEMEndpoint) => Promise<void>
+  'audit:siem:unregister': (endpointId: string) => Promise<void>
+  'audit:siem:setEnabled': (endpointId: string, enabled: boolean) => Promise<void>
+  'audit:siem:getEndpoints': () => Promise<SIEMEndpoint[]>
+  'audit:siem:getStats': (
+    endpointId?: string
+  ) => Promise<SIEMShipperStats | Record<string, SIEMShipperStats>>
+  'audit:siem:flush': (endpointId?: string) => Promise<boolean>
 
   // Watchdog (auto-recovery)
   'watchdog:start': () => Promise<boolean>

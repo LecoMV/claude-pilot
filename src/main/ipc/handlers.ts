@@ -914,6 +914,59 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // ==================== SIEM Log Shipping Handlers (deploy-e1fc) ====================
+  ipcMain.handle(
+    'audit:siem:register',
+    (
+      _event,
+      endpoint: {
+        id: string
+        name: string
+        type: 'webhook' | 'syslog' | 'http'
+        url?: string
+        host?: string
+        port?: number
+        protocol?: 'tcp' | 'udp'
+        apiKey?: string
+        enabled: boolean
+        batchSize: number
+        flushInterval: number
+        retryAttempts: number
+        retryDelay: number
+      }
+    ) => {
+      auditService.registerEndpoint(endpoint)
+    }
+  )
+
+  ipcMain.handle('audit:siem:unregister', (_event, endpointId: string) => {
+    auditService.unregisterEndpoint(endpointId)
+  })
+
+  ipcMain.handle('audit:siem:setEnabled', (_event, endpointId: string, enabled: boolean) => {
+    auditService.setEndpointEnabled(endpointId, enabled)
+  })
+
+  ipcMain.handle('audit:siem:getEndpoints', () => {
+    return auditService.getEndpoints()
+  })
+
+  ipcMain.handle('audit:siem:getStats', (_event, endpointId?: string) => {
+    const stats = auditService.getShipperStats(endpointId)
+    if (stats instanceof Map) {
+      return Object.fromEntries(stats)
+    }
+    return stats
+  })
+
+  ipcMain.handle('audit:siem:flush', async (_event, endpointId?: string): Promise<boolean> => {
+    if (endpointId) {
+      return auditService.flushToEndpoint(endpointId)
+    }
+    await auditService.flushAll()
+    return true
+  })
+
   // ==================== Watchdog Handlers ====================
   ipcMain.handle('watchdog:start', (): boolean => {
     try {

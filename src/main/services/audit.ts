@@ -57,42 +57,73 @@ export enum EventCategory {
 // Audit event structure (OCSF-compliant)
 export interface AuditEvent {
   id?: number
-  time: number                    // Unix timestamp in milliseconds
-  class_uid: number               // OCSF class (6003 for API Activity)
-  class_name: string              // Human-readable class name
-  category_uid: number            // Category ID
-  category_name: EventCategory    // Category name
-  activity_id: ActivityType       // Activity type
-  activity_name: string           // Human-readable activity
-  severity_id: Severity           // Severity level
-  status_id: StatusCode           // Operation status
-  status_detail?: string          // Optional status message
-  message: string                 // Event description
+  time: number // Unix timestamp in milliseconds
+  class_uid: number // OCSF class (6003 for API Activity)
+  class_name: string // Human-readable class name
+  category_uid: number // Category ID
+  category_name: EventCategory // Category name
+  activity_id: ActivityType // Activity type
+  activity_name: string // Human-readable activity
+  severity_id: Severity // Severity level
+  status_id: StatusCode // Operation status
+  status_detail?: string // Optional status message
+  message: string // Event description
   // Actor (who)
-  actor_user?: string             // User identifier
-  actor_process?: string          // Process name
-  actor_session?: string          // Session ID
+  actor_user?: string // User identifier
+  actor_process?: string // Process name
+  actor_session?: string // Session ID
   // Target (what)
-  target_type?: string            // Resource type (ipc, mcp, memory, etc.)
-  target_name?: string            // Resource name (channel, server, query)
-  target_data?: string            // Additional target data (JSON)
+  target_type?: string // Resource type (ipc, mcp, memory, etc.)
+  target_name?: string // Resource name (channel, server, query)
+  target_data?: string // Additional target data (JSON)
   // Metadata
-  metadata_version: string        // OCSF version
-  metadata_product_name: string   // Product name
+  metadata_version: string // OCSF version
+  metadata_product_name: string // Product name
   metadata_product_version: string // App version
   // Raw data for debugging
-  raw_data?: string               // Original event data (JSON)
+  raw_data?: string // Original event data (JSON)
 }
 
 // Log rotation config
 const MAX_LOG_SIZE_MB = 10
 const MAX_LOG_FILES = 5
 
+// Log shipping config
+export interface SIEMEndpoint {
+  id: string
+  name: string
+  type: 'webhook' | 'syslog' | 'http'
+  url?: string // For webhook/http
+  host?: string // For syslog
+  port?: number // For syslog
+  protocol?: 'tcp' | 'udp' // For syslog
+  apiKey?: string // Optional auth header
+  enabled: boolean
+  batchSize: number // Events to batch before sending
+  flushInterval: number // ms between flushes
+  retryAttempts: number
+  retryDelay: number // ms between retries
+}
+
+export interface ShipperStats {
+  totalShipped: number
+  totalFailed: number
+  lastShipTime?: number
+  lastError?: string
+  queueSize: number
+}
+
 class AuditService {
   private db: Database.Database | null = null
   private dbPath: string = ''
   private initialized = false
   private appVersion: string = '0.0.0'
+
+  // Log shipping state
+  private endpoints: Map<string, SIEMEndpoint> = new Map()
+  private eventQueue: AuditEvent[] = []
+  private flushTimers: Map<string, NodeJS.Timeout> = new Map()
+  private shipperStats: Map<string, ShipperStats> = new Map()
 
   /**
    * Initialize the audit service
@@ -155,7 +186,7 @@ class AuditService {
       `)
 
       this.initialized = true
-      console.log('[Audit] Initialized at', this.dbPath)
+      console.info('[Audit] Initialized at', this.dbPath)
 
       // Log service start
       this.log({
@@ -196,7 +227,7 @@ class AuditService {
 
         // Rename current file
         renameSync(this.dbPath, rotatedPath)
-        console.log('[Audit] Rotated log to', rotatedPath)
+        console.info('[Audit] Rotated log to', rotatedPath)
 
         // Clean up old files
         this.cleanupOldLogs(auditDir)
@@ -212,7 +243,7 @@ class AuditService {
   private cleanupOldLogs(auditDir: string): void {
     try {
       const files = readdirSync(auditDir)
-        .filter(f => f.startsWith('audit-') && f.endsWith('.db'))
+        .filter((f) => f.startsWith('audit-') && f.endsWith('.db'))
         .sort()
         .reverse()
 
@@ -220,7 +251,7 @@ class AuditService {
       const toDelete = files.slice(MAX_LOG_FILES)
       for (const file of toDelete) {
         unlinkSync(join(auditDir, file))
-        console.log('[Audit] Deleted old log:', file)
+        console.info('[Audit] Deleted old log:', file)
       }
     } catch (error) {
       console.error('[Audit] Cleanup failed:', error)
@@ -325,6 +356,11 @@ class AuditService {
         event.metadata_product_version,
         event.raw_data
       )
+
+      // Queue for SIEM shipping if endpoints are configured
+      if (this.endpoints.size > 0) {
+        this.queueForShipping(event)
+      }
     } catch (error) {
       console.error('[Audit] Failed to log event:', error)
     }
@@ -464,29 +500,41 @@ class AuditService {
     }
 
     try {
-      const total = this.db.prepare('SELECT COUNT(*) as count FROM audit_events').get() as { count: number }
+      const total = this.db.prepare('SELECT COUNT(*) as count FROM audit_events').get() as {
+        count: number
+      }
 
-      const byCategory = this.db.prepare(`
+      const byCategory = this.db
+        .prepare(
+          `
         SELECT category_name, COUNT(*) as count
         FROM audit_events
         GROUP BY category_name
-      `).all() as Array<{ category_name: string; count: number }>
+      `
+        )
+        .all() as Array<{ category_name: string; count: number }>
 
-      const byActivity = this.db.prepare(`
+      const byActivity = this.db
+        .prepare(
+          `
         SELECT activity_name, COUNT(*) as count
         FROM audit_events
         GROUP BY activity_name
-      `).all() as Array<{ activity_name: string; count: number }>
+      `
+        )
+        .all() as Array<{ activity_name: string; count: number }>
 
       const dayAgo = Date.now() - 24 * 60 * 60 * 1000
-      const last24h = this.db.prepare('SELECT COUNT(*) as count FROM audit_events WHERE time >= ?').get(dayAgo) as { count: number }
+      const last24h = this.db
+        .prepare('SELECT COUNT(*) as count FROM audit_events WHERE time >= ?')
+        .get(dayAgo) as { count: number }
 
       const stats = existsSync(this.dbPath) ? statSync(this.dbPath) : { size: 0 }
 
       return {
         totalEvents: total.count,
-        eventsByCategory: Object.fromEntries(byCategory.map(r => [r.category_name, r.count])),
-        eventsByActivity: Object.fromEntries(byActivity.map(r => [r.activity_name, r.count])),
+        eventsByCategory: Object.fromEntries(byCategory.map((r) => [r.category_name, r.count])),
+        eventsByActivity: Object.fromEntries(byActivity.map((r) => [r.activity_name, r.count])),
         last24hCount: last24h.count,
         dbSizeMB: stats.size / (1024 * 1024),
       }
@@ -525,32 +573,386 @@ class AuditService {
     if (events.length === 0) return ''
 
     const headers = [
-      'time', 'class_name', 'category_name', 'activity_name',
-      'severity_id', 'status_id', 'message',
-      'actor_user', 'actor_process', 'target_type', 'target_name'
+      'time',
+      'class_name',
+      'category_name',
+      'activity_name',
+      'severity_id',
+      'status_id',
+      'message',
+      'actor_user',
+      'actor_process',
+      'target_type',
+      'target_name',
     ]
 
-    const rows = events.map(e => [
-      new Date(e.time).toISOString(),
-      e.class_name,
-      e.category_name,
-      e.activity_name,
-      e.severity_id,
-      e.status_id,
-      `"${(e.message || '').replace(/"/g, '""')}"`,
-      e.actor_user || '',
-      e.actor_process || '',
-      e.target_type || '',
-      e.target_name || '',
-    ].join(','))
+    const rows = events.map((e) =>
+      [
+        new Date(e.time).toISOString(),
+        e.class_name,
+        e.category_name,
+        e.activity_name,
+        e.severity_id,
+        e.status_id,
+        `"${(e.message || '').replace(/"/g, '""')}"`,
+        e.actor_user || '',
+        e.actor_process || '',
+        e.target_type || '',
+        e.target_name || '',
+      ].join(',')
+    )
 
     return [headers.join(','), ...rows].join('\n')
+  }
+
+  // ============================================================================
+  // LOG SHIPPING (SIEM Integration) - deploy-e1fc
+  // ============================================================================
+
+  /**
+   * Register a SIEM endpoint for log shipping
+   */
+  registerEndpoint(endpoint: SIEMEndpoint): void {
+    this.endpoints.set(endpoint.id, endpoint)
+    this.shipperStats.set(endpoint.id, {
+      totalShipped: 0,
+      totalFailed: 0,
+      queueSize: 0,
+    })
+
+    // Start flush timer if enabled
+    if (endpoint.enabled) {
+      this.startFlushTimer(endpoint)
+    }
+
+    console.info(`[Audit] Registered SIEM endpoint: ${endpoint.name} (${endpoint.type})`)
+  }
+
+  /**
+   * Remove a SIEM endpoint
+   */
+  unregisterEndpoint(endpointId: string): void {
+    const timer = this.flushTimers.get(endpointId)
+    if (timer) {
+      clearInterval(timer)
+      this.flushTimers.delete(endpointId)
+    }
+    this.endpoints.delete(endpointId)
+    this.shipperStats.delete(endpointId)
+  }
+
+  /**
+   * Enable/disable an endpoint
+   */
+  setEndpointEnabled(endpointId: string, enabled: boolean): void {
+    const endpoint = this.endpoints.get(endpointId)
+    if (!endpoint) return
+
+    endpoint.enabled = enabled
+    if (enabled) {
+      this.startFlushTimer(endpoint)
+    } else {
+      const timer = this.flushTimers.get(endpointId)
+      if (timer) {
+        clearInterval(timer)
+        this.flushTimers.delete(endpointId)
+      }
+    }
+  }
+
+  /**
+   * Get all registered endpoints
+   */
+  getEndpoints(): SIEMEndpoint[] {
+    return Array.from(this.endpoints.values())
+  }
+
+  /**
+   * Get shipper stats for an endpoint
+   */
+  getShipperStats(endpointId?: string): ShipperStats | Map<string, ShipperStats> {
+    if (endpointId) {
+      return (
+        this.shipperStats.get(endpointId) || {
+          totalShipped: 0,
+          totalFailed: 0,
+          queueSize: this.eventQueue.length,
+        }
+      )
+    }
+    return this.shipperStats
+  }
+
+  /**
+   * Queue event for shipping to all enabled endpoints
+   */
+  private queueForShipping(event: AuditEvent): void {
+    this.eventQueue.push(event)
+
+    // Check if any endpoint batch size reached
+    for (const [id, endpoint] of this.endpoints) {
+      if (endpoint.enabled && this.eventQueue.length >= endpoint.batchSize) {
+        this.flushToEndpoint(id)
+      }
+    }
+  }
+
+  /**
+   * Start periodic flush timer for endpoint
+   */
+  private startFlushTimer(endpoint: SIEMEndpoint): void {
+    // Clear existing timer if any
+    const existing = this.flushTimers.get(endpoint.id)
+    if (existing) clearInterval(existing)
+
+    const timer = setInterval(() => {
+      if (this.eventQueue.length > 0) {
+        this.flushToEndpoint(endpoint.id)
+      }
+    }, endpoint.flushInterval)
+
+    this.flushTimers.set(endpoint.id, timer)
+  }
+
+  /**
+   * Flush queued events to a specific endpoint
+   */
+  async flushToEndpoint(endpointId: string): Promise<boolean> {
+    const endpoint = this.endpoints.get(endpointId)
+    const stats = this.shipperStats.get(endpointId)
+    if (!endpoint || !endpoint.enabled || !stats) return false
+
+    const eventsToShip = [...this.eventQueue]
+    if (eventsToShip.length === 0) return true
+
+    // Clear queue (will re-add on failure)
+    this.eventQueue = []
+
+    try {
+      const success = await this.shipEvents(endpoint, eventsToShip)
+      if (success) {
+        stats.totalShipped += eventsToShip.length
+        stats.lastShipTime = Date.now()
+        stats.lastError = undefined
+        stats.queueSize = 0
+        return true
+      } else {
+        throw new Error('Ship failed')
+      }
+    } catch (error) {
+      stats.totalFailed += eventsToShip.length
+      stats.lastError = (error as Error).message
+      // Re-queue events on failure (up to a limit)
+      if (this.eventQueue.length < 10000) {
+        this.eventQueue.unshift(...eventsToShip)
+      }
+      stats.queueSize = this.eventQueue.length
+      return false
+    }
+  }
+
+  /**
+   * Ship events to endpoint with retries
+   */
+  private async shipEvents(endpoint: SIEMEndpoint, events: AuditEvent[]): Promise<boolean> {
+    let lastError: Error | null = null
+
+    for (let attempt = 0; attempt < endpoint.retryAttempts; attempt++) {
+      try {
+        switch (endpoint.type) {
+          case 'webhook':
+          case 'http':
+            await this.shipViaHttp(endpoint, events)
+            return true
+
+          case 'syslog':
+            await this.shipViaSyslog(endpoint, events)
+            return true
+
+          default:
+            throw new Error(`Unknown endpoint type: ${endpoint.type}`)
+        }
+      } catch (error) {
+        lastError = error as Error
+        console.warn(`[Audit] Ship attempt ${attempt + 1}/${endpoint.retryAttempts} failed:`, error)
+        if (attempt < endpoint.retryAttempts - 1) {
+          await this.sleep(endpoint.retryDelay * (attempt + 1))
+        }
+      }
+    }
+
+    throw lastError || new Error('Ship failed after retries')
+  }
+
+  /**
+   * Ship events via HTTP/webhook
+   */
+  private async shipViaHttp(endpoint: SIEMEndpoint, events: AuditEvent[]): Promise<void> {
+    if (!endpoint.url) throw new Error('HTTP endpoint requires URL')
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': `Claude-Pilot/${this.appVersion}`,
+    }
+
+    if (endpoint.apiKey) {
+      headers['Authorization'] = `Bearer ${endpoint.apiKey}`
+    }
+
+    const response = await fetch(endpoint.url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        events,
+        metadata: {
+          product: 'Claude Pilot',
+          version: this.appVersion,
+          shipTime: Date.now(),
+          eventCount: events.length,
+        },
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+  }
+
+  /**
+   * Ship events via syslog (UDP/TCP)
+   */
+  private async shipViaSyslog(endpoint: SIEMEndpoint, events: AuditEvent[]): Promise<void> {
+    if (!endpoint.host || !endpoint.port) {
+      throw new Error('Syslog endpoint requires host and port')
+    }
+
+    // Format events as syslog messages (RFC 5424)
+    const messages = events.map((event) => {
+      const pri = this.calculateSyslogPri(event.severity_id)
+      const timestamp = new Date(event.time).toISOString()
+      const hostname = 'claude-pilot'
+      const appName = 'audit'
+      const procId = process.pid
+      const msgId = event.activity_name.toUpperCase().replace(/\s+/g, '_')
+
+      // Structured data (OCSF format)
+      const sd =
+        `[ocsf@1 class_uid="${event.class_uid}" activity_id="${event.activity_id}" ` +
+        `category="${event.category_name}" severity="${event.severity_id}" ` +
+        `status="${event.status_id}"]`
+
+      return `<${pri}>1 ${timestamp} ${hostname} ${appName} ${procId} ${msgId} ${sd} ${event.message}`
+    })
+
+    if (endpoint.protocol === 'udp') {
+      await this.sendUdp(endpoint.host, endpoint.port, messages)
+    } else {
+      await this.sendTcp(endpoint.host, endpoint.port, messages)
+    }
+  }
+
+  /**
+   * Calculate syslog priority value
+   */
+  private calculateSyslogPri(severity: Severity): number {
+    // Facility 16 (local0) + severity mapping
+    const facility = 16
+    const syslogSeverity = {
+      [Severity.UNKNOWN]: 5, // notice
+      [Severity.INFORMATIONAL]: 6, // info
+      [Severity.LOW]: 5, // notice
+      [Severity.MEDIUM]: 4, // warning
+      [Severity.HIGH]: 3, // error
+      [Severity.CRITICAL]: 2, // critical
+    }
+    return facility * 8 + (syslogSeverity[severity] || 6)
+  }
+
+  /**
+   * Send messages via UDP
+   */
+  private sendUdp(host: string, port: number, messages: string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      import('dgram')
+        .then((dgram) => {
+          const client = dgram.createSocket('udp4')
+          let pending = messages.length
+
+          const checkDone = () => {
+            if (--pending === 0) {
+              client.close()
+              resolve()
+            }
+          }
+
+          for (const msg of messages) {
+            const buffer = Buffer.from(msg)
+            client.send(buffer, port, host, (error) => {
+              if (error) {
+                client.close()
+                reject(error)
+              } else {
+                checkDone()
+              }
+            })
+          }
+        })
+        .catch(reject)
+    })
+  }
+
+  /**
+   * Send messages via TCP
+   */
+  private sendTcp(host: string, port: number, messages: string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      import('net')
+        .then((net) => {
+          const client = new net.Socket()
+          client.setTimeout(10000)
+
+          client.connect(port, host, () => {
+            for (const msg of messages) {
+              client.write(msg + '\n')
+            }
+            client.end()
+          })
+
+          client.on('close', () => resolve())
+          client.on('error', reject)
+          client.on('timeout', () => {
+            client.destroy()
+            reject(new Error('TCP timeout'))
+          })
+        })
+        .catch(reject)
+    })
+  }
+
+  /**
+   * Manually trigger flush to all endpoints
+   */
+  async flushAll(): Promise<void> {
+    for (const [id, endpoint] of this.endpoints) {
+      if (endpoint.enabled) {
+        await this.flushToEndpoint(id)
+      }
+    }
   }
 
   /**
    * Close database connection
    */
   close(): void {
+    // Stop all flush timers
+    for (const timer of this.flushTimers.values()) {
+      clearInterval(timer)
+    }
+    this.flushTimers.clear()
+
+    // Final flush attempt
+    this.flushAll().catch((e) => console.error('[Audit] Final flush failed:', e))
+
     if (this.db) {
       this.db.close()
       this.db = null
@@ -583,6 +985,10 @@ class AuditService {
       [ActivityType.AUTHORIZE]: 'Authorize',
     }
     return map[activity] || 'Unknown'
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 }
 
