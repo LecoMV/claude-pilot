@@ -253,6 +253,9 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
           e.preventDefault()
           onClose()
           break
+        default:
+          // Other keys are ignored
+          break
       }
     },
     [filteredCommands, selectedIndex, onClose]
@@ -278,6 +281,8 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
         return 'text-accent-teal'
       case 'action':
         return 'text-accent-yellow'
+      default:
+        return 'text-text-muted'
     }
   }
 

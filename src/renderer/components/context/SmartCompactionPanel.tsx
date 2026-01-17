@@ -104,7 +104,8 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
               id: msg.uuid,
               type: 'agent_output',
               title: `Agent: ${msg.toolName}`,
-              content: msg.toolOutput.substring(0, 500) + (msg.toolOutput.length > 500 ? '...' : ''),
+              content:
+                msg.toolOutput.substring(0, 500) + (msg.toolOutput.length > 500 ? '...' : ''),
               timestamp: msg.timestamp,
               preserved: true,
             })
@@ -117,8 +118,11 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
             id: msg.uuid,
             type: 'code_generated',
             title: `Code: ${(msg.toolInput as { file_path?: string })?.file_path || 'Unknown'}`,
-            content: String((msg.toolInput as { content?: string; new_string?: string })?.content ||
-              (msg.toolInput as { new_string?: string })?.new_string || '').substring(0, 300),
+            content: String(
+              (msg.toolInput as { content?: string; new_string?: string })?.content ||
+                (msg.toolInput as { new_string?: string })?.new_string ||
+                ''
+            ).substring(0, 300),
             timestamp: msg.timestamp,
             preserved: true,
           })
@@ -140,7 +144,7 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
 
         // Significant tool outputs
         if (msg.toolOutput && msg.toolOutput.length > 1000 && !msg.toolOutput.includes('Error')) {
-          const exists = valuableData.some(v => v.id === msg.uuid)
+          const exists = valuableData.some((v) => v.id === msg.uuid)
           if (!exists) {
             valuableData.push({
               id: msg.uuid,
@@ -211,7 +215,7 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
     if (!preview) return
     setPreview({
       ...preview,
-      valuableData: preview.valuableData.map(item =>
+      valuableData: preview.valuableData.map((item) =>
         item.id === id ? { ...item, preserved: !item.preserved } : item
       ),
     })
@@ -225,21 +229,11 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
       const filename = `session-${session.id}-${timestamp}.json`
       const exportDir = `${homePath}/.config/claude-pilot/exports`
 
-      // Get all messages
-      const messages = await window.electron.invoke('sessions:getMessages', session.id, 10000)
+      // Get all messages for export
+      const _messages = await window.electron.invoke('sessions:getMessages', session.id, 10000)
 
-      const exportData = {
-        session: {
-          id: session.id,
-          projectName: session.projectName,
-          projectPath: session.projectPath,
-          startTime: session.startTime,
-          model: session.model,
-          stats: session.stats,
-        },
-        messages,
-        exportedAt: new Date().toISOString(),
-      }
+      // Export data is prepared for future IPC handler
+      // const exportData = { session, messages, exportedAt: new Date().toISOString() }
 
       // Save via IPC (we'd need to add this handler, for now just show path)
       setExportPath(`${exportDir}/${filename}`)
@@ -253,46 +247,46 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
     setStep('sync')
 
     // Sync PostgreSQL learnings
-    setSyncStatus(s => ({ ...s, postgresql: 'syncing' }))
+    setSyncStatus((s) => ({ ...s, postgresql: 'syncing' }))
     try {
       // Learnings are auto-synced, just verify
       await window.electron.invoke('memory:learnings', '', 1)
-      setSyncStatus(s => ({ ...s, postgresql: 'done' }))
+      setSyncStatus((s) => ({ ...s, postgresql: 'done' }))
     } catch {
-      setSyncStatus(s => ({ ...s, postgresql: 'error' }))
+      setSyncStatus((s) => ({ ...s, postgresql: 'error' }))
     }
 
     // Sync Memgraph
-    setSyncStatus(s => ({ ...s, memgraph: 'syncing' }))
+    setSyncStatus((s) => ({ ...s, memgraph: 'syncing' }))
     try {
       // Check connection
       const stats = await window.electron.invoke('memory:stats')
       if (stats.memgraph.nodes >= 0) {
-        setSyncStatus(s => ({ ...s, memgraph: 'done' }))
+        setSyncStatus((s) => ({ ...s, memgraph: 'done' }))
       }
     } catch {
-      setSyncStatus(s => ({ ...s, memgraph: 'error' }))
+      setSyncStatus((s) => ({ ...s, memgraph: 'error' }))
     }
 
     // Sync Mem0/Qdrant
-    setSyncStatus(s => ({ ...s, mem0: 'syncing' }))
+    setSyncStatus((s) => ({ ...s, mem0: 'syncing' }))
     try {
       const stats = await window.electron.invoke('memory:stats')
       if (stats.qdrant.vectors >= 0) {
-        setSyncStatus(s => ({ ...s, mem0: 'done' }))
+        setSyncStatus((s) => ({ ...s, mem0: 'done' }))
       }
     } catch {
-      setSyncStatus(s => ({ ...s, mem0: 'error' }))
+      setSyncStatus((s) => ({ ...s, mem0: 'error' }))
     }
 
     // Sync Beads
-    setSyncStatus(s => ({ ...s, beads: 'syncing' }))
+    setSyncStatus((s) => ({ ...s, beads: 'syncing' }))
     try {
       // Check if beads exist
       const hasBeads = await window.electron.invoke('beads:hasBeads', session.projectPath)
-      setSyncStatus(s => ({ ...s, beads: hasBeads ? 'done' : 'idle' }))
+      setSyncStatus((s) => ({ ...s, beads: hasBeads ? 'done' : 'idle' }))
     } catch {
-      setSyncStatus(s => ({ ...s, beads: 'error' }))
+      setSyncStatus((s) => ({ ...s, beads: 'error' }))
     }
   }
 
@@ -304,7 +298,7 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
 
     try {
       // Export preserved data first
-      if (preview?.valuableData.some(v => v.preserved)) {
+      if (preview?.valuableData.some((v) => v.preserved)) {
         await handleExport()
       }
 
@@ -327,20 +321,33 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
 
   const getTypeIcon = (type: ValuableData['type']) => {
     switch (type) {
-      case 'agent_output': return <Brain className="w-4 h-4" />
-      case 'background_task': return <Server className="w-4 h-4" />
-      case 'code_generated': return <Code className="w-4 h-4" />
-      case 'research_result': return <Sparkles className="w-4 h-4" />
-      case 'tool_output': return <Wrench className="w-4 h-4" />
+      case 'agent_output':
+        return <Brain className="w-4 h-4" />
+      case 'background_task':
+        return <Server className="w-4 h-4" />
+      case 'code_generated':
+        return <Code className="w-4 h-4" />
+      case 'research_result':
+        return <Sparkles className="w-4 h-4" />
+      case 'tool_output':
+        return <Wrench className="w-4 h-4" />
+      default:
+        return <Wrench className="w-4 h-4" />
     }
   }
 
   const getSyncIcon = (status: SyncStatus[keyof SyncStatus]) => {
     switch (status) {
-      case 'idle': return <Clock className="w-4 h-4 text-text-muted" />
-      case 'syncing': return <Loader2 className="w-4 h-4 text-accent-blue animate-spin" />
-      case 'done': return <CheckCircle2 className="w-4 h-4 text-accent-green" />
-      case 'error': return <AlertCircle className="w-4 h-4 text-accent-red" />
+      case 'idle':
+        return <Clock className="w-4 h-4 text-text-muted" />
+      case 'syncing':
+        return <Loader2 className="w-4 h-4 text-accent-blue animate-spin" />
+      case 'done':
+        return <CheckCircle2 className="w-4 h-4 text-accent-green" />
+      case 'error':
+        return <AlertCircle className="w-4 h-4 text-accent-red" />
+      default:
+        return <Clock className="w-4 h-4 text-text-muted" />
     }
   }
 
@@ -387,23 +394,27 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
           <div className="flex items-center justify-center gap-2 py-2">
             {['preview', 'sync', 'compact', 'done'].map((s, i) => (
               <div key={s} className="flex items-center">
-                <div className={cn(
-                  'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
-                  step === s
-                    ? 'bg-accent-purple text-white'
-                    : ['preview', 'sync', 'compact', 'done'].indexOf(step) > i
-                      ? 'bg-accent-green text-white'
-                      : 'bg-surface-hover text-text-muted'
-                )}>
+                <div
+                  className={cn(
+                    'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
+                    step === s
+                      ? 'bg-accent-purple text-white'
+                      : ['preview', 'sync', 'compact', 'done'].indexOf(step) > i
+                        ? 'bg-accent-green text-white'
+                        : 'bg-surface-hover text-text-muted'
+                  )}
+                >
                   {i + 1}
                 </div>
                 {i < 3 && (
-                  <div className={cn(
-                    'w-12 h-0.5',
-                    ['preview', 'sync', 'compact', 'done'].indexOf(step) > i
-                      ? 'bg-accent-green'
-                      : 'bg-border'
-                  )} />
+                  <div
+                    className={cn(
+                      'w-12 h-0.5',
+                      ['preview', 'sync', 'compact', 'done'].indexOf(step) > i
+                        ? 'bg-accent-green'
+                        : 'bg-border'
+                    )}
+                  />
                 )}
               </div>
             ))}
@@ -421,12 +432,16 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
                 </div>
                 <div className="bg-background rounded-lg p-4 text-center">
                   <Archive className="w-5 h-5 mx-auto text-accent-yellow mb-2" />
-                  <p className="text-2xl font-bold text-text-primary">{preview.messagesCompacted}</p>
+                  <p className="text-2xl font-bold text-text-primary">
+                    {preview.messagesCompacted}
+                  </p>
                   <p className="text-sm text-text-muted">To Compact</p>
                 </div>
                 <div className="bg-background rounded-lg p-4 text-center">
                   <HardDrive className="w-5 h-5 mx-auto text-accent-green mb-2" />
-                  <p className="text-2xl font-bold text-text-primary">{formatNumber(preview.tokensSaved)}</p>
+                  <p className="text-2xl font-bold text-text-primary">
+                    {formatNumber(preview.tokensSaved)}
+                  </p>
                   <p className="text-sm text-text-muted">Tokens Freed</p>
                 </div>
               </div>
@@ -445,7 +460,8 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
                     )}
                     <Save className="w-4 h-4 text-accent-purple" />
                     <span className="font-medium text-text-primary">
-                      Valuable Data ({preview.valuableData.filter(v => v.preserved).length} preserved)
+                      Valuable Data ({preview.valuableData.filter((v) => v.preserved).length}{' '}
+                      preserved)
                     </span>
                   </div>
                   <span className="text-sm text-text-muted">
@@ -460,7 +476,7 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
                         No valuable data detected
                       </p>
                     ) : (
-                      preview.valuableData.map(item => (
+                      preview.valuableData.map((item) => (
                         <div key={item.id} className="p-3 flex items-start gap-3">
                           <button
                             onClick={() => togglePreserve(item.id)}
@@ -504,9 +520,7 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
                     <Database className="w-4 h-4 text-accent-blue" />
                     <span className="font-medium text-text-primary">Memory Systems</span>
                   </div>
-                  <span className="text-sm text-text-muted">
-                    Will sync before compaction
-                  </span>
+                  <span className="text-sm text-text-muted">Will sync before compaction</span>
                 </button>
 
                 {expandedSections.has('memory') && (
@@ -521,7 +535,9 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
                     <div className="flex items-center justify-between p-2 bg-background rounded">
                       <div className="flex items-center gap-2">
                         <GitBranch className="w-4 h-4 text-accent-purple" />
-                        <span className="text-sm text-text-primary">Memgraph (Knowledge Graph)</span>
+                        <span className="text-sm text-text-primary">
+                          Memgraph (Knowledge Graph)
+                        </span>
                       </div>
                       {getSyncIcon(syncStatus.memgraph)}
                     </div>
@@ -613,9 +629,7 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
                 Session has been compacted successfully
               </p>
               {exportPath && (
-                <p className="text-xs text-accent-blue mt-4">
-                  Data exported to: {exportPath}
-                </p>
+                <p className="text-xs text-accent-blue mt-4">Data exported to: {exportPath}</p>
               )}
             </div>
           )}
@@ -640,12 +654,13 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
               </button>
             )}
 
-            {step === 'sync' && Object.values(syncStatus).every(s => s === 'done' || s === 'idle') && (
-              <button onClick={handleCompact} className="btn btn-primary">
-                <Archive className="w-4 h-4 mr-1" />
-                Compact Now
-              </button>
-            )}
+            {step === 'sync' &&
+              Object.values(syncStatus).every((s) => s === 'done' || s === 'idle') && (
+                <button onClick={handleCompact} className="btn btn-primary">
+                  <Archive className="w-4 h-4 mr-1" />
+                  Compact Now
+                </button>
+              )}
 
             {step === 'done' && (
               <button onClick={onClose} className="btn btn-primary">

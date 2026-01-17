@@ -28,8 +28,8 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
     thinkingBudgetRange: [1024, 128000],
     supportsVision: true,
     supportsToolUse: true,
-    inputPricePerMillion: 15.00,
-    outputPricePerMillion: 75.00,
+    inputPricePerMillion: 15.0,
+    outputPricePerMillion: 75.0,
     cachePricePerMillion: 1.875,
     description: 'Most capable model for complex reasoning and planning',
     recommended: 'planning',
@@ -42,8 +42,8 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
     thinkingBudgetRange: [1024, 32000],
     supportsVision: true,
     supportsToolUse: true,
-    inputPricePerMillion: 3.00,
-    outputPricePerMillion: 15.00,
+    inputPricePerMillion: 3.0,
+    outputPricePerMillion: 15.0,
     cachePricePerMillion: 0.375,
     description: 'Best balance of capability and speed for coding',
     recommended: 'coding',
@@ -56,8 +56,8 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
     thinkingBudgetRange: [1024, 32000],
     supportsVision: true,
     supportsToolUse: true,
-    inputPricePerMillion: 3.00,
-    outputPricePerMillion: 15.00,
+    inputPricePerMillion: 3.0,
+    outputPricePerMillion: 15.0,
     cachePricePerMillion: 0.375,
     description: 'Fast and efficient for everyday tasks',
     recommended: 'balanced',
@@ -70,9 +70,9 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
     thinkingBudgetRange: null,
     supportsVision: true,
     supportsToolUse: true,
-    inputPricePerMillion: 0.80,
-    outputPricePerMillion: 4.00,
-    cachePricePerMillion: 0.10,
+    inputPricePerMillion: 0.8,
+    outputPricePerMillion: 4.0,
+    cachePricePerMillion: 0.1,
     description: 'Fastest model for simple tasks and quick responses',
     recommended: 'fast',
   },
@@ -334,21 +334,21 @@ export interface ExternalSession {
   gitBranch?: string
   stats: SessionStats
   // Enhanced session metadata
-  workingDirectory?: string      // cwd from JSONL - where Claude was launched
-  userType?: 'external' | 'api' | 'internal' | string  // How session was initiated
-  isSubagent?: boolean           // Whether this is a subagent/sidechain session
+  workingDirectory?: string // cwd from JSONL - where Claude was launched
+  userType?: 'external' | 'api' | 'internal' | string // How session was initiated
+  isSubagent?: boolean // Whether this is a subagent/sidechain session
   // Process info (for active sessions only)
   processInfo?: SessionProcessInfo
 }
 
 export interface SessionProcessInfo {
-  pid: number                    // Process ID
-  profile: string                // Profile name (default, engineering, security, etc.)
-  terminal: string               // TTY (pts/3) or 'background'
-  launchMode: 'new' | 'resume'   // Whether session was resumed or new
-  permissionMode?: string        // Permission level (bypassPermissions, etc.)
-  wrapper?: string               // Launch wrapper (claude+, claude-eng, etc.)
-  activeMcpServers: string[]     // Running MCP server names
+  pid: number // Process ID
+  profile: string // Profile name (default, engineering, security, etc.)
+  terminal: string // TTY (pts/3) or 'background'
+  launchMode: 'new' | 'resume' // Whether session was resumed or new
+  permissionMode?: string // Permission level (bypassPermissions, etc.)
+  wrapper?: string // Launch wrapper (claude+, claude-eng, etc.)
+  activeMcpServers: string[] // Running MCP server names
 }
 
 export interface SessionStats {
@@ -360,7 +360,7 @@ export interface SessionStats {
   outputTokens: number
   cachedTokens: number
   estimatedCost?: number
-  serviceTier?: 'standard' | 'scale' | 'pro' | string  // API tier from Anthropic
+  serviceTier?: 'standard' | 'scale' | 'pro' | string // API tier from Anthropic
 }
 
 export interface SessionMessage {
@@ -407,8 +407,8 @@ export interface ClaudeCodeProfile {
   settings: ProfileSettings
   claudeMd?: string
   enabledRules?: string[]
-  hasMcpConfig?: boolean  // Whether profile has mcp.json
-  profilePath?: string    // Full path to profile directory
+  hasMcpConfig?: boolean // Whether profile has mcp.json
+  profilePath?: string // Full path to profile directory
   createdAt: number
   updatedAt: number
 }
@@ -941,6 +941,33 @@ export interface BranchStats {
   avgMessagesPerBranch: number
 }
 
+// ============================================================================
+// AUTO-UPDATE - electron-updater types
+// ============================================================================
+
+export interface UpdateInfo {
+  version: string
+  releaseDate?: string
+  releaseNotes?: string | null
+}
+
+export interface UpdateCheckResult {
+  updateAvailable: boolean
+  updateInfo?: UpdateInfo
+  error?: string
+}
+
+export interface UpdateStatus {
+  checking: boolean
+  downloading: boolean
+  downloadProgress?: number
+  updateAvailable: boolean
+  updateDownloaded: boolean
+  currentVersion: string
+  latestVersion?: string
+  error?: string
+}
+
 // IPC Channel definitions
 export type IPCChannels = {
   // System
@@ -967,29 +994,62 @@ export type IPCChannels = {
     memgraph: { nodes: number; edges: number }
     qdrant: { vectors: number }
   }>
-  'memory:graph': (query?: string, limit?: number) => Promise<{
+  'memory:graph': (
+    query?: string,
+    limit?: number
+  ) => Promise<{
     nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>
-    edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>
+    edges: Array<{
+      id: string
+      source: string
+      target: string
+      type: string
+      properties: Record<string, unknown>
+    }>
   }>
   'memory:vectors': (query: string, limit?: number) => Promise<VectorMemory[]>
-  'memory:qdrant:browse': (collection?: string, limit?: number, offset?: string) => Promise<{
+  'memory:qdrant:browse': (
+    collection?: string,
+    limit?: number,
+    offset?: string
+  ) => Promise<{
     points: Array<{ id: string; payload: Record<string, unknown>; created_at?: string }>
     nextOffset: string | null
   }>
-  'memory:qdrant:search': (query: string, collection?: string, limit?: number) => Promise<{
+  'memory:qdrant:search': (
+    query: string,
+    collection?: string,
+    limit?: number
+  ) => Promise<{
     results: Array<{ id: string; score: number; payload: Record<string, unknown> }>
   }>
-  'memory:memgraph:search': (keyword: string, nodeType?: string, limit?: number) => Promise<{
-    results: Array<{ id: string; label: string; type: string; properties: Record<string, unknown>; score?: number }>
+  'memory:memgraph:search': (
+    keyword: string,
+    nodeType?: string,
+    limit?: number
+  ) => Promise<{
+    results: Array<{
+      id: string
+      label: string
+      type: string
+      properties: Record<string, unknown>
+      score?: number
+    }>
   }>
-  'memory:raw': (source: 'postgresql' | 'memgraph' | 'qdrant', query: string) => Promise<{
+  'memory:raw': (
+    source: 'postgresql' | 'memgraph' | 'qdrant',
+    query: string
+  ) => Promise<{
     success: boolean
     data: unknown
     error?: string
     suggestion?: string
     executionTime: number
   }>
-  'memory:unified-search': (query: string, limit?: number) => Promise<{
+  'memory:unified-search': (
+    query: string,
+    limit?: number
+  ) => Promise<{
     results: Array<{
       id: string
       source: 'postgresql' | 'memgraph' | 'qdrant'
@@ -1024,12 +1084,17 @@ export type IPCChannels = {
   // Custom Profiles (claude-eng, claude-sec, etc.)
   'profiles:list': () => Promise<ClaudeCodeProfile[]>
   'profiles:get': (id: string) => Promise<ClaudeCodeProfile | null>
-  'profiles:create': (profile: Omit<ClaudeCodeProfile, 'id' | 'createdAt' | 'updatedAt'>) => Promise<ClaudeCodeProfile | null>
+  'profiles:create': (
+    profile: Omit<ClaudeCodeProfile, 'id' | 'createdAt' | 'updatedAt'>
+  ) => Promise<ClaudeCodeProfile | null>
   'profiles:update': (id: string, updates: Partial<ClaudeCodeProfile>) => Promise<boolean>
   'profiles:delete': (id: string) => Promise<boolean>
   'profiles:activate': (id: string) => Promise<boolean>
   'profiles:getActive': () => Promise<string | null>
-  'profiles:launch': (id: string, projectPath?: string) => Promise<{ success: boolean; error?: string }>
+  'profiles:launch': (
+    id: string,
+    projectPath?: string
+  ) => Promise<{ success: boolean; error?: string }>
 
   // Context
   'context:tokenUsage': () => Promise<TokenUsage>
@@ -1100,7 +1165,10 @@ export type IPCChannels = {
     offset?: number
   }) => Promise<AuditEvent[]>
   'audit:stats': () => Promise<AuditStats>
-  'audit:export': (format: 'json' | 'csv', params?: { startTime?: number; endTime?: number }) => Promise<string>
+  'audit:export': (
+    format: 'json' | 'csv',
+    params?: { startTime?: number; endTime?: number }
+  ) => Promise<string>
 
   // Watchdog (auto-recovery)
   'watchdog:start': () => Promise<boolean>
@@ -1125,7 +1193,12 @@ export type IPCChannels = {
 
   // pgvector (embeddings)
   'pgvector:status': () => Promise<PgVectorStatus>
-  'pgvector:search': (query: string, table?: string, limit?: number, threshold?: number) => Promise<PgVectorSearchResult[]>
+  'pgvector:search': (
+    query: string,
+    table?: string,
+    limit?: number,
+    threshold?: number
+  ) => Promise<PgVectorSearchResult[]>
   'pgvector:embed': (text: string) => Promise<number[] | null>
   'pgvector:collections': () => Promise<PgVectorCollection[]>
   'pgvector:createIndex': (table: string, config: PgVectorIndexConfig) => Promise<boolean>
@@ -1144,7 +1217,10 @@ export type IPCChannels = {
   'context:clearCache': () => Promise<boolean>
 
   // Transcript parsing
-  'transcript:parse': (filePath: string, options?: TranscriptParseOptions) => Promise<TranscriptMessage[]>
+  'transcript:parse': (
+    filePath: string,
+    options?: TranscriptParseOptions
+  ) => Promise<TranscriptMessage[]>
   'transcript:stats': (filePath: string) => Promise<TranscriptStats>
   'transcript:last': (filePath: string, count: number) => Promise<TranscriptMessage[]>
   'transcript:watch': (filePath: string, enable: boolean) => Promise<boolean>
@@ -1190,6 +1266,12 @@ export type IPCChannels = {
 
   // Terminal operations
   'terminal:openAt': (path: string) => Promise<boolean>
+
+  // Auto-update (electron-updater)
+  'update:check': () => Promise<UpdateCheckResult>
+  'update:download': () => Promise<boolean>
+  'update:install': () => Promise<void>
+  'update:getStatus': () => Promise<UpdateStatus>
 }
 
 // Window API exposed to renderer
@@ -1230,9 +1312,14 @@ export interface ClaudeAPI {
     isEncryptionAvailable: () => Promise<boolean>
   }
   audit: {
-    query: (params?: Parameters<IPCChannels['audit:query']>[0]) => ReturnType<IPCChannels['audit:query']>
+    query: (
+      params?: Parameters<IPCChannels['audit:query']>[0]
+    ) => ReturnType<IPCChannels['audit:query']>
     getStats: () => ReturnType<IPCChannels['audit:stats']>
-    export: (format: 'json' | 'csv', params?: { startTime?: number; endTime?: number }) => Promise<string>
+    export: (
+      format: 'json' | 'csv',
+      params?: { startTime?: number; endTime?: number }
+    ) => Promise<string>
   }
   beads: {
     list: (filter?: BeadListFilter) => ReturnType<IPCChannels['beads:list']>
@@ -1246,20 +1333,33 @@ export interface ClaudeAPI {
   }
   pgvector: {
     getStatus: () => ReturnType<IPCChannels['pgvector:status']>
-    search: (query: string, table?: string, limit?: number, threshold?: number) => ReturnType<IPCChannels['pgvector:search']>
+    search: (
+      query: string,
+      table?: string,
+      limit?: number,
+      threshold?: number
+    ) => ReturnType<IPCChannels['pgvector:search']>
     embed: (text: string) => ReturnType<IPCChannels['pgvector:embed']>
     getCollections: () => ReturnType<IPCChannels['pgvector:collections']>
-    createIndex: (table: string, config: PgVectorIndexConfig) => ReturnType<IPCChannels['pgvector:createIndex']>
+    createIndex: (
+      table: string,
+      config: PgVectorIndexConfig
+    ) => ReturnType<IPCChannels['pgvector:createIndex']>
     rebuildIndex: (table: string) => ReturnType<IPCChannels['pgvector:rebuildIndex']>
     vacuum: (table: string) => ReturnType<IPCChannels['pgvector:vacuum']>
     getAutoConfig: () => ReturnType<IPCChannels['pgvector:getAutoConfig']>
-    setAutoConfig: (config: PgVectorAutoEmbedConfig) => ReturnType<IPCChannels['pgvector:setAutoConfig']>
+    setAutoConfig: (
+      config: PgVectorAutoEmbedConfig
+    ) => ReturnType<IPCChannels['pgvector:setAutoConfig']>
   }
   predictiveContext: {
     predict: (prompt: string, projectPath: string) => ReturnType<IPCChannels['context:predict']>
     getPatterns: (projectPath: string) => ReturnType<IPCChannels['context:patterns']>
     getStats: () => ReturnType<IPCChannels['context:stats']>
-    recordAccess: (path: string, keywords: string[]) => ReturnType<IPCChannels['context:recordAccess']>
+    recordAccess: (
+      path: string,
+      keywords: string[]
+    ) => ReturnType<IPCChannels['context:recordAccess']>
     getConfig: () => ReturnType<IPCChannels['context:getConfig']>
     setConfig: (config: PredictiveContextConfig) => ReturnType<IPCChannels['context:setConfig']>
     clearCache: () => ReturnType<IPCChannels['context:clearCache']>
@@ -1274,12 +1374,23 @@ export interface ClaudeAPI {
     pause: (id: string) => ReturnType<IPCChannels['plans:pause']>
     resume: (id: string) => ReturnType<IPCChannels['plans:resume']>
     cancel: (id: string) => ReturnType<IPCChannels['plans:cancel']>
-    stepComplete: (planId: string, stepId: string, output?: string) => ReturnType<IPCChannels['plans:stepComplete']>
-    stepFail: (planId: string, stepId: string, error: string) => ReturnType<IPCChannels['plans:stepFail']>
+    stepComplete: (
+      planId: string,
+      stepId: string,
+      output?: string
+    ) => ReturnType<IPCChannels['plans:stepComplete']>
+    stepFail: (
+      planId: string,
+      stepId: string,
+      error: string
+    ) => ReturnType<IPCChannels['plans:stepFail']>
     getStats: () => ReturnType<IPCChannels['plans:stats']>
   }
   transcript: {
-    parse: (filePath: string, options?: TranscriptParseOptions) => ReturnType<IPCChannels['transcript:parse']>
+    parse: (
+      filePath: string,
+      options?: TranscriptParseOptions
+    ) => ReturnType<IPCChannels['transcript:parse']>
     stats: (filePath: string) => ReturnType<IPCChannels['transcript:stats']>
     last: (filePath: string, count: number) => ReturnType<IPCChannels['transcript:last']>
     watch: (filePath: string, enable: boolean) => ReturnType<IPCChannels['transcript:watch']>
@@ -1292,7 +1403,10 @@ export interface ClaudeAPI {
     delete: (branchId: string) => ReturnType<IPCChannels['branches:delete']>
     rename: (branchId: string, name: string) => ReturnType<IPCChannels['branches:rename']>
     switch: (branchId: string) => ReturnType<IPCChannels['branches:switch']>
-    addMessage: (branchId: string, message: ConversationMessage) => ReturnType<IPCChannels['branches:addMessage']>
+    addMessage: (
+      branchId: string,
+      message: ConversationMessage
+    ) => ReturnType<IPCChannels['branches:addMessage']>
     diff: (branchA: string, branchB: string) => ReturnType<IPCChannels['branches:diff']>
     merge: (params: BranchMergeParams) => ReturnType<IPCChannels['branches:merge']>
     abandon: (branchId: string) => ReturnType<IPCChannels['branches:abandon']>

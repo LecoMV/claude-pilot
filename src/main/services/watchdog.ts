@@ -3,7 +3,7 @@
  * Monitors critical services and automatically restarts them on failure
  */
 
-import { execSync, spawn } from 'child_process'
+import { execSync } from 'child_process'
 import { EventEmitter } from 'events'
 import { auditService, ActivityType, EventCategory, Severity, StatusCode } from './audit'
 
@@ -108,7 +108,7 @@ class WatchdogService extends EventEmitter {
     if (this.enabled) return
 
     this.enabled = true
-    console.log('[Watchdog] Starting service monitoring')
+    console.info('[Watchdog] Starting service monitoring')
 
     // Initial check
     this.checkAllServices()
@@ -139,7 +139,7 @@ class WatchdogService extends EventEmitter {
       this.checkInterval = null
     }
 
-    console.log('[Watchdog] Service monitoring stopped')
+    console.info('[Watchdog] Service monitoring stopped')
 
     auditService.log({
       category: EventCategory.SYSTEM,
@@ -168,16 +168,19 @@ class WatchdogService extends EventEmitter {
   /**
    * Check a single service's health
    */
-  private async checkService(service: ServiceDefinition): Promise<boolean> {
+  private checkService(service: ServiceDefinition): Promise<boolean> | boolean {
     switch (service.type) {
       case 'systemd':
-        return this.checkSystemdService(service.unitName!)
+        if (!service.unitName) return false
+        return this.checkSystemdService(service.unitName)
 
       case 'podman':
-        return this.checkPodmanContainer(service.containerName!)
+        if (!service.containerName) return false
+        return this.checkPodmanContainer(service.containerName)
 
       case 'http':
-        return this.checkHttpHealth(service.healthUrl!, service.healthTimeout)
+        if (!service.healthUrl) return false
+        return this.checkHttpHealth(service.healthUrl, service.healthTimeout)
 
       case 'process':
         return this.checkProcess(service.id)
@@ -263,7 +266,7 @@ class WatchdogService extends EventEmitter {
     if (isHealthy) {
       // Service is healthy
       if (health.status !== 'healthy') {
-        console.log(`[Watchdog] ${service.name} is now healthy`)
+        console.info(`[Watchdog] ${service.name} is now healthy`)
         this.emit('service:recovered', { serviceId, serviceName: service.name })
       }
       health.status = 'healthy'
@@ -279,9 +282,13 @@ class WatchdogService extends EventEmitter {
       health.error = error || 'Service not responding'
 
       if (health.status === 'healthy') {
-        console.log(`[Watchdog] ${service.name} became unhealthy: ${health.error}`)
+        console.info(`[Watchdog] ${service.name} became unhealthy: ${health.error}`)
         health.status = 'unhealthy'
-        this.emit('service:unhealthy', { serviceId, serviceName: service.name, error: health.error })
+        this.emit('service:unhealthy', {
+          serviceId,
+          serviceName: service.name,
+          error: health.error,
+        })
 
         // Attempt recovery
         this.attemptRecovery(serviceId)
@@ -302,7 +309,12 @@ class WatchdogService extends EventEmitter {
       console.error(`[Watchdog] ${service.name} exceeded max restarts (${service.maxRestarts})`)
       health.status = 'failed'
 
-      this.logRecoveryEvent(serviceId, 'recovery_failed', false, `Exceeded max restarts (${service.maxRestarts})`)
+      this.logRecoveryEvent(
+        serviceId,
+        'recovery_failed',
+        false,
+        `Exceeded max restarts (${service.maxRestarts})`
+      )
 
       this.emit('service:failed', {
         serviceId,
@@ -316,7 +328,9 @@ class WatchdogService extends EventEmitter {
     health.status = 'recovering'
     health.restartCount++
 
-    console.log(`[Watchdog] Attempting to restart ${service.name} (attempt ${health.restartCount}/${service.maxRestarts})`)
+    console.info(
+      `[Watchdog] Attempting to restart ${service.name} (attempt ${health.restartCount}/${service.maxRestarts})`
+    )
 
     // Wait before restart
     await this.sleep(service.restartDelay)
@@ -326,11 +340,16 @@ class WatchdogService extends EventEmitter {
       health.lastRestart = Date.now()
 
       if (success) {
-        console.log(`[Watchdog] ${service.name} restart initiated`)
+        console.info(`[Watchdog] ${service.name} restart initiated`)
         this.logRecoveryEvent(serviceId, 'restart', true, `Restart attempt ${health.restartCount}`)
       } else {
         console.error(`[Watchdog] Failed to restart ${service.name}`)
-        this.logRecoveryEvent(serviceId, 'restart', false, `Restart attempt ${health.restartCount} failed`)
+        this.logRecoveryEvent(
+          serviceId,
+          'restart',
+          false,
+          `Restart attempt ${health.restartCount} failed`
+        )
       }
     } catch (error) {
       console.error(`[Watchdog] Error restarting ${service.name}:`, error)
@@ -341,7 +360,7 @@ class WatchdogService extends EventEmitter {
   /**
    * Restart a service
    */
-  private async restartService(service: ServiceDefinition): Promise<boolean> {
+  private restartService(service: ServiceDefinition): boolean {
     try {
       switch (service.type) {
         case 'systemd':
@@ -501,7 +520,7 @@ class WatchdogService extends EventEmitter {
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms))
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 }
 

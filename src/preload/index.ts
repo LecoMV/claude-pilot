@@ -151,6 +151,12 @@ const ALLOWED_CHANNELS = new Set<string>([
   // Terminal external
   'terminal:openAt',
 
+  // Auto-update
+  'update:check',
+  'update:download',
+  'update:install',
+  'update:getStatus',
+
   // Beads (work tracking)
   'beads:list',
   'beads:get',
@@ -238,6 +244,12 @@ const ALLOWED_EVENT_CHANNELS = new Set<string>([
 
   // Branch events
   'branches:updated',
+
+  // Update events
+  'update:available',
+  'update:downloaded',
+  'update:progress',
+  'update:error',
 ])
 
 /**
@@ -257,10 +269,7 @@ function validateChannel(channel: string, type: 'invoke' | 'on' | 'send'): void 
 // Expose protected methods that allow the renderer process to use
 // ipcRenderer without exposing the entire object
 const electronAPI: ElectronAPI = {
-  invoke: <K extends keyof IPCChannels>(
-    channel: K,
-    ...args: Parameters<IPCChannels[K]>
-  ) => {
+  invoke: <K extends keyof IPCChannels>(channel: K, ...args: Parameters<IPCChannels[K]>) => {
     // Runtime security check
     validateChannel(channel as string, 'invoke')
 
@@ -322,14 +331,12 @@ const claudeAPI = {
 
   // Credentials
   credentials: {
-    store: (key: string, value: string) =>
-      electronAPI.invoke('credentials:store', key, value),
+    store: (key: string, value: string) => electronAPI.invoke('credentials:store', key, value),
     retrieve: (key: string) => electronAPI.invoke('credentials:retrieve', key),
     delete: (key: string) => electronAPI.invoke('credentials:delete', key),
     has: (key: string) => electronAPI.invoke('credentials:has', key),
     list: () => electronAPI.invoke('credentials:list'),
-    isEncryptionAvailable: () =>
-      electronAPI.invoke('credentials:isEncryptionAvailable'),
+    isEncryptionAvailable: () => electronAPI.invoke('credentials:isEncryptionAvailable'),
   },
 
   // Audit
@@ -351,8 +358,7 @@ const claudeAPI = {
       electronAPI.invoke('beads:create', params),
     update: (id: string, params: Parameters<IPCChannels['beads:update']>[1]) =>
       electronAPI.invoke('beads:update', id, params),
-    close: (id: string, reason?: string) =>
-      electronAPI.invoke('beads:close', id, reason),
+    close: (id: string, reason?: string) => electronAPI.invoke('beads:close', id, reason),
     ready: () => electronAPI.invoke('beads:ready'),
     blocked: () => electronAPI.invoke('beads:blocked'),
   },
@@ -377,8 +383,7 @@ const claudeAPI = {
   predictiveContext: {
     predict: (prompt: string, projectPath: string) =>
       electronAPI.invoke('context:predict', prompt, projectPath),
-    getPatterns: (projectPath: string) =>
-      electronAPI.invoke('context:patterns', projectPath),
+    getPatterns: (projectPath: string) => electronAPI.invoke('context:patterns', projectPath),
     getStats: () => electronAPI.invoke('context:stats'),
     recordAccess: (path: string, keywords: string[]) =>
       electronAPI.invoke('context:recordAccess', path, keywords),
@@ -413,8 +418,10 @@ const claudeAPI = {
     parse: (filePath: string, options?: Parameters<IPCChannels['transcript:parse']>[1]) =>
       electronAPI.invoke('transcript:parse', filePath, options),
     stats: (filePath: string) => electronAPI.invoke('transcript:stats', filePath),
-    last: (filePath: string, count: number) => electronAPI.invoke('transcript:last', filePath, count),
-    watch: (filePath: string, enable: boolean) => electronAPI.invoke('transcript:watch', filePath, enable),
+    last: (filePath: string, count: number) =>
+      electronAPI.invoke('transcript:last', filePath, count),
+    watch: (filePath: string, enable: boolean) =>
+      electronAPI.invoke('transcript:watch', filePath, enable),
   },
 
   // Branches (conversation branching)
@@ -422,22 +429,31 @@ const claudeAPI = {
     list: (sessionId: string) => electronAPI.invoke('branches:list', sessionId),
     get: (branchId: string) => electronAPI.invoke('branches:get', branchId),
     getTree: (sessionId: string) => electronAPI.invoke('branches:getTree', sessionId),
-    create: (params: { sessionId: string; branchPointMessageId: string; name: string; description?: string }) =>
-      electronAPI.invoke('branches:create', params),
+    create: (params: {
+      sessionId: string
+      branchPointMessageId: string
+      name: string
+      description?: string
+    }) => electronAPI.invoke('branches:create', params),
     delete: (branchId: string) => electronAPI.invoke('branches:delete', branchId),
-    rename: (branchId: string, name: string) => electronAPI.invoke('branches:rename', branchId, name),
+    rename: (branchId: string, name: string) =>
+      electronAPI.invoke('branches:rename', branchId, name),
     switch: (branchId: string) => electronAPI.invoke('branches:switch', branchId),
-    addMessage: (branchId: string, message: {
-      id: string
-      role: 'user' | 'assistant' | 'tool-result'
-      content: string
-      timestamp: number
-      toolName?: string
-      toolInput?: Record<string, unknown>
-      toolOutput?: string
-      parentId?: string
-    }) => electronAPI.invoke('branches:addMessage', branchId, message),
-    diff: (branchA: string, branchB: string) => electronAPI.invoke('branches:diff', branchA, branchB),
+    addMessage: (
+      branchId: string,
+      message: {
+        id: string
+        role: 'user' | 'assistant' | 'tool-result'
+        content: string
+        timestamp: number
+        toolName?: string
+        toolInput?: Record<string, unknown>
+        toolOutput?: string
+        parentId?: string
+      }
+    ) => electronAPI.invoke('branches:addMessage', branchId, message),
+    diff: (branchA: string, branchB: string) =>
+      electronAPI.invoke('branches:diff', branchA, branchB),
     merge: (params: {
       sourceBranchId: string
       targetBranchId: string
@@ -446,7 +462,16 @@ const claudeAPI = {
     }) => electronAPI.invoke('branches:merge', params),
     abandon: (branchId: string) => electronAPI.invoke('branches:abandon', branchId),
     getStats: (sessionId?: string) => electronAPI.invoke('branches:stats', sessionId),
-    getActiveBranch: (sessionId: string) => electronAPI.invoke('branches:getActiveBranch', sessionId),
+    getActiveBranch: (sessionId: string) =>
+      electronAPI.invoke('branches:getActiveBranch', sessionId),
+  },
+
+  // Auto-update
+  update: {
+    check: () => electronAPI.invoke('update:check'),
+    download: () => electronAPI.invoke('update:download'),
+    install: () => electronAPI.invoke('update:install'),
+    getStatus: () => electronAPI.invoke('update:getStatus'),
   },
 }
 

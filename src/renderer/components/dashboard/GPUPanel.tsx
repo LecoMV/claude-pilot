@@ -1,7 +1,4 @@
-import { useEffect, useState } from 'react'
 import {
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -29,10 +26,10 @@ interface GPUPanelProps {
 
 // Temperature thresholds for color coding
 const TEMP_THRESHOLDS = {
-  cool: 50,    // Green below this
-  warm: 70,    // Yellow below this
-  hot: 85,     // Orange below this
-  critical: 90 // Red at or above
+  cool: 50, // Green below this
+  warm: 70, // Yellow below this
+  hot: 85, // Orange below this
+  critical: 90, // Red at or above
 }
 
 // Utilization thresholds
@@ -40,7 +37,7 @@ const UTIL_THRESHOLDS = {
   idle: 10,
   light: 30,
   moderate: 60,
-  heavy: 85
+  heavy: 85,
 }
 
 function getTemperatureColor(temp: number): string {
@@ -83,9 +80,7 @@ function GPUTooltip({ active, payload, label }: TooltipProps) {
 
   return (
     <div className="bg-surface border border-border rounded-lg p-3 shadow-lg">
-      <p className="text-xs text-text-muted mb-2">
-        {new Date(label).toLocaleTimeString()}
-      </p>
+      <p className="text-xs text-text-muted mb-2">{new Date(label).toLocaleTimeString()}</p>
       {payload.map((entry, index) => (
         <p key={index} className="text-sm" style={{ color: entry.color }}>
           {entry.name}: {entry.value?.toFixed(1) ?? 'N/A'}
@@ -100,7 +95,7 @@ export function GPUPanel({ gpu }: GPUPanelProps) {
   const { history } = useMetricsHistoryStore()
 
   // Filter history to only include GPU data points
-  const gpuHistory = history.filter(p => p.gpuUtilization !== undefined)
+  const gpuHistory = history.filter((p) => p.gpuUtilization !== undefined)
 
   // No GPU detected
   if (!gpu || !gpu.available) {
@@ -145,12 +140,12 @@ export function GPUPanel({ gpu }: GPUPanelProps) {
     )
   }
 
-  const memUsagePercent = gpu.memoryUsed && gpu.memoryTotal
-    ? (gpu.memoryUsed / gpu.memoryTotal) * 100
-    : 0
+  const memUsagePercent =
+    gpu.memoryUsed && gpu.memoryTotal ? (gpu.memoryUsed / gpu.memoryTotal) * 100 : 0
 
   const utilizationStatus = getUtilizationStatus(gpu.utilization)
-  const tempColor = gpu.temperature !== undefined ? getTemperatureColor(gpu.temperature) : 'text-text-muted'
+  const tempColor =
+    gpu.temperature !== undefined ? getTemperatureColor(gpu.temperature) : 'text-text-muted'
 
   return (
     <div className="card p-6 space-y-6">
@@ -167,13 +162,21 @@ export function GPUPanel({ gpu }: GPUPanelProps) {
             <p className="text-sm text-text-muted">Driver {gpu.driverVersion}</p>
           </div>
         </div>
-        <div className={cn('px-3 py-1 rounded-full text-sm font-medium',
-          utilizationStatus.color,
-          utilizationStatus.label === 'Maximum' ? 'bg-accent-red/10' :
-          utilizationStatus.label === 'Heavy' ? 'bg-accent-yellow/10' :
-          utilizationStatus.label === 'Moderate' ? 'bg-accent-blue/10' :
-          utilizationStatus.label === 'Light' ? 'bg-accent-green/10' : 'bg-surface-hover'
-        )}>
+        <div
+          className={cn(
+            'px-3 py-1 rounded-full text-sm font-medium',
+            utilizationStatus.color,
+            utilizationStatus.label === 'Maximum'
+              ? 'bg-accent-red/10'
+              : utilizationStatus.label === 'Heavy'
+                ? 'bg-accent-yellow/10'
+                : utilizationStatus.label === 'Moderate'
+                  ? 'bg-accent-blue/10'
+                  : utilizationStatus.label === 'Light'
+                    ? 'bg-accent-green/10'
+                    : 'bg-surface-hover'
+          )}
+        >
           {utilizationStatus.label} Load
         </div>
       </div>
@@ -207,7 +210,10 @@ export function GPUPanel({ gpu }: GPUPanelProps) {
           {gpu.temperature !== undefined && (
             <div className="w-full h-2 rounded-full bg-surface-hover overflow-hidden mt-2">
               <div
-                className={cn('h-full rounded-full transition-all duration-300', getTemperatureBgColor(gpu.temperature))}
+                className={cn(
+                  'h-full rounded-full transition-all duration-300',
+                  getTemperatureBgColor(gpu.temperature)
+                )}
                 style={{ width: `${Math.min((gpu.temperature / 100) * 100, 100)}%` }}
               />
             </div>
@@ -226,18 +232,14 @@ export function GPUPanel({ gpu }: GPUPanelProps) {
             <HardDrive className="w-4 h-4 text-accent-blue" />
             <span className="text-sm text-text-muted">VRAM Used</span>
           </div>
-          <p className="text-2xl font-bold text-text-primary">
-            {formatBytes(gpu.memoryUsed || 0)}
-          </p>
+          <p className="text-2xl font-bold text-text-primary">{formatBytes(gpu.memoryUsed || 0)}</p>
           <div className="w-full h-2 rounded-full bg-surface-hover overflow-hidden mt-2">
             <div
               className="h-full rounded-full bg-accent-blue transition-all duration-300"
               style={{ width: `${memUsagePercent}%` }}
             />
           </div>
-          <p className="text-xs text-text-muted mt-1">
-            of {formatBytes(gpu.memoryTotal || 0)}
-          </p>
+          <p className="text-xs text-text-muted mt-1">of {formatBytes(gpu.memoryTotal || 0)}</p>
         </div>
 
         {/* VRAM % */}
@@ -246,9 +248,7 @@ export function GPUPanel({ gpu }: GPUPanelProps) {
             <Activity className="w-4 h-4 text-accent-teal" />
             <span className="text-sm text-text-muted">VRAM %</span>
           </div>
-          <p className="text-2xl font-bold text-text-primary">
-            {memUsagePercent.toFixed(1)}%
-          </p>
+          <p className="text-2xl font-bold text-text-primary">{memUsagePercent.toFixed(1)}%</p>
           <p className="text-xs text-text-muted mt-2">
             {formatBytes((gpu.memoryTotal || 0) - (gpu.memoryUsed || 0))} free
           </p>

@@ -3,7 +3,7 @@
  * Git-like branching visualization and management for conversations
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import ReactFlow, {
   Node,
   Edge,
@@ -21,15 +21,8 @@ import {
   GitMerge,
   GitCommit,
   Plus,
-  Trash2,
-  Edit3,
   ArrowRightLeft,
-  Copy,
-  Check,
-  ChevronDown,
-  ChevronRight,
   AlertCircle,
-  Clock,
   Archive,
   Play,
 } from 'lucide-react'
@@ -47,17 +40,21 @@ interface BranchPanelProps {
 }
 
 // Custom node for branch visualization
-function BranchNode({ data }: { data: {
-  label: string
-  status: string
-  messageCount: number
-  isActive: boolean
-  isMain: boolean
-  onSwitch: () => void
-  onRename: () => void
-  onDelete: () => void
-  onAbandon: () => void
-} }) {
+function BranchNode({
+  data,
+}: {
+  data: {
+    label: string
+    status: string
+    messageCount: number
+    isActive: boolean
+    isMain: boolean
+    onSwitch: () => void
+    onRename: () => void
+    onDelete: () => void
+    onAbandon: () => void
+  }
+}) {
   const statusColors = {
     active: 'border-accent-green bg-accent-green/10',
     merged: 'border-accent-blue bg-accent-blue/10',
@@ -92,10 +89,7 @@ function BranchNode({ data }: { data: {
       <div className="flex items-center justify-between text-xs text-text-muted">
         <span>{data.messageCount} messages</span>
         {data.status === 'active' && !data.isActive && (
-          <button
-            onClick={data.onSwitch}
-            className="text-accent-blue hover:underline"
-          >
+          <button onClick={data.onSwitch} className="text-accent-blue hover:underline">
             switch
           </button>
         )}
@@ -110,7 +104,7 @@ const nodeTypes = {
 
 export function BranchPanel({ session }: BranchPanelProps) {
   const [branches, setBranches] = useState<ConversationBranch[]>([])
-  const [tree, setTree] = useState<BranchTree | null>(null)
+  const [_tree, setTree] = useState<BranchTree | null>(null)
   const [stats, setStats] = useState<BranchStats | null>(null)
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -118,7 +112,7 @@ export function BranchPanel({ session }: BranchPanelProps) {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showDiffModal, setShowDiffModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
-  const [selectedBranch, setSelectedBranch] = useState<ConversationBranch | null>(null)
+  const [_selectedBranch, setSelectedBranch] = useState<ConversationBranch | null>(null)
   const [diffResult, setDiffResult] = useState<BranchDiff | null>(null)
 
   // React Flow state
@@ -152,11 +146,12 @@ export function BranchPanel({ session }: BranchPanelProps) {
     } finally {
       setLoading(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session])
 
   // Build React Flow graph from branches
-  const buildGraph = useCallback((branches: ConversationBranch[], activeId: string | null) => {
-    if (branches.length === 0) {
+  const buildGraph = useCallback((branchList: ConversationBranch[], activeId: string | null) => {
+    if (branchList.length === 0) {
       setNodes([])
       setEdges([])
       return
@@ -166,7 +161,7 @@ export function BranchPanel({ session }: BranchPanelProps) {
     const newEdges: Edge[] = []
 
     // Calculate positions using tree layout
-    const branchMap = new Map(branches.map(b => [b.id, b]))
+    const branchMap = new Map(branchList.map((b) => [b.id, b]))
     const processed = new Set<string>()
     let yOffset = 0
 
@@ -219,20 +214,21 @@ export function BranchPanel({ session }: BranchPanelProps) {
       }
 
       // Process children
-      const children = branches.filter(b => b.parentBranchId === branchId)
+      const children = branchList.filter((b) => b.parentBranchId === branchId)
       for (const child of children) {
         processNode(child.id, x + 200, level + 1)
       }
     }
 
     // Start with main branch
-    const mainBranch = branches.find(b => b.parentBranchId === null)
+    const mainBranch = branchList.find((b) => b.parentBranchId === null)
     if (mainBranch) {
       processNode(mainBranch.id, 0, 0)
     }
 
     setNodes(newNodes)
     setEdges(newEdges)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load on mount and session change
@@ -267,6 +263,7 @@ export function BranchPanel({ session }: BranchPanelProps) {
   }
 
   const handleDelete = async (branchId: string) => {
+    // eslint-disable-next-line no-alert
     if (!confirm('Delete this branch? This cannot be undone.')) return
 
     try {
@@ -289,7 +286,7 @@ export function BranchPanel({ session }: BranchPanelProps) {
   const handleCreateBranch = async (name: string, description?: string) => {
     if (!session || !activeBranchId) return
 
-    const activeBranch = branches.find(b => b.id === activeBranchId)
+    const activeBranch = branches.find((b) => b.id === activeBranchId)
     if (!activeBranch) return
 
     // Use last message as branch point
@@ -362,9 +359,7 @@ export function BranchPanel({ session }: BranchPanelProps) {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
             <GitBranch className="w-5 h-5 text-accent-purple" />
-            <h2 className="text-lg font-semibold text-text-primary">
-              Conversation Branches
-            </h2>
+            <h2 className="text-lg font-semibold text-text-primary">Conversation Branches</h2>
           </div>
 
           <div className="flex items-center gap-2">
@@ -488,7 +483,7 @@ export function BranchPanel({ session }: BranchPanelProps) {
       {/* Merge Modal */}
       {showMergeModal && (
         <MergeModal
-          branches={branches.filter(b => b.status === 'active')}
+          branches={branches.filter((b) => b.status === 'active')}
           onClose={() => setShowMergeModal(false)}
           onMerge={handleMerge}
         />
@@ -587,8 +582,10 @@ function DiffModal({
               onChange={(e) => setBranchA(e.target.value)}
               className="input w-full"
             >
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
               ))}
             </select>
           </div>
@@ -600,8 +597,10 @@ function DiffModal({
               onChange={(e) => setBranchB(e.target.value)}
               className="input w-full"
             >
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
               ))}
             </select>
           </div>
@@ -620,16 +619,18 @@ function DiffModal({
             <div className="grid grid-cols-2 gap-0 divide-x divide-border">
               <div className="p-4">
                 <h4 className="text-sm font-medium text-text-primary mb-2">
-                  Only in {branches.find(b => b.id === diff.branchA)?.name}
+                  Only in {branches.find((b) => b.id === diff.branchA)?.name}
                 </h4>
                 <div className="space-y-2">
                   {diff.messagesOnlyInA.length === 0 ? (
                     <p className="text-sm text-text-muted">No unique messages</p>
                   ) : (
-                    diff.messagesOnlyInA.map(msg => (
+                    diff.messagesOnlyInA.map((msg) => (
                       <div key={msg.id} className="p-2 bg-accent-red/10 rounded text-sm">
                         <span className="text-text-muted text-xs">{msg.role}</span>
-                        <p className="text-text-primary truncate">{msg.content.substring(0, 100)}</p>
+                        <p className="text-text-primary truncate">
+                          {msg.content.substring(0, 100)}
+                        </p>
                       </div>
                     ))
                   )}
@@ -638,16 +639,18 @@ function DiffModal({
 
               <div className="p-4">
                 <h4 className="text-sm font-medium text-text-primary mb-2">
-                  Only in {branches.find(b => b.id === diff.branchB)?.name}
+                  Only in {branches.find((b) => b.id === diff.branchB)?.name}
                 </h4>
                 <div className="space-y-2">
                   {diff.messagesOnlyInB.length === 0 ? (
                     <p className="text-sm text-text-muted">No unique messages</p>
                   ) : (
-                    diff.messagesOnlyInB.map(msg => (
+                    diff.messagesOnlyInB.map((msg) => (
                       <div key={msg.id} className="p-2 bg-accent-green/10 rounded text-sm">
                         <span className="text-text-muted text-xs">{msg.role}</span>
-                        <p className="text-text-primary truncate">{msg.content.substring(0, 100)}</p>
+                        <p className="text-text-primary truncate">
+                          {msg.content.substring(0, 100)}
+                        </p>
                       </div>
                     ))
                   )}
@@ -675,10 +678,14 @@ function MergeModal({
 }: {
   branches: ConversationBranch[]
   onClose: () => void
-  onMerge: (sourceBranchId: string, targetBranchId: string, strategy: 'replace' | 'append' | 'cherry-pick') => void
+  onMerge: (
+    sourceBranchId: string,
+    targetBranchId: string,
+    strategy: 'replace' | 'append' | 'cherry-pick'
+  ) => void
 }) {
   const [source, setSource] = useState(branches[0]?.id || '')
-  const [target, setTarget] = useState(branches.find(b => b.parentBranchId === null)?.id || '')
+  const [target, setTarget] = useState(branches.find((b) => b.parentBranchId === null)?.id || '')
   const [strategy, setStrategy] = useState<'replace' | 'append' | 'cherry-pick'>('append')
 
   const handleMerge = () => {
@@ -699,8 +706,10 @@ function MergeModal({
               onChange={(e) => setSource(e.target.value)}
               className="input w-full"
             >
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
               ))}
             </select>
           </div>
@@ -716,8 +725,10 @@ function MergeModal({
               onChange={(e) => setTarget(e.target.value)}
               className="input w-full"
             >
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
               ))}
             </select>
           </div>
@@ -734,7 +745,9 @@ function MergeModal({
                 />
                 <div>
                   <p className="text-sm text-text-primary">Append</p>
-                  <p className="text-xs text-text-muted">Add source messages after target messages</p>
+                  <p className="text-xs text-text-muted">
+                    Add source messages after target messages
+                  </p>
                 </div>
               </label>
 
@@ -747,7 +760,9 @@ function MergeModal({
                 />
                 <div>
                   <p className="text-sm text-text-primary">Replace</p>
-                  <p className="text-xs text-text-muted">Replace target messages with source messages</p>
+                  <p className="text-xs text-text-muted">
+                    Replace target messages with source messages
+                  </p>
                 </div>
               </label>
 
@@ -771,11 +786,7 @@ function MergeModal({
           <button onClick={onClose} className="btn btn-secondary">
             Cancel
           </button>
-          <button
-            onClick={handleMerge}
-            className="btn btn-primary"
-            disabled={source === target}
-          >
+          <button onClick={handleMerge} className="btn btn-primary" disabled={source === target}>
             <GitMerge className="w-4 h-4 mr-1" />
             Merge
           </button>

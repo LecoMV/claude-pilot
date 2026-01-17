@@ -5,7 +5,6 @@ import {
   RefreshCw,
   Settings2,
   Layers,
-  Cpu,
   Sparkles,
   BarChart3,
   CheckCircle2,
@@ -13,8 +12,6 @@ import {
   Loader2,
   TableIcon,
   Index,
-  Trash2,
-  Info,
   AlertTriangle,
   Zap,
 } from 'lucide-react'
@@ -57,7 +54,11 @@ export function PgVectorPanel() {
   const [autoConfig, setAutoConfig] = useState<PgVectorAutoEmbedConfig | null>(null)
   const [selectedCollection, setSelectedCollection] = useState<PgVectorCollection | null>(null)
   const [indexModalOpen, setIndexModalOpen] = useState(false)
-  const [indexConfig, setIndexConfig] = useState<PgVectorIndexConfig>({ type: 'hnsw', m: 16, efConstruction: 64 })
+  const [indexConfig, setIndexConfig] = useState<PgVectorIndexConfig>({
+    type: 'hnsw',
+    m: 16,
+    efConstruction: 64,
+  })
 
   // Load status
   const loadStatus = useCallback(async () => {
@@ -123,7 +124,11 @@ export function PgVectorPanel() {
     if (!selectedCollection) return
 
     try {
-      await window.electron.invoke('pgvector:createIndex', selectedCollection.tableName, indexConfig)
+      await window.electron.invoke(
+        'pgvector:createIndex',
+        selectedCollection.tableName,
+        indexConfig
+      )
       setIndexModalOpen(false)
       loadStatus()
     } catch (error) {
@@ -132,14 +137,17 @@ export function PgVectorPanel() {
   }, [selectedCollection, indexConfig, loadStatus])
 
   // Vacuum table
-  const handleVacuum = useCallback(async (table: string) => {
-    try {
-      await window.electron.invoke('pgvector:vacuum', table)
-      loadStatus()
-    } catch (error) {
-      console.error('Failed to vacuum table:', error)
-    }
-  }, [loadStatus])
+  const handleVacuum = useCallback(
+    async (table: string) => {
+      try {
+        await window.electron.invoke('pgvector:vacuum', table)
+        loadStatus()
+      } catch (error) {
+        console.error('Failed to vacuum table:', error)
+      }
+    },
+    [loadStatus]
+  )
 
   if (loading) {
     return (
@@ -154,14 +162,12 @@ export function PgVectorPanel() {
       {/* Header with status */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className={cn(
-            'p-2 rounded-lg',
-            status?.enabled ? 'bg-green-500/20' : 'bg-red-500/20'
-          )}>
-            <Database className={cn(
-              'w-5 h-5',
-              status?.enabled ? 'text-green-400' : 'text-red-400'
-            )} />
+          <div
+            className={cn('p-2 rounded-lg', status?.enabled ? 'bg-green-500/20' : 'bg-red-500/20')}
+          >
+            <Database
+              className={cn('w-5 h-5', status?.enabled ? 'text-green-400' : 'text-red-400')}
+            />
           </div>
           <div>
             <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
@@ -177,9 +183,13 @@ export function PgVectorPanel() {
               )}
             </h2>
             <p className="text-sm text-text-muted">
-              Model: <span className="text-accent-blue">{status?.embeddingModel || 'nomic-embed-text'}</span>
+              Model:{' '}
+              <span className="text-accent-blue">
+                {status?.embeddingModel || 'nomic-embed-text'}
+              </span>
               {' | '}
-              Dimensions: <span className="text-accent-purple">{status?.defaultDimensions || 768}</span>
+              Dimensions:{' '}
+              <span className="text-accent-purple">{status?.defaultDimensions || 768}</span>
             </p>
           </div>
         </div>
@@ -218,7 +228,9 @@ export function PgVectorPanel() {
               <input
                 type="checkbox"
                 checked={autoConfig.enableLearnings}
-                onChange={(e) => saveAutoConfig({ ...autoConfig, enableLearnings: e.target.checked })}
+                onChange={(e) =>
+                  saveAutoConfig({ ...autoConfig, enableLearnings: e.target.checked })
+                }
                 className="rounded border-border bg-background"
               />
               <span className="text-sm text-text-primary">Embed Learnings</span>
@@ -228,7 +240,9 @@ export function PgVectorPanel() {
               <input
                 type="checkbox"
                 checked={autoConfig.enableSessions}
-                onChange={(e) => saveAutoConfig({ ...autoConfig, enableSessions: e.target.checked })}
+                onChange={(e) =>
+                  saveAutoConfig({ ...autoConfig, enableSessions: e.target.checked })
+                }
                 className="rounded border-border bg-background"
               />
               <span className="text-sm text-text-primary">Embed Sessions</span>
@@ -261,7 +275,9 @@ export function PgVectorPanel() {
               <input
                 type="number"
                 value={autoConfig.batchSize}
-                onChange={(e) => saveAutoConfig({ ...autoConfig, batchSize: parseInt(e.target.value) || 10 })}
+                onChange={(e) =>
+                  saveAutoConfig({ ...autoConfig, batchSize: parseInt(e.target.value) || 10 })
+                }
                 className="w-full px-3 py-1.5 rounded-lg bg-background border border-border text-sm text-text-primary"
                 min={1}
                 max={100}
@@ -273,7 +289,12 @@ export function PgVectorPanel() {
               <input
                 type="number"
                 value={autoConfig.concurrentRequests}
-                onChange={(e) => saveAutoConfig({ ...autoConfig, concurrentRequests: parseInt(e.target.value) || 2 })}
+                onChange={(e) =>
+                  saveAutoConfig({
+                    ...autoConfig,
+                    concurrentRequests: parseInt(e.target.value) || 2,
+                  })
+                }
                 className="w-full px-3 py-1.5 rounded-lg bg-background border border-border text-sm text-text-primary"
                 min={1}
                 max={10}
@@ -285,7 +306,9 @@ export function PgVectorPanel() {
               <input
                 type="number"
                 value={autoConfig.rateLimit}
-                onChange={(e) => saveAutoConfig({ ...autoConfig, rateLimit: parseInt(e.target.value) || 100 })}
+                onChange={(e) =>
+                  saveAutoConfig({ ...autoConfig, rateLimit: parseInt(e.target.value) || 100 })
+                }
                 className="w-full px-3 py-1.5 rounded-lg bg-background border border-border text-sm text-text-primary"
                 min={10}
                 max={1000}
@@ -330,15 +353,17 @@ export function PgVectorPanel() {
                     <td className="py-2 px-3 text-accent-purple font-medium">
                       {collection.vectorCount.toLocaleString()}
                     </td>
-                    <td className="py-2 px-3 text-text-muted">
-                      {collection.dimensions}
-                    </td>
+                    <td className="py-2 px-3 text-text-muted">{collection.dimensions}</td>
                     <td className="py-2 px-3">
-                      <span className={cn(
-                        'px-2 py-0.5 rounded-md text-xs border',
-                        indexTypeColors[collection.indexType]
-                      )}>
-                        {collection.indexType === 'none' ? 'No Index' : collection.indexType.toUpperCase()}
+                      <span
+                        className={cn(
+                          'px-2 py-0.5 rounded-md text-xs border',
+                          indexTypeColors[collection.indexType]
+                        )}
+                      >
+                        {collection.indexType === 'none'
+                          ? 'No Index'
+                          : collection.indexType.toUpperCase()}
                       </span>
                     </td>
                     <td className="py-2 px-3 text-text-muted">
@@ -390,7 +415,8 @@ export function PgVectorPanel() {
           <AlertTriangle className="w-12 h-12 text-yellow-500/50 mb-3" />
           <p className="text-text-muted">pgvector extension not installed</p>
           <p className="text-sm text-text-muted/70 mt-1">
-            Run <code className="px-1 py-0.5 bg-surface rounded">CREATE EXTENSION vector;</code> to enable
+            Run <code className="px-1 py-0.5 bg-surface rounded">CREATE EXTENSION vector;</code> to
+            enable
           </p>
         </div>
       )}
@@ -452,20 +478,14 @@ export function PgVectorPanel() {
                   : 'bg-accent-purple text-white hover:bg-accent-purple/80'
               )}
             >
-              {searching ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                'Search'
-              )}
+              {searching ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Search'}
             </button>
           </div>
 
           {/* Search results */}
           {searchResults.length > 0 && (
             <div className="space-y-2">
-              <p className="text-sm text-text-muted">
-                Found {searchResults.length} results
-              </p>
+              <p className="text-sm text-text-muted">Found {searchResults.length} results</p>
 
               {searchResults.map((result, index) => (
                 <div
@@ -479,18 +499,21 @@ export function PgVectorPanel() {
                     </div>
                     <div className="flex items-center gap-1">
                       <BarChart3 className="w-3 h-3 text-accent-purple" />
-                      <span className={cn(
-                        'text-sm font-medium',
-                        result.similarity >= 0.8 ? 'text-green-400' :
-                        result.similarity >= 0.6 ? 'text-yellow-400' : 'text-red-400'
-                      )}>
+                      <span
+                        className={cn(
+                          'text-sm font-medium',
+                          result.similarity >= 0.8
+                            ? 'text-green-400'
+                            : result.similarity >= 0.6
+                              ? 'text-yellow-400'
+                              : 'text-red-400'
+                        )}
+                      >
                         {(result.similarity * 100).toFixed(1)}%
                       </span>
                     </div>
                   </div>
-                  <p className="text-sm text-text-primary line-clamp-3">
-                    {result.content}
-                  </p>
+                  <p className="text-sm text-text-primary line-clamp-3">{result.content}</p>
                 </div>
               ))}
             </div>
@@ -503,9 +526,7 @@ export function PgVectorPanel() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-background border border-border rounded-xl p-6 w-[400px] space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-text-primary">
-                Configure Index
-              </h3>
+              <h3 className="text-lg font-semibold text-text-primary">Configure Index</h3>
               <button
                 onClick={() => setIndexModalOpen(false)}
                 className="p-1 hover:bg-surface rounded"
@@ -515,7 +536,8 @@ export function PgVectorPanel() {
             </div>
 
             <p className="text-sm text-text-muted">
-              Table: <span className="font-mono text-text-primary">{selectedCollection.tableName}</span>
+              Table:{' '}
+              <span className="font-mono text-text-primary">{selectedCollection.tableName}</span>
             </p>
 
             <div>
@@ -541,26 +563,29 @@ export function PgVectorPanel() {
             {indexConfig.type === 'hnsw' && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-text-muted mb-1 block">
-                    M (connections)
-                  </label>
+                  <label className="text-xs text-text-muted mb-1 block">M (connections)</label>
                   <input
                     type="number"
                     value={indexConfig.m || 16}
-                    onChange={(e) => setIndexConfig({ ...indexConfig, m: parseInt(e.target.value) || 16 })}
+                    onChange={(e) =>
+                      setIndexConfig({ ...indexConfig, m: parseInt(e.target.value) || 16 })
+                    }
                     className="w-full px-3 py-1.5 rounded-lg bg-surface border border-border text-sm text-text-primary"
                     min={4}
                     max={64}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-text-muted mb-1 block">
-                    ef_construction
-                  </label>
+                  <label className="text-xs text-text-muted mb-1 block">ef_construction</label>
                   <input
                     type="number"
                     value={indexConfig.efConstruction || 64}
-                    onChange={(e) => setIndexConfig({ ...indexConfig, efConstruction: parseInt(e.target.value) || 64 })}
+                    onChange={(e) =>
+                      setIndexConfig({
+                        ...indexConfig,
+                        efConstruction: parseInt(e.target.value) || 64,
+                      })
+                    }
                     className="w-full px-3 py-1.5 rounded-lg bg-surface border border-border text-sm text-text-primary"
                     min={16}
                     max={512}
@@ -571,19 +596,20 @@ export function PgVectorPanel() {
 
             {indexConfig.type === 'ivfflat' && (
               <div>
-                <label className="text-xs text-text-muted mb-1 block">
-                  Lists (clusters)
-                </label>
+                <label className="text-xs text-text-muted mb-1 block">Lists (clusters)</label>
                 <input
                   type="number"
                   value={indexConfig.lists || 100}
-                  onChange={(e) => setIndexConfig({ ...indexConfig, lists: parseInt(e.target.value) || 100 })}
+                  onChange={(e) =>
+                    setIndexConfig({ ...indexConfig, lists: parseInt(e.target.value) || 100 })
+                  }
                   className="w-full px-3 py-1.5 rounded-lg bg-surface border border-border text-sm text-text-primary"
                   min={10}
                   max={1000}
                 />
                 <p className="text-xs text-text-muted mt-1">
-                  Recommended: sqrt(vectorCount) = ~{Math.round(Math.sqrt(selectedCollection.vectorCount))}
+                  Recommended: sqrt(vectorCount) = ~
+                  {Math.round(Math.sqrt(selectedCollection.vectorCount))}
                 </p>
               </div>
             )}

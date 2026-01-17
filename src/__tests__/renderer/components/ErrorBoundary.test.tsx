@@ -100,7 +100,7 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText('No error')).toBeInTheDocument()
   })
 
-  it('should copy error details when Copy Details is clicked', async () => {
+  it('should copy error details when Copy Details is clicked', () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
@@ -185,9 +185,7 @@ describe('InlineErrorBoundary', () => {
       </InlineErrorBoundary>
     )
 
-    expect(
-      screen.getByText('Failed to load this section')
-    ).toBeInTheDocument()
+    expect(screen.getByText('Failed to load this section')).toBeInTheDocument()
   })
 })
 
@@ -220,8 +218,6 @@ describe('withErrorBoundary HOC', () => {
 
     const WrappedComponent = withErrorBoundary(TestComponent)
 
-    expect(WrappedComponent.displayName).toBe(
-      'withErrorBoundary(TestComponent)'
-    )
+    expect(WrappedComponent.displayName).toBe('withErrorBoundary(TestComponent)')
   })
 })

@@ -11,7 +11,6 @@ import {
   Brain,
   Clock,
   Loader2,
-  ExternalLink,
   Copy,
   Check,
   Filter,
@@ -85,35 +84,43 @@ export function GlobalSearch() {
   }, [])
 
   const saveRecentSearch = (searchQuery: string) => {
-    const updated = [searchQuery, ...recentSearches.filter(s => s !== searchQuery)].slice(0, 5)
+    const updated = [searchQuery, ...recentSearches.filter((s) => s !== searchQuery)].slice(0, 5)
     setRecentSearches(updated)
     localStorage.setItem('claude-pilot-recent-searches', JSON.stringify(updated))
   }
 
-  const handleSearch = useCallback(async (searchQuery?: string) => {
-    const q = searchQuery || query
-    if (!q.trim()) return
+  const handleSearch = useCallback(
+    async (searchQuery?: string) => {
+      const q = searchQuery || query
+      if (!q.trim()) return
 
-    setLoading(true)
-    setError(null)
+      setLoading(true)
+      setError(null)
 
-    try {
-      const response = await window.electron.invoke('memory:unified-search', q, 50) as SearchResponse
+      try {
+        const response = (await window.electron.invoke(
+          'memory:unified-search',
+          q,
+          50
+        )) as SearchResponse
 
-      // Filter by selected sources
-      const filtered = response.results.filter(r => selectedSources.has(r.source))
+        // Filter by selected sources
+        const filtered = response.results.filter((r) => selectedSources.has(r.source))
 
-      setResults(filtered)
-      setStats(response.stats)
-      saveRecentSearch(q)
-    } catch (err) {
-      setError((err as Error).message)
-      setResults([])
-      setStats(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [query, selectedSources])
+        setResults(filtered)
+        setStats(response.stats)
+        saveRecentSearch(q)
+      } catch (err) {
+        setError((err as Error).message)
+        setResults([])
+        setStats(null)
+      } finally {
+        setLoading(false)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- saveRecentSearch is stable
+    [query, selectedSources]
+  )
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -124,7 +131,8 @@ export function GlobalSearch() {
   const toggleSource = (source: string) => {
     const newSources = new Set(selectedSources)
     if (newSources.has(source)) {
-      if (newSources.size > 1) { // Keep at least one source
+      if (newSources.size > 1) {
+        // Keep at least one source
         newSources.delete(source)
       }
     } else {
@@ -275,10 +283,7 @@ export function GlobalSearch() {
             const Icon = config.icon
 
             return (
-              <div
-                key={result.id}
-                className="card p-4 hover:border-border-hover transition-colors"
-              >
+              <div key={result.id} className="card p-4 hover:border-border-hover transition-colors">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     {/* Header */}
@@ -295,14 +300,10 @@ export function GlobalSearch() {
                     </div>
 
                     {/* Title */}
-                    <h3 className="font-medium text-text-primary mb-1 truncate">
-                      {result.title}
-                    </h3>
+                    <h3 className="font-medium text-text-primary mb-1 truncate">{result.title}</h3>
 
                     {/* Content */}
-                    <p className="text-sm text-text-muted line-clamp-3">
-                      {result.content}
-                    </p>
+                    <p className="text-sm text-text-muted line-clamp-3">{result.content}</p>
 
                     {/* Metadata */}
                     {result.metadata && Object.keys(result.metadata).length > 0 && (
@@ -345,7 +346,7 @@ export function GlobalSearch() {
       {!loading && !error && !results.length && query && (
         <div className="text-center py-12">
           <Search className="w-12 h-12 text-text-muted mx-auto mb-4" />
-          <p className="text-text-muted">No results found for "{query}"</p>
+          <p className="text-text-muted">No results found for &ldquo;{query}&rdquo;</p>
           <p className="text-sm text-text-muted mt-1">Try different keywords or sources</p>
         </div>
       )}

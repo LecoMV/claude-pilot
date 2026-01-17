@@ -28,7 +28,6 @@ import {
 import { cn } from '@/lib/utils'
 import type {
   Plan,
-  PlanStep,
   PlanStatus,
   StepStatus,
   StepType,
@@ -106,8 +105,8 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
 
     // Listen for plan updates
     const unsubscribe = window.electron.on('plan:updated', (plan: Plan) => {
-      setPlans(prev => {
-        const index = prev.findIndex(p => p.id === plan.id)
+      setPlans((prev) => {
+        const index = prev.findIndex((p) => p.id === plan.id)
         if (index >= 0) {
           const updated = [...prev]
           updated[index] = plan
@@ -140,13 +139,16 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
     await window.electron.invoke('plans:cancel', id)
   }, [])
 
-  const handleDelete = useCallback(async (id: string) => {
-    await window.electron.invoke('plans:delete', id)
-    loadData()
-    if (selectedPlan?.id === id) {
-      setSelectedPlan(null)
-    }
-  }, [loadData, selectedPlan?.id])
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await window.electron.invoke('plans:delete', id)
+      loadData()
+      if (selectedPlan?.id === id) {
+        setSelectedPlan(null)
+      }
+    },
+    [loadData, selectedPlan?.id]
+  )
 
   const handleStepComplete = useCallback(async (planId: string, stepId: string) => {
     await window.electron.invoke('plans:stepComplete', planId, stepId, 'Manually completed')
@@ -154,7 +156,7 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
 
   // Toggle step expansion
   const toggleStep = useCallback((stepId: string) => {
-    setExpandedSteps(prev => {
+    setExpandedSteps((prev) => {
       const next = new Set(prev)
       if (next.has(stepId)) {
         next.delete(stepId)
@@ -183,9 +185,7 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
           </div>
           <div>
             <h2 className="text-lg font-semibold text-text-primary">Autonomous Plans</h2>
-            <p className="text-sm text-text-muted">
-              Create and execute multi-step task plans
-            </p>
+            <p className="text-sm text-text-muted">Create and execute multi-step task plans</p>
           </div>
         </div>
 
@@ -224,7 +224,9 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
           <div className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-yellow-400" />
             <span className="text-sm text-text-muted">Steps:</span>
-            <span className="text-sm font-medium text-text-primary">{stats.totalStepsExecuted}</span>
+            <span className="text-sm font-medium text-text-primary">
+              {stats.totalStepsExecuted}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-accent-blue" />
@@ -262,20 +264,21 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
                   )}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-text-primary truncate">
-                      {plan.title}
-                    </span>
-                    <span className={cn(
-                      'px-2 py-0.5 rounded-md text-xs border',
-                      statusColors[plan.status]
-                    )}>
+                    <span className="font-medium text-text-primary truncate">{plan.title}</span>
+                    <span
+                      className={cn(
+                        'px-2 py-0.5 rounded-md text-xs border',
+                        statusColors[plan.status]
+                      )}
+                    >
                       {plan.status}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-xs text-text-muted">
                     <span>{plan.steps.length} steps</span>
                     <span>
-                      {plan.steps.filter(s => s.status === 'completed').length}/{plan.steps.length} done
+                      {plan.steps.filter((s) => s.status === 'completed').length}/
+                      {plan.steps.length} done
                     </span>
                   </div>
                   {plan.status === 'executing' && (
@@ -283,7 +286,7 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
                       <div
                         className="h-full bg-accent-purple transition-all"
                         style={{
-                          width: `${(plan.steps.filter(s => s.status === 'completed').length / plan.steps.length) * 100}%`
+                          width: `${(plan.steps.filter((s) => s.status === 'completed').length / plan.steps.length) * 100}%`,
                         }}
                       />
                     </div>
@@ -366,10 +369,7 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
                   const isExpanded = expandedSteps.has(step.id)
 
                   return (
-                    <div
-                      key={step.id}
-                      className="border border-border rounded-lg overflow-hidden"
-                    >
+                    <div key={step.id} className="border border-border rounded-lg overflow-hidden">
                       <div
                         onClick={() => toggleStep(step.id)}
                         className="flex items-center gap-3 p-3 cursor-pointer hover:bg-surface/50 transition-colors"
@@ -458,9 +458,8 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
                   <p>Started: {new Date(selectedPlan.startedAt).toLocaleString()}</p>
                   {selectedPlan.completedAt && (
                     <p>
-                      Completed: {new Date(selectedPlan.completedAt).toLocaleString()}
-                      {' '}
-                      ({formatDuration(selectedPlan.totalDuration || 0)})
+                      Completed: {new Date(selectedPlan.completedAt).toLocaleString()} (
+                      {formatDuration(selectedPlan.totalDuration || 0)})
                     </p>
                   )}
                 </div>
@@ -497,9 +496,9 @@ interface CreatePlanModalProps {
 function CreatePlanModal({ projectPath, onClose, onCreated }: CreatePlanModalProps) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [steps, setSteps] = useState<Array<{ name: string; description: string; type: StepType; command?: string }>>([
-    { name: '', description: '', type: 'shell' }
-  ])
+  const [steps, setSteps] = useState<
+    Array<{ name: string; description: string; type: StepType; command?: string }>
+  >([{ name: '', description: '', type: 'shell' }])
   const [creating, setCreating] = useState(false)
 
   const addStep = () => {
@@ -517,7 +516,7 @@ function CreatePlanModal({ projectPath, onClose, onCreated }: CreatePlanModalPro
   }
 
   const handleCreate = async () => {
-    if (!title || steps.some(s => !s.name)) return
+    if (!title || steps.some((s) => !s.name)) return
 
     setCreating(true)
     try {
@@ -525,7 +524,7 @@ function CreatePlanModal({ projectPath, onClose, onCreated }: CreatePlanModalPro
         title,
         description,
         projectPath,
-        steps: steps.map(s => ({
+        steps: steps.map((s) => ({
           name: s.name,
           description: s.description,
           type: s.type,
@@ -642,10 +641,10 @@ function CreatePlanModal({ projectPath, onClose, onCreated }: CreatePlanModalPro
           </button>
           <button
             onClick={handleCreate}
-            disabled={creating || !title || steps.some(s => !s.name)}
+            disabled={creating || !title || steps.some((s) => !s.name)}
             className={cn(
               'px-4 py-2 rounded-lg font-medium transition-colors',
-              creating || !title || steps.some(s => !s.name)
+              creating || !title || steps.some((s) => !s.name)
                 ? 'bg-surface text-text-muted cursor-not-allowed'
                 : 'bg-accent-purple text-white hover:bg-accent-purple/80'
             )}

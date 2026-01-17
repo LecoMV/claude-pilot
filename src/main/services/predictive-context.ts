@@ -1,7 +1,7 @@
 // Predictive Context Service - File prediction based on prompts and patterns
 // Uses keyword matching, co-occurrence tracking, and session history analysis
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs'
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import type {
@@ -102,7 +102,8 @@ class PredictiveContextService {
     trackedFiles: 0,
     cacheHitRate: 0,
   }
-  private predictionCache: Map<string, { predictions: FilePrediction[]; timestamp: number }> = new Map()
+  private predictionCache: Map<string, { predictions: FilePrediction[]; timestamp: number }> =
+    new Map()
 
   constructor() {
     this.config = this.loadConfig()
@@ -164,10 +165,11 @@ class PredictiveContextService {
    * Extract keywords from a prompt for file matching
    */
   private extractKeywords(prompt: string): string[] {
-    const words = prompt.toLowerCase()
+    const words = prompt
+      .toLowerCase()
       .replace(/[^a-z0-9\s]/g, ' ')
       .split(/\s+/)
-      .filter(w => w.length > 2)
+      .filter((w) => w.length > 2)
 
     // Dedupe and return common keywords
     const keywords = new Set<string>()
@@ -190,11 +192,7 @@ class PredictiveContextService {
   /**
    * Find files in a directory matching patterns
    */
-  private findMatchingFiles(
-    projectPath: string,
-    patterns: string[],
-    maxDepth = 4
-  ): string[] {
+  private findMatchingFiles(projectPath: string, patterns: string[], maxDepth = 4): string[] {
     const matches: string[] = []
     const visited = new Set<string>()
 
@@ -206,8 +204,10 @@ class PredictiveContextService {
         const entries = readdirSync(dir, { withFileTypes: true })
         for (const entry of entries) {
           // Skip hidden and common non-code directories
-          if (entry.name.startsWith('.') ||
-              ['node_modules', 'dist', 'build', '.git', '__pycache__', 'venv'].includes(entry.name)) {
+          if (
+            entry.name.startsWith('.') ||
+            ['node_modules', 'dist', 'build', '.git', '__pycache__', 'venv'].includes(entry.name)
+          ) {
             continue
           }
 
@@ -259,14 +259,14 @@ class PredictiveContextService {
   /**
    * Predict files based on prompt and project
    */
-  async predict(prompt: string, projectPath: string): Promise<FilePrediction[]> {
+  predict(prompt: string, projectPath: string): FilePrediction[] {
     if (!this.config.enabled) return []
 
     // Check cache
     const cacheKey = `${projectPath}:${prompt.slice(0, 100)}`
     const cached = this.predictionCache.get(cacheKey)
     if (cached && Date.now() - cached.timestamp < 60000) {
-      this.stats.cacheHitRate = (this.stats.cacheHitRate * 0.9) + 0.1
+      this.stats.cacheHitRate = this.stats.cacheHitRate * 0.9 + 0.1
       return cached.predictions
     }
 
@@ -279,7 +279,7 @@ class PredictiveContextService {
     for (const keyword of keywords) {
       const patterns = KEYWORD_FILE_PATTERNS[keyword]
       if (patterns) {
-        patterns.forEach(p => keywordPatterns.add(p))
+        patterns.forEach((p) => keywordPatterns.add(p))
       }
     }
 
@@ -300,9 +300,9 @@ class PredictiveContextService {
     // 2. Pattern-based predictions (from history)
     for (const [filePath, pattern] of this.patterns) {
       // Check if any keyword matches the file's associated keywords
-      const matchingKeywords = pattern.keywords.filter(k => keywords.includes(k))
+      const matchingKeywords = pattern.keywords.filter((k) => keywords.includes(k))
       if (matchingKeywords.length > 0) {
-        const confidence = Math.min(0.9, 0.4 + (matchingKeywords.length * 0.15))
+        const confidence = Math.min(0.9, 0.4 + matchingKeywords.length * 0.15)
         predictions.push({
           path: filePath,
           confidence,
@@ -337,7 +337,7 @@ class PredictiveContextService {
     }
 
     // 4. Recent files boost
-    const recentThreshold = Date.now() - (24 * 60 * 60 * 1000) // 24 hours
+    const recentThreshold = Date.now() - 24 * 60 * 60 * 1000 // 24 hours
     for (const prediction of predictions) {
       if (prediction.lastAccessed && prediction.lastAccessed > recentThreshold) {
         prediction.confidence = Math.min(1, prediction.confidence + 0.1)
@@ -347,7 +347,7 @@ class PredictiveContextService {
     // Sort by confidence and deduplicate
     const seen = new Set<string>()
     const uniquePredictions = predictions
-      .filter(p => {
+      .filter((p) => {
         if (seen.has(p.path)) return false
         seen.add(p.path)
         return p.confidence >= this.config.minConfidence
@@ -407,7 +407,7 @@ class PredictiveContextService {
     this.stats.trackedFiles = this.patterns.size
 
     // Track co-occurrence with recently accessed files
-    const recentThreshold = now - (10 * 60 * 1000) // 10 minutes
+    const recentThreshold = now - 10 * 60 * 1000 // 10 minutes
     for (const [otherPath, otherPattern] of this.patterns) {
       if (otherPath !== path && otherPattern.lastAccessed > recentThreshold) {
         // Add co-occurrence in both directions
@@ -456,9 +456,10 @@ class PredictiveContextService {
   getStats(): PredictiveContextStats {
     return {
       ...this.stats,
-      accuracy: this.stats.totalPredictions > 0
-        ? this.stats.accuratePredictions / this.stats.totalPredictions
-        : 0,
+      accuracy:
+        this.stats.totalPredictions > 0
+          ? this.stats.accuratePredictions / this.stats.totalPredictions
+          : 0,
     }
   }
 

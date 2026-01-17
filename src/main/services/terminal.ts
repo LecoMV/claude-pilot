@@ -90,7 +90,7 @@ class TerminalManager {
 export const terminalManager = new TerminalManager()
 
 export function registerTerminalHandlers(): void {
-  ipcMain.handle('terminal:create', async (_event, cwd?: string): Promise<string> => {
+  ipcMain.handle('terminal:create', (_event, cwd?: string): string => {
     return terminalManager.create(cwd)
   })
 
@@ -106,7 +106,7 @@ export function registerTerminalHandlers(): void {
     terminalManager.close(id)
   })
 
-  ipcMain.handle('terminal:list', async (): Promise<string[]> => {
+  ipcMain.handle('terminal:list', (): string[] => {
     return terminalManager.listSessions()
   })
 }

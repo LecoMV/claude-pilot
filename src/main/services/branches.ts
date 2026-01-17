@@ -15,7 +15,6 @@ import type {
   BranchMergeParams,
   BranchCreateParams,
   BranchStats,
-  BranchStatus,
 } from '@shared/types'
 
 const BRANCHES_DIR = path.join(homedir(), '.config', 'claude-pilot', 'branches')
@@ -47,7 +46,7 @@ class BranchService {
           this.branches.set(branch.id, branch)
         }
       }
-    } catch (error) {
+    } catch {
       // Directory might be empty, that's okay
     }
   }
@@ -84,7 +83,7 @@ class BranchService {
   async list(sessionId: string): Promise<ConversationBranch[]> {
     await this.init()
     return Array.from(this.branches.values())
-      .filter(b => b.sessionId === sessionId)
+      .filter((b) => b.sessionId === sessionId)
       .sort((a, b) => a.createdAt - b.createdAt)
   }
 
@@ -100,7 +99,7 @@ class BranchService {
     const branches = await this.list(sessionId)
     if (branches.length === 0) return null
 
-    const mainBranch = branches.find(b => b.parentBranchId === null)
+    const mainBranch = branches.find((b) => b.parentBranchId === null)
     if (!mainBranch) return null
 
     return {
@@ -123,7 +122,8 @@ class BranchService {
     if (existingBranches.length > 0) {
       // Find which branch the message belongs to
       for (const branch of existingBranches) {
-        const hasMessage = branch.messages.some(m => m.id === branchPointMessageId) ||
+        const hasMessage =
+          branch.messages.some((m) => m.id === branchPointMessageId) ||
           branch.branchPointMessageId === branchPointMessageId
         if (hasMessage) {
           parentBranchId = branch.id
@@ -132,7 +132,7 @@ class BranchService {
       }
       // If no parent found, use main branch
       if (!parentBranchId) {
-        const mainBranch = existingBranches.find(b => b.parentBranchId === null)
+        const mainBranch = existingBranches.find((b) => b.parentBranchId === null)
         if (mainBranch) {
           parentBranchId = mainBranch.id
         }
@@ -161,7 +161,7 @@ class BranchService {
     await this.init()
 
     const existingBranches = await this.list(sessionId)
-    const mainBranch = existingBranches.find(b => b.parentBranchId === null)
+    const mainBranch = existingBranches.find((b) => b.parentBranchId === null)
 
     if (mainBranch) {
       return mainBranch
@@ -197,8 +197,9 @@ class BranchService {
     }
 
     // Check for child branches
-    const hasChildren = Array.from(this.branches.values())
-      .some(b => b.parentBranchId === branchId)
+    const hasChildren = Array.from(this.branches.values()).some(
+      (b) => b.parentBranchId === branchId
+    )
     if (hasChildren) {
       return false // Can't delete branch with children
     }
@@ -269,12 +270,12 @@ class BranchService {
 
     // Find common ancestor
     let commonAncestorId = ''
-    const aMessageIds = new Set(a.messages.map(m => m.id))
-    const bMessageIds = new Set(b.messages.map(m => m.id))
+    const aMessageIds = new Set(a.messages.map((m) => m.id))
+    const bMessageIds = new Set(b.messages.map((m) => m.id))
 
     // Messages unique to each branch
-    const messagesOnlyInA = a.messages.filter(m => !bMessageIds.has(m.id))
-    const messagesOnlyInB = b.messages.filter(m => !aMessageIds.has(m.id))
+    const messagesOnlyInA = a.messages.filter((m) => !bMessageIds.has(m.id))
+    const messagesOnlyInB = b.messages.filter((m) => !aMessageIds.has(m.id))
 
     // Common ancestor is the branch point of the more recent branch
     if (a.createdAt > b.createdAt) {
@@ -324,7 +325,7 @@ class BranchService {
       case 'append':
         // Append source messages to target
         messagesToMerge = source.messages.filter(
-          sm => !target.messages.some(tm => tm.id === sm.id)
+          (sm) => !target.messages.some((tm) => tm.id === sm.id)
         )
         target.messages.push(...messagesToMerge)
         break
@@ -332,9 +333,13 @@ class BranchService {
       case 'cherry-pick':
         // Only add specified messages
         if (messageIds) {
-          messagesToMerge = source.messages.filter(m => messageIds.includes(m.id))
+          messagesToMerge = source.messages.filter((m) => messageIds.includes(m.id))
           target.messages.push(...messagesToMerge)
         }
+        break
+
+      default:
+        // Unknown strategy, do nothing
         break
     }
 
@@ -345,10 +350,7 @@ class BranchService {
 
     target.updatedAt = Date.now()
 
-    await Promise.all([
-      this.saveBranch(source),
-      this.saveBranch(target),
-    ])
+    await Promise.all([this.saveBranch(source), this.saveBranch(target)])
 
     return true
   }
@@ -376,13 +378,13 @@ class BranchService {
     await this.init()
 
     const branches = sessionId
-      ? Array.from(this.branches.values()).filter(b => b.sessionId === sessionId)
+      ? Array.from(this.branches.values()).filter((b) => b.sessionId === sessionId)
       : Array.from(this.branches.values())
 
     const totalBranches = branches.length
-    const activeBranches = branches.filter(b => b.status === 'active').length
-    const mergedBranches = branches.filter(b => b.status === 'merged').length
-    const abandonedBranches = branches.filter(b => b.status === 'abandoned').length
+    const activeBranches = branches.filter((b) => b.status === 'active').length
+    const mergedBranches = branches.filter((b) => b.status === 'merged').length
+    const abandonedBranches = branches.filter((b) => b.status === 'abandoned').length
 
     const totalMessages = branches.reduce((sum, b) => sum + b.messages.length, 0)
     const avgMessagesPerBranch = totalBranches > 0 ? totalMessages / totalBranches : 0
@@ -403,15 +405,15 @@ class BranchService {
     // Check stored active branch
     const storedActive = this.activeBranches.get(sessionId)
     if (storedActive && this.branches.has(storedActive)) {
-      const branch = this.branches.get(storedActive)!
-      if (branch.status === 'active') {
+      const branch = this.branches.get(storedActive)
+      if (branch && branch.status === 'active') {
         return storedActive
       }
     }
 
     // Find main branch as fallback
     const branches = await this.list(sessionId)
-    const mainBranch = branches.find(b => b.parentBranchId === null && b.status === 'active')
+    const mainBranch = branches.find((b) => b.parentBranchId === null && b.status === 'active')
     if (mainBranch) {
       this.activeBranches.set(sessionId, mainBranch.id)
       return mainBranch.id
@@ -425,55 +427,43 @@ export const branchService = new BranchService()
 
 // Register IPC handlers
 export function registerBranchHandlers(): void {
-  ipcMain.handle('branches:list', async (_event, sessionId: string) =>
-    branchService.list(sessionId)
-  )
+  ipcMain.handle('branches:list', (_event, sessionId: string) => branchService.list(sessionId))
 
-  ipcMain.handle('branches:get', async (_event, branchId: string) =>
-    branchService.get(branchId)
-  )
+  ipcMain.handle('branches:get', (_event, branchId: string) => branchService.get(branchId))
 
-  ipcMain.handle('branches:getTree', async (_event, sessionId: string) =>
+  ipcMain.handle('branches:getTree', (_event, sessionId: string) =>
     branchService.getTree(sessionId)
   )
 
-  ipcMain.handle('branches:create', async (_event, params: BranchCreateParams) =>
+  ipcMain.handle('branches:create', (_event, params: BranchCreateParams) =>
     branchService.create(params)
   )
 
-  ipcMain.handle('branches:delete', async (_event, branchId: string) =>
-    branchService.delete(branchId)
-  )
+  ipcMain.handle('branches:delete', (_event, branchId: string) => branchService.delete(branchId))
 
-  ipcMain.handle('branches:rename', async (_event, branchId: string, name: string) =>
+  ipcMain.handle('branches:rename', (_event, branchId: string, name: string) =>
     branchService.rename(branchId, name)
   )
 
-  ipcMain.handle('branches:switch', async (_event, branchId: string) =>
-    branchService.switch(branchId)
-  )
+  ipcMain.handle('branches:switch', (_event, branchId: string) => branchService.switch(branchId))
 
-  ipcMain.handle('branches:addMessage', async (_event, branchId: string, message: ConversationMessage) =>
+  ipcMain.handle('branches:addMessage', (_event, branchId: string, message: ConversationMessage) =>
     branchService.addMessage(branchId, message)
   )
 
-  ipcMain.handle('branches:diff', async (_event, branchA: string, branchB: string) =>
+  ipcMain.handle('branches:diff', (_event, branchA: string, branchB: string) =>
     branchService.diff(branchA, branchB)
   )
 
-  ipcMain.handle('branches:merge', async (_event, params: BranchMergeParams) =>
+  ipcMain.handle('branches:merge', (_event, params: BranchMergeParams) =>
     branchService.merge(params)
   )
 
-  ipcMain.handle('branches:abandon', async (_event, branchId: string) =>
-    branchService.abandon(branchId)
-  )
+  ipcMain.handle('branches:abandon', (_event, branchId: string) => branchService.abandon(branchId))
 
-  ipcMain.handle('branches:stats', async (_event, sessionId?: string) =>
-    branchService.stats(sessionId)
-  )
+  ipcMain.handle('branches:stats', (_event, sessionId?: string) => branchService.stats(sessionId))
 
-  ipcMain.handle('branches:getActiveBranch', async (_event, sessionId: string) =>
+  ipcMain.handle('branches:getActiveBranch', (_event, sessionId: string) =>
     branchService.getActiveBranch(sessionId)
   )
 }

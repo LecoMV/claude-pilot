@@ -1,5 +1,6 @@
 import { Component, ErrorInfo, ReactNode } from 'react'
 import { AlertTriangle, RefreshCw, Copy, Check } from 'lucide-react'
+import * as Sentry from '@sentry/electron/renderer'
 import { cn } from '@/lib/utils'
 
 interface ErrorBoundaryProps {
@@ -40,6 +41,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
     // Call custom error handler if provided
     this.props.onError?.(error, errorInfo)
+
+    // Report to Sentry (deploy-b4go)
+    Sentry.captureException(error, {
+      extra: {
+        componentStack: errorInfo.componentStack,
+      },
+      tags: {
+        errorBoundary: true,
+      },
+    })
 
     // Send to main process for logging
     window.electron?.send('error:ui', {
@@ -105,9 +116,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               <AlertTriangle className="w-8 h-8 text-accent-red" />
             </div>
 
-            <h2 className="text-xl font-semibold text-text-primary mb-2">
-              Something went wrong
-            </h2>
+            <h2 className="text-xl font-semibold text-text-primary mb-2">Something went wrong</h2>
 
             <p className="text-text-muted mb-4">
               An error occurred while rendering this component.
@@ -115,25 +124,17 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
             {error && (
               <div className="bg-background rounded-lg p-4 mb-4 text-left">
-                <p className="text-sm font-mono text-accent-red break-all">
-                  {error.message}
-                </p>
+                <p className="text-sm font-mono text-accent-red break-all">{error.message}</p>
               </div>
             )}
 
             <div className="flex gap-2 justify-center">
-              <button
-                onClick={this.resetError}
-                className="btn btn-primary"
-              >
+              <button onClick={this.resetError} className="btn btn-primary">
                 <RefreshCw className="w-4 h-4 mr-2" />
                 Try Again
               </button>
 
-              <button
-                onClick={this.copyErrorDetails}
-                className="btn btn-secondary"
-              >
+              <button onClick={this.copyErrorDetails} className="btn btn-secondary">
                 {copied ? (
                   <>
                     <Check className="w-4 h-4 mr-2" />
@@ -247,11 +248,13 @@ export class AsyncBoundary extends Component<AsyncBoundaryProps, AsyncBoundarySt
 
   render(): ReactNode {
     if (this.state.hasError) {
-      return this.props.error ?? (
-        <div className="p-4 text-center text-text-muted">
-          <AlertTriangle className="w-6 h-6 mx-auto mb-2" />
-          <p>Failed to load content</p>
-        </div>
+      return (
+        this.props.error ?? (
+          <div className="p-4 text-center text-text-muted">
+            <AlertTriangle className="w-6 h-6 mx-auto mb-2" />
+            <p>Failed to load content</p>
+          </div>
+        )
       )
     }
 

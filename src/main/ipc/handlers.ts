@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow, type WebContents, shell, dialog } from 'electron'
+import { ipcMain, BrowserWindow, type WebContents, shell, dialog, app } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { execSync, spawn, ChildProcess } from 'child_process'
 import { memgraphService } from '../services/memgraph'
 import { postgresService } from '../services/postgresql'
@@ -10,7 +11,17 @@ import { predictiveContextService } from '../services/predictive-context'
 import { planService } from '../services/plans'
 import { branchService } from '../services/branches'
 import { transcriptService, type ParseOptions, type TranscriptStats } from '../services/transcript'
-import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync, statSync } from 'fs'
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  watch,
+  FSWatcher,
+  mkdirSync,
+  unlinkSync,
+  statSync,
+} from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { ipcSchemas, validate } from '../../shared/validation'
@@ -217,7 +228,10 @@ class LogStreamManager {
       })
 
       this.journalProcess.stdout?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n').filter((l) => l.trim())
+        const lines = data
+          .toString()
+          .split('\n')
+          .filter((l) => l.trim())
         for (const line of lines) {
           try {
             const entry = JSON.parse(line)
@@ -322,12 +336,12 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('system:resources', async (): Promise<ResourceUsage> => {
+  ipcMain.handle('system:resources', (): ResourceUsage => {
     return getResourceUsage()
   })
 
   // Claude handlers
-  ipcMain.handle('claude:version', async (): Promise<string> => {
+  ipcMain.handle('claude:version', (): string => {
     try {
       const result = execSync('claude --version', { encoding: 'utf-8' })
       return result.trim()
@@ -336,18 +350,18 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('claude:projects', async (): Promise<ClaudeProject[]> => {
+  ipcMain.handle('claude:projects', (): ClaudeProject[] => {
     return getClaudeProjects()
   })
 
   // MCP handlers
-  ipcMain.handle('mcp:list', async (): Promise<MCPServer[]> => {
+  ipcMain.handle('mcp:list', (): MCPServer[] => {
     return getMCPServers()
   })
 
-  ipcMain.handle('mcp:toggle', async (_event, name: string, enabled: boolean): Promise<boolean> => {
+  ipcMain.handle('mcp:toggle', (_event, name: string, enabled: boolean): boolean => {
     return wrapIPCHandler(
-      async () => {
+      () => {
         // Try mcp.json first (primary MCP config location)
         const mcpJsonPath = join(CLAUDE_DIR, 'mcp.json')
         if (existsSync(mcpJsonPath)) {
@@ -377,19 +391,19 @@ export function registerIpcHandlers(): void {
     )
   })
 
-  ipcMain.handle('mcp:getServer', async (_event, name: string): Promise<MCPServer | null> => {
+  ipcMain.handle('mcp:getServer', (_event, name: string): MCPServer | null => {
     const servers = getMCPServers()
     return servers.find((s) => s.name === name) || null
   })
 
-  ipcMain.handle('mcp:reload', async (): Promise<boolean> => {
+  ipcMain.handle('mcp:reload', (): boolean => {
     // Claude Code auto-reloads settings, but we can signal a refresh
     return true
   })
 
-  ipcMain.handle('mcp:getConfig', async (): Promise<string> => {
+  ipcMain.handle('mcp:getConfig', (): string => {
     return wrapIPCHandler(
-      async () => {
+      () => {
         const settingsPath = join(CLAUDE_DIR, 'settings.json')
         if (existsSync(settingsPath)) {
           return readFileSync(settingsPath, 'utf-8')
@@ -402,7 +416,7 @@ export function registerIpcHandlers(): void {
     )
   })
 
-  ipcMain.handle('mcp:saveConfig', async (_event, content: string): Promise<boolean> => {
+  ipcMain.handle('mcp:saveConfig', (_event, content: string): boolean => {
     // Validate content length and type
     const validated = getValidatedArgs<{ content: string }>(
       'mcp:saveConfig',
@@ -410,7 +424,7 @@ export function registerIpcHandlers(): void {
       ['content']
     )
     return wrapIPCHandler(
-      async () => {
+      () => {
         const settingsPath = join(CLAUDE_DIR, 'settings.json')
         // Validate JSON before saving
         JSON.parse(validated.content)
@@ -427,109 +441,172 @@ export function registerIpcHandlers(): void {
   })
 
   // Memory handlers
-  ipcMain.handle('memory:learnings', async (_event, query?: string, limit = 50): Promise<Learning[]> => {
+  ipcMain.handle('memory:learnings', (_event, query?: string, limit = 50): Learning[] => {
     return queryLearnings(query, limit)
   })
 
-  ipcMain.handle('memory:stats', async (): Promise<{
-    postgresql: { count: number }
-    memgraph: { nodes: number; edges: number }
-    qdrant: { vectors: number }
-  }> => {
-    return getMemoryStats()
-  })
+  ipcMain.handle(
+    'memory:stats',
+    (): Promise<{
+      postgresql: { count: number }
+      memgraph: { nodes: number; edges: number }
+      qdrant: { vectors: number }
+    }> => {
+      return getMemoryStats()
+    }
+  )
 
-  ipcMain.handle('memory:graph', async (_event, query?: string, limit = 100): Promise<{
-    nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>
-    edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>
-  }> => {
-    return queryMemgraphGraph(query, limit)
-  })
+  ipcMain.handle(
+    'memory:graph',
+    (
+      _event,
+      query?: string,
+      limit = 100
+    ): Promise<{
+      nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>
+      edges: Array<{
+        id: string
+        source: string
+        target: string
+        type: string
+        properties: Record<string, unknown>
+      }>
+    }> => {
+      return queryMemgraphGraph(query, limit)
+    }
+  )
 
   // Qdrant memory browser
-  ipcMain.handle('memory:qdrant:browse', async (_event, collection = 'mem0_memories', limit = 50, offset?: string): Promise<{
-    points: Array<{ id: string; payload: Record<string, unknown>; created_at?: string }>
-    nextOffset: string | null
-  }> => {
-    return browseQdrantMemories(collection, limit, offset)
-  })
+  ipcMain.handle(
+    'memory:qdrant:browse',
+    (
+      _event,
+      collection = 'mem0_memories',
+      limit = 50,
+      offset?: string
+    ): Promise<{
+      points: Array<{ id: string; payload: Record<string, unknown>; created_at?: string }>
+      nextOffset: string | null
+    }> => {
+      return browseQdrantMemories(collection, limit, offset)
+    }
+  )
 
   // Qdrant semantic search
-  ipcMain.handle('memory:qdrant:search', async (_event, query: string, collection = 'mem0_memories', limit = 20): Promise<{
-    results: Array<{ id: string; score: number; payload: Record<string, unknown> }>
-  }> => {
-    return searchQdrantMemories(query, collection, limit)
-  })
+  ipcMain.handle(
+    'memory:qdrant:search',
+    (
+      _event,
+      query: string,
+      collection = 'mem0_memories',
+      limit = 20
+    ): Promise<{
+      results: Array<{ id: string; score: number; payload: Record<string, unknown> }>
+    }> => {
+      return searchQdrantMemories(query, collection, limit)
+    }
+  )
 
   // Memgraph keyword search
-  ipcMain.handle('memory:memgraph:search', async (_event, keyword: string, nodeType?: string, limit = 50): Promise<{
-    results: Array<{ id: string; label: string; type: string; properties: Record<string, unknown>; score?: number }>
-  }> => {
-    return searchMemgraphNodes(keyword, nodeType, limit)
-  })
+  ipcMain.handle(
+    'memory:memgraph:search',
+    (
+      _event,
+      keyword: string,
+      nodeType?: string,
+      limit = 50
+    ): Promise<{
+      results: Array<{
+        id: string
+        label: string
+        type: string
+        properties: Record<string, unknown>
+        score?: number
+      }>
+    }> => {
+      return searchMemgraphNodes(keyword, nodeType, limit)
+    }
+  )
 
   // Raw query mode - execute queries directly
-  ipcMain.handle('memory:raw', async (_event, source: 'postgresql' | 'memgraph' | 'qdrant', query: string): Promise<{
-    success: boolean
-    data: unknown
-    error?: string
-    executionTime: number
-  }> => {
-    // Validate input
-    const validated = getValidatedArgs<{ source: string; query: string }>(
-      'memory:raw',
-      [source, query],
-      ['source', 'query']
-    )
-    return executeRawQuery(validated.source as 'postgresql' | 'memgraph' | 'qdrant', validated.query)
-  })
+  ipcMain.handle(
+    'memory:raw',
+    (
+      _event,
+      source: 'postgresql' | 'memgraph' | 'qdrant',
+      query: string
+    ): Promise<{
+      success: boolean
+      data: unknown
+      error?: string
+      executionTime: number
+    }> => {
+      // Validate input
+      const validated = getValidatedArgs<{ source: string; query: string }>(
+        'memory:raw',
+        [source, query],
+        ['source', 'query']
+      )
+      return executeRawQuery(
+        validated.source as 'postgresql' | 'memgraph' | 'qdrant',
+        validated.query
+      )
+    }
+  )
 
   // Unified federated search across all memory sources with RRF merging
-  ipcMain.handle('memory:unified-search', async (_event, query: string, limit = 20): Promise<{
-    results: Array<{
-      id: string
-      source: 'postgresql' | 'memgraph' | 'qdrant'
-      title: string
-      content: string
-      score: number
-      metadata: Record<string, unknown>
-    }>
-    stats: {
-      postgresql: number
-      memgraph: number
-      qdrant: number
-      totalTime: number
+  ipcMain.handle(
+    'memory:unified-search',
+    (
+      _event,
+      query: string,
+      limit = 20
+    ): Promise<{
+      results: Array<{
+        id: string
+        source: 'postgresql' | 'memgraph' | 'qdrant'
+        title: string
+        content: string
+        score: number
+        metadata: Record<string, unknown>
+      }>
+      stats: {
+        postgresql: number
+        memgraph: number
+        qdrant: number
+        totalTime: number
+      }
+    }> => {
+      return unifiedSearch(query, limit)
     }
-  }> => {
-    return unifiedSearch(query, limit)
-  })
+  )
 
   // Profile handlers
-  ipcMain.handle('profile:settings', async () => {
+  ipcMain.handle('profile:settings', () => {
     return getProfileSettings()
   })
 
-  ipcMain.handle('profile:saveSettings', async (_event, settings: ProfileSettings) => {
+  ipcMain.handle('profile:saveSettings', (_event, settings: ProfileSettings) => {
     return saveProfileSettings(settings)
   })
 
-  ipcMain.handle('profile:claudemd', async () => {
+  ipcMain.handle('profile:claudemd', () => {
     return getClaudeMd()
   })
 
-  ipcMain.handle('profile:saveClaudemd', async (_event, content: string) => {
+  ipcMain.handle('profile:saveClaudemd', (_event, content: string) => {
     return saveClaudeMd(content)
   })
 
-  ipcMain.handle('profile:rules', async () => {
+  ipcMain.handle('profile:rules', () => {
     return getRules()
   })
 
-  ipcMain.handle('profile:toggleRule', async (_event, name: string, enabled: boolean) => {
+  ipcMain.handle('profile:toggleRule', (_event, name: string, enabled: boolean) => {
     return toggleRule(name, enabled)
   })
 
-  ipcMain.handle('profile:saveRule', async (_event, path: string, content: string): Promise<boolean> => {
+  ipcMain.handle('profile:saveRule', (_event, path: string, content: string): boolean => {
     try {
       // Validate path and content - prevents path traversal attacks
       const validated = getValidatedArgs<{ path: string; content: string }>(
@@ -546,194 +623,203 @@ export function registerIpcHandlers(): void {
   })
 
   // Custom Profiles handlers (claude-eng, claude-sec, etc.)
-  ipcMain.handle('profiles:list', async (): Promise<ClaudeCodeProfile[]> => {
+  ipcMain.handle('profiles:list', (): ClaudeCodeProfile[] => {
     return listProfiles()
   })
 
-  ipcMain.handle('profiles:get', async (_event, id: string): Promise<ClaudeCodeProfile | null> => {
+  ipcMain.handle('profiles:get', (_event, id: string): ClaudeCodeProfile | null => {
     return getProfile(id)
   })
 
   ipcMain.handle(
     'profiles:create',
-    async (
+    (
       _event,
       profile: Omit<ClaudeCodeProfile, 'id' | 'createdAt' | 'updatedAt'>
-    ): Promise<ClaudeCodeProfile | null> => {
+    ): ClaudeCodeProfile | null => {
       return createProfile(profile)
     }
   )
 
   ipcMain.handle(
     'profiles:update',
-    async (_event, id: string, updates: Partial<ClaudeCodeProfile>): Promise<boolean> => {
+    (_event, id: string, updates: Partial<ClaudeCodeProfile>): boolean => {
       return updateProfile(id, updates)
     }
   )
 
-  ipcMain.handle('profiles:delete', async (_event, id: string): Promise<boolean> => {
+  ipcMain.handle('profiles:delete', (_event, id: string): boolean => {
     return deleteProfile(id)
   })
 
-  ipcMain.handle('profiles:activate', async (_event, id: string): Promise<boolean> => {
+  ipcMain.handle('profiles:activate', (_event, id: string): boolean => {
     return activateProfile(id)
   })
 
-  ipcMain.handle('profiles:getActive', async (): Promise<string | null> => {
+  ipcMain.handle('profiles:getActive', (): string | null => {
     return getActiveProfileId()
   })
 
   ipcMain.handle(
     'profiles:launch',
-    async (_event, id: string, projectPath?: string): Promise<{ success: boolean; error?: string }> => {
+    (_event, id: string, projectPath?: string): { success: boolean; error?: string } => {
       return launchProfile(id, projectPath)
     }
   )
 
   // Context handlers
-  ipcMain.handle('context:tokenUsage', async (): Promise<TokenUsage> => {
+  ipcMain.handle('context:tokenUsage', (): TokenUsage => {
     return getTokenUsage()
   })
 
-  ipcMain.handle('context:compactionSettings', async (): Promise<CompactionSettings> => {
+  ipcMain.handle('context:compactionSettings', (): CompactionSettings => {
     return getCompactionSettings()
   })
 
-  ipcMain.handle('context:sessions', async (): Promise<SessionSummary[]> => {
+  ipcMain.handle('context:sessions', (): SessionSummary[] => {
     return getRecentSessions()
   })
 
-  ipcMain.handle('context:compact', async (): Promise<boolean> => {
+  ipcMain.handle('context:compact', (): boolean => {
     return triggerCompaction()
   })
 
-  ipcMain.handle('context:setAutoCompact', async (_event, enabled: boolean): Promise<boolean> => {
+  ipcMain.handle('context:setAutoCompact', (_event, enabled: boolean): boolean => {
     return setAutoCompact(enabled)
   })
 
   // Services handlers
-  ipcMain.handle('services:systemd', async (): Promise<SystemdService[]> => {
+  ipcMain.handle('services:systemd', (): SystemdService[] => {
     return getSystemdServices()
   })
 
-  ipcMain.handle('services:podman', async (): Promise<PodmanContainer[]> => {
+  ipcMain.handle('services:podman', (): PodmanContainer[] => {
     return getPodmanContainers()
   })
 
-  ipcMain.handle('services:systemdAction', async (_event, name: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
-    // Validate service name and action type
-    const validated = getValidatedArgs<{ name: string; action: string }>(
-      'services:systemdAction',
-      [name, action],
-      ['name', 'action']
-    )
-    return systemdAction(validated.name, validated.action as 'start' | 'stop' | 'restart')
-  })
+  ipcMain.handle(
+    'services:systemdAction',
+    (_event, name: string, action: 'start' | 'stop' | 'restart'): boolean => {
+      // Validate service name and action type
+      const validated = getValidatedArgs<{ name: string; action: string }>(
+        'services:systemdAction',
+        [name, action],
+        ['name', 'action']
+      )
+      return systemdAction(validated.name, validated.action as 'start' | 'stop' | 'restart')
+    }
+  )
 
-  ipcMain.handle('services:podmanAction', async (_event, id: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
-    // Validate container ID and action type
-    const validated = getValidatedArgs<{ id: string; action: string }>(
-      'services:podmanAction',
-      [id, action],
-      ['id', 'action']
-    )
-    return podmanAction(validated.id, validated.action as 'start' | 'stop' | 'restart')
-  })
+  ipcMain.handle(
+    'services:podmanAction',
+    (_event, id: string, action: 'start' | 'stop' | 'restart'): boolean => {
+      // Validate container ID and action type
+      const validated = getValidatedArgs<{ id: string; action: string }>(
+        'services:podmanAction',
+        [id, action],
+        ['id', 'action']
+      )
+      return podmanAction(validated.id, validated.action as 'start' | 'stop' | 'restart')
+    }
+  )
 
   // Logs handlers
-  ipcMain.handle('logs:recent', async (_event, limit = 200): Promise<LogEntry[]> => {
+  ipcMain.handle('logs:recent', (_event, limit = 200): LogEntry[] => {
     return getRecentLogs(limit)
   })
 
-  ipcMain.handle('logs:stream', async (_event, sources: string[]): Promise<boolean> => {
+  ipcMain.handle('logs:stream', (_event, sources: string[]): boolean => {
     return startLogStream(sources)
   })
 
-  ipcMain.handle('logs:stopStream', async (): Promise<boolean> => {
+  ipcMain.handle('logs:stopStream', (): boolean => {
     return stopLogStream()
   })
 
   // Ollama handlers
-  ipcMain.handle('ollama:status', async (): Promise<OllamaStatus> => {
+  ipcMain.handle('ollama:status', (): OllamaStatus => {
     return getOllamaStatus()
   })
 
-  ipcMain.handle('ollama:list', async (): Promise<OllamaModel[]> => {
+  ipcMain.handle('ollama:list', (): OllamaModel[] => {
     return getOllamaModels()
   })
 
-  ipcMain.handle('ollama:running', async (): Promise<OllamaRunningModel[]> => {
+  ipcMain.handle('ollama:running', (): OllamaRunningModel[] => {
     return getRunningModels()
   })
 
-  ipcMain.handle('ollama:pull', async (_event, model: string): Promise<boolean> => {
+  ipcMain.handle('ollama:pull', (_event, model: string): boolean => {
     // Validate model name
     const validated = getValidatedArgs<{ model: string }>('ollama:pull', [model], ['model'])
     return pullOllamaModel(validated.model)
   })
 
-  ipcMain.handle('ollama:delete', async (_event, model: string): Promise<boolean> => {
+  ipcMain.handle('ollama:delete', (_event, model: string): boolean => {
     // Validate model name
     const validated = getValidatedArgs<{ model: string }>('ollama:delete', [model], ['model'])
     return deleteOllamaModel(validated.model)
   })
 
-  ipcMain.handle('ollama:run', async (_event, model: string): Promise<boolean> => {
+  ipcMain.handle('ollama:run', (_event, model: string): boolean => {
     // Validate model name
     const validated = getValidatedArgs<{ model: string }>('ollama:run', [model], ['model'])
     return runOllamaModel(validated.model)
   })
 
-  ipcMain.handle('ollama:stop', async (_event, model: string): Promise<boolean> => {
+  ipcMain.handle('ollama:stop', (_event, model: string): boolean => {
     // Validate model name
     const validated = getValidatedArgs<{ model: string }>('ollama:stop', [model], ['model'])
     return stopOllamaModel(validated.model)
   })
 
   // Agent handlers
-  ipcMain.handle('agents:list', async (): Promise<Agent[]> => {
+  ipcMain.handle('agents:list', (): Agent[] => {
     return getAgentList()
   })
 
-  ipcMain.handle('agents:spawn', async (_event, type: AgentType, name: string): Promise<Agent | null> => {
+  ipcMain.handle('agents:spawn', (_event, type: AgentType, name: string): Agent | null => {
     return spawnAgent(type, name)
   })
 
-  ipcMain.handle('agents:terminate', async (_event, id: string): Promise<boolean> => {
+  ipcMain.handle('agents:terminate', (_event, id: string): boolean => {
     return terminateAgent(id)
   })
 
-  ipcMain.handle('agents:swarmStatus', async (): Promise<SwarmInfo | null> => {
+  ipcMain.handle('agents:swarmStatus', (): SwarmInfo | null => {
     return getSwarmStatus()
   })
 
-  ipcMain.handle('agents:hiveMindStatus', async (): Promise<HiveMindInfo | null> => {
+  ipcMain.handle('agents:hiveMindStatus', (): HiveMindInfo | null => {
     return getHiveMindStatus()
   })
 
-  ipcMain.handle('agents:initSwarm', async (_event, topology: string): Promise<boolean> => {
+  ipcMain.handle('agents:initSwarm', (_event, topology: string): boolean => {
     return initSwarm(topology)
   })
 
-  ipcMain.handle('agents:shutdownSwarm', async (): Promise<boolean> => {
+  ipcMain.handle('agents:shutdownSwarm', (): boolean => {
     return shutdownSwarm()
   })
 
   // Chat handlers
-  ipcMain.handle('chat:send', async (event, projectPath: string, message: string, messageId: string): Promise<boolean> => {
-    return sendChatMessage(event.sender, projectPath, message, messageId)
-  })
+  ipcMain.handle(
+    'chat:send',
+    (event, projectPath: string, message: string, messageId: string): boolean => {
+      return sendChatMessage(event.sender, projectPath, message, messageId)
+    }
+  )
 
   // Settings handlers
-  ipcMain.handle('settings:get', async (): Promise<AppSettings> => {
+  ipcMain.handle('settings:get', (): AppSettings => {
     return getAppSettings()
   })
 
-  ipcMain.handle('settings:save', async (_event, settings: AppSettings): Promise<boolean> => {
+  ipcMain.handle('settings:save', (_event, settings: AppSettings): boolean => {
     return saveAppSettings(settings)
   })
 
-  ipcMain.handle('settings:setBudget', async (_event, budget: BudgetSettings): Promise<boolean> => {
+  ipcMain.handle('settings:setBudget', (_event, budget: BudgetSettings): boolean => {
     const settings = getAppSettings()
     settings.budget = budget
     return saveAppSettings(settings)
@@ -741,25 +827,25 @@ export function registerIpcHandlers(): void {
 
   // Credential handlers - secure credential storage using OS keychain
   // Uses wrapIPCHandler for consistent error logging and audit trail
-  ipcMain.handle('credentials:store', async (_event, key: string, value: string): Promise<boolean> => {
+  ipcMain.handle('credentials:store', (_event, key: string, value: string): boolean => {
     return wrapIPCHandler(
-      async () => credentialService.store(key, value),
+      () => credentialService.store(key, value),
       createIPCContext('credentials:store', 'store credential', { key }),
       false
     )
   })
 
-  ipcMain.handle('credentials:retrieve', async (_event, key: string): Promise<string | null> => {
+  ipcMain.handle('credentials:retrieve', (_event, key: string): string | null => {
     return wrapIPCHandler(
-      async () => credentialService.retrieve(key),
+      () => credentialService.retrieve(key),
       createIPCContext('credentials:retrieve', 'retrieve credential', { key }),
       null
     )
   })
 
-  ipcMain.handle('credentials:delete', async (_event, key: string): Promise<boolean> => {
+  ipcMain.handle('credentials:delete', (_event, key: string): boolean => {
     return wrapIPCHandler(
-      async () => {
+      () => {
         credentialService.delete(key)
         return true
       },
@@ -768,55 +854,68 @@ export function registerIpcHandlers(): void {
     )
   })
 
-  ipcMain.handle('credentials:has', async (_event, key: string): Promise<boolean> => {
+  ipcMain.handle('credentials:has', (_event, key: string): boolean => {
     return wrapIPCHandler(
-      async () => credentialService.has(key),
+      () => credentialService.has(key),
       createIPCContext('credentials:has', 'check credential exists', { key }),
       false
     )
   })
 
-  ipcMain.handle('credentials:list', async (): Promise<string[]> => {
+  ipcMain.handle('credentials:list', (): string[] => {
     return wrapIPCHandler(
-      async () => credentialService.listKeys(),
+      () => credentialService.listKeys(),
       createIPCContext('credentials:list', 'list credential keys'),
       []
     )
   })
 
-  ipcMain.handle('credentials:isEncryptionAvailable', async (): Promise<boolean> => {
+  ipcMain.handle('credentials:isEncryptionAvailable', (): boolean => {
     return credentialService.isEncryptionAvailable()
   })
 
   // ==================== Audit Handlers (OCSF) ====================
-  ipcMain.handle('audit:query', async (_event, params?: {
-    startTime?: number
-    endTime?: number
-    category?: string
-    activity?: number
-    targetType?: string
-    limit?: number
-    offset?: number
-  }) => {
-    return auditService.query(params as Parameters<typeof auditService.query>[0])
-  })
+  ipcMain.handle(
+    'audit:query',
+    (
+      _event,
+      params?: {
+        startTime?: number
+        endTime?: number
+        category?: string
+        activity?: number
+        targetType?: string
+        limit?: number
+        offset?: number
+      }
+    ) => {
+      return auditService.query(params as Parameters<typeof auditService.query>[0])
+    }
+  )
 
-  ipcMain.handle('audit:stats', async () => {
+  ipcMain.handle('audit:stats', () => {
     return auditService.getStats()
   })
 
-  ipcMain.handle('audit:export', async (_event, format: 'json' | 'csv', params?: {
-    startTime?: number
-    endTime?: number
-  }) => {
-    if (format === 'csv') {
-      return auditService.exportCSV(params)
+  ipcMain.handle(
+    'audit:export',
+    (
+      _event,
+      format: 'json' | 'csv',
+      params?: {
+        startTime?: number
+        endTime?: number
+      }
+    ) => {
+      if (format === 'csv') {
+        return auditService.exportCSV(params)
+      }
+      return auditService.exportJSON(params)
     }
-    return auditService.exportJSON(params)
-  })
+  )
 
   // ==================== Watchdog Handlers ====================
-  ipcMain.handle('watchdog:start', async (): Promise<boolean> => {
+  ipcMain.handle('watchdog:start', (): boolean => {
     try {
       watchdogService.start()
       return true
@@ -825,7 +924,7 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('watchdog:stop', async (): Promise<boolean> => {
+  ipcMain.handle('watchdog:stop', (): boolean => {
     try {
       watchdogService.stop()
       return true
@@ -834,53 +933,45 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('watchdog:isEnabled', async (): Promise<boolean> => {
+  ipcMain.handle('watchdog:isEnabled', (): boolean => {
     return watchdogService.isEnabled()
   })
 
-  ipcMain.handle('watchdog:getHealth', async () => {
+  ipcMain.handle('watchdog:getHealth', () => {
     return watchdogService.getHealth()
   })
 
-  ipcMain.handle('watchdog:getServiceHealth', async (_event, serviceId: string) => {
+  ipcMain.handle('watchdog:getServiceHealth', (_event, serviceId: string) => {
     return watchdogService.getServiceHealth(serviceId)
   })
 
-  ipcMain.handle('watchdog:getRecoveryHistory', async (_event, limit?: number) => {
+  ipcMain.handle('watchdog:getRecoveryHistory', (_event, limit?: number) => {
     return watchdogService.getRecoveryHistory(limit)
   })
 
-  ipcMain.handle('watchdog:forceCheck', async (_event, serviceId: string) => {
+  ipcMain.handle('watchdog:forceCheck', (_event, serviceId: string) => {
     return watchdogService.forceCheck(serviceId)
   })
 
-  ipcMain.handle('watchdog:forceRestart', async (_event, serviceId: string) => {
+  ipcMain.handle('watchdog:forceRestart', (_event, serviceId: string) => {
     return watchdogService.forceRestart(serviceId)
   })
 
   // System helpers
-  ipcMain.handle('system:getHomePath', async (): Promise<string> => {
+  ipcMain.handle('system:getHomePath', (): string => {
     return HOME
   })
 
   // Shell operations
-  ipcMain.handle('shell:openPath', async (_event, path: string): Promise<string> => {
+  ipcMain.handle('shell:openPath', (_event, path: string): string => {
     // Validate input - prevents path traversal attacks
-    const validated = getValidatedArgs<{ path: string }>(
-      'shell:openPath',
-      [path],
-      ['path']
-    )
+    const validated = getValidatedArgs<{ path: string }>('shell:openPath', [path], ['path'])
     return shell.openPath(validated.path)
   })
 
   ipcMain.handle('shell:openExternal', async (_event, url: string): Promise<void> => {
     // Validate URL format
-    const validated = getValidatedArgs<{ url: string }>(
-      'shell:openExternal',
-      [url],
-      ['url']
-    )
+    const validated = getValidatedArgs<{ url: string }>('shell:openExternal', [url], ['url'])
     await shell.openExternal(validated.url)
   })
 
@@ -897,14 +988,10 @@ export function registerIpcHandlers(): void {
   })
 
   // Terminal at specific path - sends message to renderer to open terminal at path
-  ipcMain.handle('terminal:openAt', async (event, path: string): Promise<boolean> => {
+  ipcMain.handle('terminal:openAt', (event, path: string): boolean => {
     try {
       // Validate path - prevents path traversal attacks
-      const validated = getValidatedArgs<{ path: string }>(
-        'terminal:openAt',
-        [path],
-        ['path']
-      )
+      const validated = getValidatedArgs<{ path: string }>('terminal:openAt', [path], ['path'])
       // Get the webContents that sent this message
       const webContents = event.sender
       // Send message back to renderer to navigate to terminal and set cwd
@@ -916,7 +1003,7 @@ export function registerIpcHandlers(): void {
   })
 }
 
-async function getClaudeStatus() {
+function getClaudeStatus() {
   // Return cached data if available (30 second cache - version rarely changes)
   type ClaudeStatus = { online: boolean; version?: string; lastCheck: number }
   const cached = dataCache.get<ClaudeStatus>('claudeStatus')
@@ -939,12 +1026,12 @@ async function getMCPStatus() {
   const servers = await getMCPServers()
   return {
     servers,
-    totalActive: servers.filter(s => s.status === 'online').length,
-    totalDisabled: servers.filter(s => s.config.disabled).length,
+    totalActive: servers.filter((s) => s.status === 'online').length,
+    totalDisabled: servers.filter((s) => s.config.disabled).length,
   }
 }
 
-async function getMemoryStatus() {
+function getMemoryStatus() {
   // Return cached data if available (10 second cache)
   type MemStatus = {
     postgresql: { online: boolean }
@@ -992,7 +1079,7 @@ async function getMemoryStatus() {
   return status
 }
 
-async function getOllamaServiceStatus() {
+function getOllamaServiceStatus() {
   // Return cached data if available (10 second cache)
   const cached = dataCache.get<{ online: boolean; modelCount: number; runningModels: number }>(
     'ollamaStatus'
@@ -1038,7 +1125,7 @@ async function getOllamaServiceStatus() {
   }
 }
 
-async function getResourceUsage(): Promise<ResourceUsage> {
+function getResourceUsage(): ResourceUsage {
   // Return cached data if available (5 second cache)
   const cached = dataCache.get<ResourceUsage>('resourceUsage')
   if (cached) return cached
@@ -1212,12 +1299,12 @@ function getClaudeProjects(): ClaudeProject[] {
     const decodedPath = entry.name.replace(/-/g, '/')
 
     // Count session files
-    const sessionFiles = readdirSync(projectPath).filter(f => f.endsWith('.jsonl'))
+    const sessionFiles = readdirSync(projectPath).filter((f) => f.endsWith('.jsonl'))
 
     // Check for CLAUDE.md
     const realPath = decodedPath.startsWith('/') ? decodedPath : join(HOME, decodedPath)
-    const hasCLAUDEMD = existsSync(join(realPath, '.claude', 'CLAUDE.md')) ||
-                        existsSync(join(realPath, 'CLAUDE.md'))
+    const hasCLAUDEMD =
+      existsSync(join(realPath, '.claude', 'CLAUDE.md')) || existsSync(join(realPath, 'CLAUDE.md'))
 
     // Check for Beads
     const hasBeads = existsSync(join(realPath, '.beads'))
@@ -1353,10 +1440,10 @@ async function queryLearnings(query?: string, limit = 50): Promise<Learning[]> {
       id: row.id,
       category: row.category || 'general',
       content: row.content || '',
-      confidence: typeof row.relevance === 'string' ? parseFloat(row.relevance) : row.relevance || 1,
-      createdAt: row.created_at instanceof Date
-        ? row.created_at.toISOString()
-        : String(row.created_at),
+      confidence:
+        typeof row.relevance === 'string' ? parseFloat(row.relevance) : row.relevance || 1,
+      createdAt:
+        row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
       source: row.topic || undefined,
     }))
   } catch (error) {
@@ -1407,9 +1494,8 @@ async function queryLearningsSimple(query?: string, limit = 50): Promise<Learnin
       category: row.category || 'general',
       content: row.content || '',
       confidence: 1,
-      createdAt: row.created_at instanceof Date
-        ? row.created_at.toISOString()
-        : String(row.created_at),
+      createdAt:
+        row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
       source: row.topic || undefined,
     }))
   } catch (error) {
@@ -1450,19 +1536,19 @@ async function getMemoryStats(): Promise<{
 
   // Qdrant count - sum across all collections
   try {
-    const collectionsResult = execSync(
-      'curl -s http://localhost:6333/collections',
-      { encoding: 'utf-8', timeout: 3000 }
-    )
+    const collectionsResult = execSync('curl -s http://localhost:6333/collections', {
+      encoding: 'utf-8',
+      timeout: 3000,
+    })
     const collections = JSON.parse(collectionsResult)
     let totalVectors = 0
 
     for (const col of collections.result?.collections || []) {
       try {
-        const colResult = execSync(
-          `curl -s http://localhost:6333/collections/${col.name}`,
-          { encoding: 'utf-8', timeout: 2000 }
-        )
+        const colResult = execSync(`curl -s http://localhost:6333/collections/${col.name}`, {
+          encoding: 'utf-8',
+          timeout: 2000,
+        })
         const colData = JSON.parse(colResult)
         totalVectors += colData.result?.points_count || 0
       } catch {
@@ -1478,7 +1564,6 @@ async function getMemoryStats(): Promise<{
 }
 
 // Parse mgconsole tabular output into array of objects
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function _parseMgconsoleOutput(output: string): Array<Record<string, unknown>> {
   const lines = output.trim().split('\n')
   if (lines.length < 4) return [] // Need at least header separator, header, separator, and data
@@ -1499,8 +1584,8 @@ function _parseMgconsoleOutput(output: string): Array<Record<string, unknown>> {
   const headerLine = lines[headerLineIdx]
   const columns = headerLine
     .split('|')
-    .filter(c => c.trim())
-    .map(c => c.trim())
+    .filter((c) => c.trim())
+    .map((c) => c.trim())
 
   // Parse data rows (skip header and separator lines)
   for (let i = headerLineIdx + 1; i < lines.length; i++) {
@@ -1509,8 +1594,8 @@ function _parseMgconsoleOutput(output: string): Array<Record<string, unknown>> {
 
     const values = line
       .split('|')
-      .filter(v => v.trim() !== '')
-      .map(v => {
+      .filter((v) => v.trim() !== '')
+      .map((v) => {
         const trimmed = v.trim()
         // Parse value types
         if (trimmed === 'Null' || trimmed === 'null') return null
@@ -1518,7 +1603,11 @@ function _parseMgconsoleOutput(output: string): Array<Record<string, unknown>> {
           return trimmed.slice(1, -1) // Remove quotes
         }
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-          try { return JSON.parse(trimmed) } catch { return trimmed }
+          try {
+            return JSON.parse(trimmed)
+          } catch {
+            return trimmed
+          }
         }
         const num = Number(trimmed)
         if (!isNaN(num)) return num
@@ -1538,7 +1627,6 @@ function _parseMgconsoleOutput(output: string): Array<Record<string, unknown>> {
 }
 
 // Parse Cypher node/relationship format: (:Label {prop: value, ...}) or [:TYPE {prop: value, ...}]
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function _parseCypherNodeProps(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'string') return {}
 
@@ -1588,7 +1676,13 @@ async function queryMemgraphGraph(
   limit = 100
 ): Promise<{
   nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>
-  edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>
+  edges: Array<{
+    id: string
+    source: string
+    target: string
+    type: string
+    properties: Record<string, unknown>
+  }>
 }> {
   try {
     await memgraphService.connect()
@@ -1597,14 +1691,29 @@ async function queryMemgraphGraph(
       // Execute custom Cypher query
       const results = await memgraphService.query(query)
       // For custom queries, try to extract nodes/edges from results
-      const nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }> = []
-      const edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }> = []
+      const nodes: Array<{
+        id: string
+        label: string
+        type: string
+        properties: Record<string, unknown>
+      }> = []
+      const edges: Array<{
+        id: string
+        source: string
+        target: string
+        type: string
+        properties: Record<string, unknown>
+      }> = []
 
       for (const row of results) {
         // Look for node-like objects in results
         for (const value of Object.values(row)) {
           if (value && typeof value === 'object' && 'id' in value && 'labels' in value) {
-            const node = value as { id: number; labels: string[]; properties: Record<string, unknown> }
+            const node = value as {
+              id: number
+              labels: string[]
+              properties: Record<string, unknown>
+            }
             nodes.push({
               id: String(node.id),
               label: (node.properties.name || node.properties.title || `Node ${node.id}`) as string,
@@ -1659,11 +1768,13 @@ async function browseQdrantMemories(
     if (response.ok) {
       const data = await response.json()
       if (data.result?.points) {
-        result.points = data.result.points.map((p: { id: string; payload: Record<string, unknown> }) => ({
-          id: p.id,
-          payload: p.payload,
-          created_at: p.payload?.created_at as string | undefined,
-        }))
+        result.points = data.result.points.map(
+          (p: { id: string; payload: Record<string, unknown> }) => ({
+            id: p.id,
+            payload: p.payload,
+            created_at: p.payload?.created_at as string | undefined,
+          })
+        )
       }
       result.nextOffset = data.result?.next_page_offset || null
     }
@@ -1715,42 +1826,50 @@ async function searchQdrantMemories(
 
     if (embedding && embedding.length > 0) {
       // Use vector similarity search with Qdrant
-      const searchResponse = await fetch(`http://localhost:6333/collections/${collection}/points/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vector: embedding,
-          limit,
-          with_payload: true,
-          with_vector: false,
-          score_threshold: 0.3, // Minimum similarity threshold
-        }),
-      })
+      const searchResponse = await fetch(
+        `http://localhost:6333/collections/${collection}/points/search`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vector: embedding,
+            limit,
+            with_payload: true,
+            with_vector: false,
+            score_threshold: 0.3, // Minimum similarity threshold
+          }),
+        }
+      )
 
       if (searchResponse.ok) {
         const data = await searchResponse.json()
         if (data.result) {
-          result.results = data.result.map((p: { id: string; score: number; payload: Record<string, unknown> }) => ({
-            id: p.id,
-            score: p.score,
-            payload: p.payload,
-          }))
+          result.results = data.result.map(
+            (p: { id: string; score: number; payload: Record<string, unknown> }) => ({
+              id: p.id,
+              score: p.score,
+              payload: p.payload,
+            })
+          )
           return result
         }
       }
     }
 
     // Fallback to keyword-based search if embedding fails or Ollama unavailable
-    console.log('[Qdrant] Falling back to keyword search')
-    const scrollResponse = await fetch(`http://localhost:6333/collections/${collection}/points/scroll`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        limit: limit * 5, // Get more to filter
-        with_payload: true,
-        with_vector: false,
-      }),
-    })
+    console.info('[Qdrant] Falling back to keyword search')
+    const scrollResponse = await fetch(
+      `http://localhost:6333/collections/${collection}/points/scroll`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          limit: limit * 5, // Get more to filter
+          with_payload: true,
+          with_vector: false,
+        }),
+      }
+    )
 
     if (scrollResponse.ok) {
       const data = await scrollResponse.json()
@@ -1841,7 +1960,9 @@ async function unifiedSearch(
     id: `mg-${node.id}`,
     source: 'memgraph' as const,
     title: node.label,
-    content: String(node.properties.instruction || node.properties.description || node.properties.output || '').slice(0, 300),
+    content: String(
+      node.properties.instruction || node.properties.description || node.properties.output || ''
+    ).slice(0, 300),
     originalScore: node.score || 0.5,
     rank: index + 1,
     metadata: {
@@ -1855,7 +1976,9 @@ async function unifiedSearch(
     id: `qd-${point.id}`,
     source: 'qdrant' as const,
     title: String(point.payload?.user_id || 'Memory'),
-    content: String(point.payload?.data || '').slice(0, 300) + (String(point.payload?.data || '').length > 300 ? '...' : ''),
+    content:
+      String(point.payload?.data || '').slice(0, 300) +
+      (String(point.payload?.data || '').length > 300 ? '...' : ''),
     originalScore: point.score,
     rank: index + 1,
     metadata: {
@@ -1920,7 +2043,13 @@ async function searchMemgraphNodes(
   nodeType: string | undefined,
   limit: number
 ): Promise<{
-  results: Array<{ id: string; label: string; type: string; properties: Record<string, unknown>; score?: number }>
+  results: Array<{
+    id: string
+    label: string
+    type: string
+    properties: Record<string, unknown>
+    score?: number
+  }>
 }> {
   try {
     await memgraphService.connect()
@@ -1933,7 +2062,7 @@ async function searchMemgraphNodes(
     )
 
     return {
-      results: searchResults.map(r => ({
+      results: searchResults.map((r) => ({
         id: String(r.id),
         label: r.label,
         type: r.type,
@@ -1949,13 +2078,37 @@ async function searchMemgraphNodes(
 
 // Valid Cypher keywords that can start a query
 const VALID_CYPHER_STARTS = [
-  'MATCH', 'RETURN', 'CREATE', 'MERGE', 'DELETE', 'DETACH', 'SET', 'REMOVE',
-  'WITH', 'UNWIND', 'CALL', 'SHOW', 'OPTIONAL', 'EXPLAIN', 'PROFILE',
-  'LOAD', 'FOREACH', 'USING', 'DROP', 'ALTER', 'GRANT', 'REVOKE', 'DENY'
+  'MATCH',
+  'RETURN',
+  'CREATE',
+  'MERGE',
+  'DELETE',
+  'DETACH',
+  'SET',
+  'REMOVE',
+  'WITH',
+  'UNWIND',
+  'CALL',
+  'SHOW',
+  'OPTIONAL',
+  'EXPLAIN',
+  'PROFILE',
+  'LOAD',
+  'FOREACH',
+  'USING',
+  'DROP',
+  'ALTER',
+  'GRANT',
+  'REVOKE',
+  'DENY',
 ]
 
 // Validate Cypher query syntax before sending to Memgraph
-function validateCypherQuery(query: string): { valid: boolean; error?: string; suggestion?: string } {
+function validateCypherQuery(query: string): {
+  valid: boolean
+  error?: string
+  suggestion?: string
+} {
   const trimmed = query.trim()
   if (!trimmed) {
     return { valid: false, error: 'Query is empty' }
@@ -1967,18 +2120,19 @@ function validateCypherQuery(query: string): { valid: boolean; error?: string; s
   // Check if it starts with a valid Cypher keyword
   if (!VALID_CYPHER_STARTS.includes(firstWord)) {
     const suggestions: Record<string, string> = {
-      'SELECT': 'Cypher uses MATCH/RETURN instead of SELECT. Try: MATCH (n) RETURN n LIMIT 10',
-      'FROM': 'Cypher uses MATCH instead of FROM. Try: MATCH (n:NodeType) RETURN n',
-      'WHERE': 'WHERE must follow MATCH. Try: MATCH (n) WHERE n.name = "value" RETURN n',
-      'INSERT': 'Cypher uses CREATE instead of INSERT. Try: CREATE (n:Label {prop: "value"})',
-      'UPDATE': 'Cypher uses SET instead of UPDATE. Try: MATCH (n) SET n.prop = "value"',
+      SELECT: 'Cypher uses MATCH/RETURN instead of SELECT. Try: MATCH (n) RETURN n LIMIT 10',
+      FROM: 'Cypher uses MATCH instead of FROM. Try: MATCH (n:NodeType) RETURN n',
+      WHERE: 'WHERE must follow MATCH. Try: MATCH (n) WHERE n.name = "value" RETURN n',
+      INSERT: 'Cypher uses CREATE instead of INSERT. Try: CREATE (n:Label {prop: "value"})',
+      UPDATE: 'Cypher uses SET instead of UPDATE. Try: MATCH (n) SET n.prop = "value"',
     }
 
     return {
       valid: false,
       error: `Invalid Cypher syntax: "${firstWord}" is not a valid starting keyword`,
-      suggestion: suggestions[firstWord] ||
-        `Valid Cypher queries start with: ${VALID_CYPHER_STARTS.slice(0, 8).join(', ')}...\nExample: MATCH (n:CyberTechnique) RETURN n LIMIT 10`
+      suggestion:
+        suggestions[firstWord] ||
+        `Valid Cypher queries start with: ${VALID_CYPHER_STARTS.slice(0, 8).join(', ')}...\nExample: MATCH (n:CyberTechnique) RETURN n LIMIT 10`,
     }
   }
 
@@ -2442,7 +2596,10 @@ function createProfile(
   ensureProfilesDir()
 
   // Generate ID from name (slugified)
-  const id = profile.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  const id = profile.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
   const now = Date.now()
 
   const newProfile: ClaudeCodeProfile = {
@@ -2536,8 +2693,9 @@ function activateProfile(id: string): boolean {
       }
 
       // Disable all rules not in the enabled list
+      const enabledRules = profile.enabledRules ?? []
       const disabledRules = allRules
-        .filter((r) => !profile.enabledRules!.includes(r.name))
+        .filter((r) => !enabledRules.includes(r.name))
         .map((r) => r.name)
 
       settings.disabledRules = disabledRules
@@ -2560,10 +2718,7 @@ function getActiveProfileId(): string | null {
   }
 }
 
-function launchProfile(
-  id: string,
-  projectPath?: string
-): { success: boolean; error?: string } {
+function launchProfile(id: string, projectPath?: string): { success: boolean; error?: string } {
   const profile = getProfile(id)
   if (!profile) {
     return { success: false, error: 'Profile not found' }
@@ -2781,7 +2936,7 @@ function triggerCompaction(): boolean {
     })
 
     result.stdout?.on('data', (data: Buffer) => {
-      console.log('Compaction output:', data.toString())
+      console.info('Compaction output:', data.toString())
     })
 
     result.stderr?.on('data', (data: Buffer) => {
@@ -2794,7 +2949,7 @@ function triggerCompaction(): boolean {
 
     result.on('close', (code) => {
       if (code === 0) {
-        console.log('Compaction completed successfully')
+        console.info('Compaction completed successfully')
       } else {
         console.error(`Compaction exited with code ${code}`)
       }
@@ -2835,7 +2990,10 @@ function getRecentSessions(): SessionSummary[] {
 
         try {
           const content = readFileSync(sessionPath, 'utf-8')
-          const lines = content.trim().split('\n').filter((l) => l.trim())
+          const lines = content
+            .trim()
+            .split('\n')
+            .filter((l) => l.trim())
 
           if (lines.length === 0) continue
 
@@ -2902,15 +3060,7 @@ function getRecentSessions(): SessionSummary[] {
 // Services functions
 function getSystemdServices(): SystemdService[] {
   const services: SystemdService[] = []
-  const importantServices = [
-    'postgresql',
-    'docker',
-    'ssh',
-    'nginx',
-    'redis',
-    'memcached',
-    'cron',
-  ]
+  const importantServices = ['postgresql', 'docker', 'ssh', 'nginx', 'redis', 'memcached', 'cron']
 
   try {
     // Get list of services
@@ -2961,10 +3111,10 @@ function getPodmanContainers(): PodmanContainer[] {
   const containers: PodmanContainer[] = []
 
   try {
-    const result = execSync(
-      'podman ps -a --format json 2>/dev/null',
-      { encoding: 'utf-8', timeout: 10000 }
-    )
+    const result = execSync('podman ps -a --format json 2>/dev/null', {
+      encoding: 'utf-8',
+      timeout: 10000,
+    })
 
     if (!result.trim()) return containers
 
@@ -3045,7 +3195,8 @@ function generateLogId(): string {
 
 function parseLogLevel(line: string): LogLevel {
   const lower = line.toLowerCase()
-  if (lower.includes('error') || lower.includes('failed') || lower.includes('exception')) return 'error'
+  if (lower.includes('error') || lower.includes('failed') || lower.includes('exception'))
+    return 'error'
   if (lower.includes('warn') || lower.includes('warning')) return 'warn'
   if (lower.includes('debug')) return 'debug'
   return 'info'
@@ -3061,7 +3212,10 @@ function getRecentLogs(limit = 200): LogEntry[] {
       { encoding: 'utf-8', timeout: 5000 }
     )
 
-    for (const line of sysLogs.trim().split('\n').slice(-Math.floor(limit / 4))) {
+    for (const line of sysLogs
+      .trim()
+      .split('\n')
+      .slice(-Math.floor(limit / 4))) {
       if (!line.trim()) continue
       // Parse journalctl format: 2024-01-15T12:34:56+00:00 hostname process[pid]: message
       const match = line.match(/^(\S+)\s+\S+\s+(\S+)\[\d+\]:\s*(.*)$/)
@@ -3161,9 +3315,7 @@ function getRecentLogs(limit = 200): LogEntry[] {
   }
 
   // Sort by timestamp and limit
-  return logs
-    .sort((a, b) => a.timestamp - b.timestamp)
-    .slice(-limit)
+  return logs.sort((a, b) => a.timestamp - b.timestamp).slice(-limit)
 }
 
 function startLogStream(sources: string[]): boolean {
@@ -3199,29 +3351,33 @@ function getOllamaModels(): OllamaModel[] {
     const data = JSON.parse(result)
     if (!data.models) return []
 
-    return data.models.map((m: {
-      name: string
-      size: number
-      digest: string
-      modified_at: string
-      details?: {
-        format?: string
-        family?: string
-        parameter_size?: string
-        quantization_level?: string
-      }
-    }) => ({
-      name: m.name,
-      size: m.size,
-      digest: m.digest,
-      modifiedAt: m.modified_at,
-      details: m.details ? {
-        format: m.details.format,
-        family: m.details.family,
-        parameterSize: m.details.parameter_size,
-        quantizationLevel: m.details.quantization_level,
-      } : undefined,
-    }))
+    return data.models.map(
+      (m: {
+        name: string
+        size: number
+        digest: string
+        modified_at: string
+        details?: {
+          format?: string
+          family?: string
+          parameter_size?: string
+          quantization_level?: string
+        }
+      }) => ({
+        name: m.name,
+        size: m.size,
+        digest: m.digest,
+        modifiedAt: m.modified_at,
+        details: m.details
+          ? {
+              format: m.details.format,
+              family: m.details.family,
+              parameterSize: m.details.parameter_size,
+              quantizationLevel: m.details.quantization_level,
+            }
+          : undefined,
+      })
+    )
   } catch {
     return []
   }
@@ -3236,19 +3392,15 @@ function getRunningModels(): OllamaRunningModel[] {
     const data = JSON.parse(result)
     if (!data.models) return []
 
-    return data.models.map((m: {
-      name: string
-      model: string
-      size: number
-      digest: string
-      expires_at: string
-    }) => ({
-      name: m.name,
-      model: m.model,
-      size: m.size,
-      digest: m.digest,
-      expiresAt: m.expires_at,
-    }))
+    return data.models.map(
+      (m: { name: string; model: string; size: number; digest: string; expires_at: string }) => ({
+        name: m.name,
+        model: m.model,
+        size: m.size,
+        digest: m.digest,
+        expiresAt: m.expires_at,
+      })
+    )
   } catch {
     return []
   }
@@ -3424,7 +3576,12 @@ function shutdownSwarm(): boolean {
 }
 
 // Chat functions
-function sendChatMessage(sender: WebContents, projectPath: string, message: string, messageId: string): boolean {
+function sendChatMessage(
+  sender: WebContents,
+  projectPath: string,
+  message: string,
+  messageId: string
+): boolean {
   try {
     // Run claude command in background and stream output
     const claude = spawn('claude', ['--print', '-p', message], {
@@ -3593,12 +3750,15 @@ class SessionWatchManager {
 const sessionWatchManager = new SessionWatchManager()
 
 // Parse a single JSONL session file
-async function parseSessionFile(filePath: string): Promise<ExternalSession | null> {
+function parseSessionFile(filePath: string): ExternalSession | null {
   try {
     if (!existsSync(filePath)) return null
 
     const content = readFileSync(filePath, 'utf-8')
-    const lines = content.trim().split('\n').filter((l) => l.trim())
+    const lines = content
+      .trim()
+      .split('\n')
+      .filter((l) => l.trim())
     if (lines.length === 0) return null
 
     // Parse first and last entries for metadata
@@ -3634,7 +3794,11 @@ async function parseSessionFile(filePath: string): Promise<ExternalSession | nul
           const content = message?.content
           if (Array.isArray(content)) {
             for (const block of content) {
-              if (block && typeof block === 'object' && (block as Record<string, unknown>).type === 'tool_use') {
+              if (
+                block &&
+                typeof block === 'object' &&
+                (block as Record<string, unknown>).type === 'tool_use'
+              ) {
                 stats.toolCalls++
               }
             }
@@ -3681,9 +3845,7 @@ async function parseSessionFile(filePath: string): Promise<ExternalSession | nul
 
     // Calculate estimated cost (rough approximation)
     // Claude 3.5 Sonnet: ~$3/MTok input, ~$15/MTok output
-    stats.estimatedCost =
-      (stats.inputTokens * 0.000003) +
-      (stats.outputTokens * 0.000015)
+    stats.estimatedCost = stats.inputTokens * 0.000003 + stats.outputTokens * 0.000015
 
     const session: ExternalSession = {
       id: sessionId,
@@ -3729,7 +3891,10 @@ async function discoverExternalSessions(): Promise<ExternalSession[]> {
       { encoding: 'utf-8', timeout: 10000 }
     )
 
-    const files = findResult.trim().split('\n').filter((f) => f.trim())
+    const files = findResult
+      .trim()
+      .split('\n')
+      .filter((f) => f.trim())
 
     // Parse each session file
     for (const filePath of files) {
@@ -3750,7 +3915,7 @@ async function discoverExternalSessions(): Promise<ExternalSession[]> {
 }
 
 // Get messages from a session
-async function getSessionMessages(sessionId: string, limit = 100): Promise<SessionMessage[]> {
+function getSessionMessages(sessionId: string, limit = 100): SessionMessage[] {
   const projectsDir = join(CLAUDE_DIR, 'projects')
   const messages: SessionMessage[] = []
 
@@ -3765,7 +3930,10 @@ async function getSessionMessages(sessionId: string, limit = 100): Promise<Sessi
     if (!filePath || !existsSync(filePath)) return messages
 
     const content = readFileSync(filePath, 'utf-8')
-    const lines = content.trim().split('\n').filter((l) => l.trim())
+    const lines = content
+      .trim()
+      .split('\n')
+      .filter((l) => l.trim())
 
     // Parse messages (take last N lines)
     const startIndex = Math.max(0, lines.length - limit)
@@ -3816,9 +3984,7 @@ async function getSessionMessages(sessionId: string, limit = 100): Promise<Sessi
           uuid: entry.uuid as string,
           parentUuid: entry.parentUuid as string | undefined,
           type,
-          timestamp: entry.timestamp
-            ? new Date(entry.timestamp as string).getTime()
-            : Date.now(),
+          timestamp: entry.timestamp ? new Date(entry.timestamp as string).getTime() : Date.now(),
           content,
           model: message?.model as string | undefined,
           usage: message?.usage as SessionMessage['usage'],
@@ -3869,7 +4035,7 @@ function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
 
     if (!psOutput) return processes
 
-    const lines = psOutput.split('\n').filter(l => l.trim())
+    const lines = psOutput.split('\n').filter((l) => l.trim())
 
     for (const line of lines) {
       const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/)
@@ -3881,7 +4047,8 @@ function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
 
       // Skip if not a main claude process (filter out wrappers and subprocesses)
       const mainCmd = args[0]
-      if (!mainCmd.includes('claude') || mainCmd.includes('conmon') || mainCmd.includes('podman')) continue
+      if (!mainCmd.includes('claude') || mainCmd.includes('conmon') || mainCmd.includes('podman'))
+        continue
 
       // Determine profile from --settings path
       let profile = 'default'
@@ -3910,10 +4077,10 @@ function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
       // Detect active MCP servers by looking at child processes
       const mcpServers: string[] = []
       try {
-        const childOutput = execSync(
-          `ps --ppid ${pid} -o args --no-headers 2>/dev/null`,
-          { encoding: 'utf-8', timeout: 2000 }
-        ).trim()
+        const childOutput = execSync(`ps --ppid ${pid} -o args --no-headers 2>/dev/null`, {
+          encoding: 'utf-8',
+          timeout: 2000,
+        }).trim()
 
         const childLines = childOutput.split('\n')
         for (const childLine of childLines) {
@@ -3948,7 +4115,10 @@ function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
 }
 
 // Match a session to its running process by working directory
-function matchSessionToProcess(session: ExternalSession, processes: ClaudeProcessInfo[]): SessionProcessInfo | undefined {
+function matchSessionToProcess(
+  session: ExternalSession,
+  processes: ClaudeProcessInfo[]
+): SessionProcessInfo | undefined {
   // Try to match by working directory
   const sessionCwd = session.workingDirectory
   if (!sessionCwd) return undefined
@@ -4007,7 +4177,7 @@ async function getActiveSessions(): Promise<ExternalSession[]> {
 }
 
 // IPC Handlers for External Sessions
-ipcMain.handle('sessions:discover', async () => {
+ipcMain.handle('sessions:discover', () => {
   return discoverExternalSessions()
 })
 
@@ -4016,11 +4186,11 @@ ipcMain.handle('sessions:get', async (_event, sessionId: string) => {
   return sessions.find((s) => s.id === sessionId) || null
 })
 
-ipcMain.handle('sessions:getMessages', async (_event, sessionId: string, limit?: number) => {
+ipcMain.handle('sessions:getMessages', (_event, sessionId: string, limit?: number) => {
   return getSessionMessages(sessionId, limit)
 })
 
-ipcMain.handle('sessions:watch', async (_event, enable: boolean) => {
+ipcMain.handle('sessions:watch', (_event, enable: boolean) => {
   if (enable) {
     return sessionWatchManager.start()
   } else {
@@ -4028,16 +4198,12 @@ ipcMain.handle('sessions:watch', async (_event, enable: boolean) => {
   }
 })
 
-ipcMain.handle('sessions:getActive', async () => {
+ipcMain.handle('sessions:getActive', () => {
   return getActiveSessions()
 })
 
 // Transcript handlers - streaming transcript parser
-ipcMain.handle('transcript:parse', async (
-  _event,
-  filePath: string,
-  options?: ParseOptions
-) => {
+ipcMain.handle('transcript:parse', async (_event, filePath: string, options?: ParseOptions) => {
   try {
     return await transcriptService.parseAll(filePath, options)
   } catch (error) {
@@ -4046,10 +4212,7 @@ ipcMain.handle('transcript:parse', async (
   }
 })
 
-ipcMain.handle('transcript:stats', async (
-  _event,
-  filePath: string
-): Promise<TranscriptStats> => {
+ipcMain.handle('transcript:stats', async (_event, filePath: string): Promise<TranscriptStats> => {
   try {
     return await transcriptService.getStats(filePath)
   } catch (error) {
@@ -4065,11 +4228,7 @@ ipcMain.handle('transcript:stats', async (
   }
 })
 
-ipcMain.handle('transcript:last', async (
-  _event,
-  filePath: string,
-  count: number
-) => {
+ipcMain.handle('transcript:last', async (_event, filePath: string, count: number) => {
   try {
     return await transcriptService.getLastMessages(filePath, count)
   } catch (error) {
@@ -4078,7 +4237,7 @@ ipcMain.handle('transcript:last', async (
   }
 })
 
-ipcMain.handle('transcript:watch', async (_event, filePath: string, enable: boolean) => {
+ipcMain.handle('transcript:watch', (_event, filePath: string, enable: boolean) => {
   if (enable) {
     transcriptService.watchTranscript(filePath)
     return true
@@ -4098,7 +4257,7 @@ ipcMain.handle('transcript:watch', async (_event, filePath: string, enable: bool
  */
 function parseBeadListOutput(output: string): Bead[] {
   const beads: Bead[] = []
-  const lines = output.split('\n').filter(line => line.trim())
+  const lines = output.split('\n').filter((line) => line.trim())
 
   for (const line of lines) {
     // Match: deploy-xxxx [P0] [type] status - title
@@ -4124,7 +4283,7 @@ function parseBeadListOutput(output: string): Bead[] {
  * Parse bd show output for a single bead
  */
 function parseBeadShowOutput(output: string): Bead | null {
-  const lines = output.split('\n').filter(line => line.trim())
+  const lines = output.split('\n').filter((line) => line.trim())
   if (lines.length === 0) return null
 
   // First line: id: title
@@ -4162,10 +4321,20 @@ function parseBeadShowOutput(output: string): Bead | null {
       description = line.replace('Description:', '').trim()
     } else if (line.startsWith('Blocked by:')) {
       const deps = line.replace('Blocked by:', '').trim()
-      blockedBy.push(...deps.split(',').map(d => d.trim()).filter(Boolean))
+      blockedBy.push(
+        ...deps
+          .split(',')
+          .map((d) => d.trim())
+          .filter(Boolean)
+      )
     } else if (line.startsWith('Blocks:')) {
       const deps = line.replace('Blocks:', '').trim()
-      blocks.push(...deps.split(',').map(d => d.trim()).filter(Boolean))
+      blocks.push(
+        ...deps
+          .split(',')
+          .map((d) => d.trim())
+          .filter(Boolean)
+      )
     }
   }
 
@@ -4221,7 +4390,7 @@ function parseBeadStatsOutput(output: string): BeadStats {
 /**
  * Execute bd command safely
  */
-async function executeBdCommand(args: string[], cwd?: string): Promise<string> {
+function executeBdCommand(args: string[], cwd?: string): string {
   return new Promise((resolve, reject) => {
     const bdProcess = spawn('bd', args, {
       cwd: cwd || HOME,
@@ -4269,16 +4438,15 @@ ipcMain.handle('beads:list', async (_event, filter?: BeadListFilter) => {
 
     // Apply additional filters client-side
     if (filter?.priority && filter.priority !== 'all') {
-      beads = beads.filter(b => b.priority === filter.priority)
+      beads = beads.filter((b) => b.priority === filter.priority)
     }
     if (filter?.type && filter.type !== 'all') {
-      beads = beads.filter(b => b.type === filter.type)
+      beads = beads.filter((b) => b.type === filter.type)
     }
     if (filter?.search) {
       const search = filter.search.toLowerCase()
-      beads = beads.filter(b =>
-        b.title.toLowerCase().includes(search) ||
-        b.id.toLowerCase().includes(search)
+      beads = beads.filter(
+        (b) => b.title.toLowerCase().includes(search) || b.id.toLowerCase().includes(search)
       )
     }
     if (filter?.limit) {
@@ -4412,7 +4580,7 @@ ipcMain.handle('beads:blocked', async () => {
   }
 })
 
-ipcMain.handle('beads:hasBeads', async (_event, projectPath: string) => {
+ipcMain.handle('beads:hasBeads', (_event, projectPath: string) => {
   try {
     // Check if .beads directory exists in project
     const beadsPath = join(projectPath, '.beads')
@@ -4443,7 +4611,10 @@ const defaultPgVectorConfig: PgVectorAutoEmbedConfig = {
 function getPgVectorConfig(): PgVectorAutoEmbedConfig {
   try {
     if (existsSync(PGVECTOR_CONFIG_PATH)) {
-      return { ...defaultPgVectorConfig, ...JSON.parse(readFileSync(PGVECTOR_CONFIG_PATH, 'utf-8')) }
+      return {
+        ...defaultPgVectorConfig,
+        ...JSON.parse(readFileSync(PGVECTOR_CONFIG_PATH, 'utf-8')),
+      }
     }
   } catch (error) {
     console.error('Failed to load pgvector config:', error)
@@ -4567,7 +4738,7 @@ async function searchPgVectors(
     // Generate embedding using Ollama
     const embedding = await generateEmbedding(query)
     if (!embedding || embedding.length === 0) {
-      console.log('[pgvector] No embedding generated, falling back to text search')
+      console.info('[pgvector] No embedding generated, falling back to text search')
       return results
     }
 
@@ -4585,7 +4756,7 @@ async function searchPgVectors(
          JOIN pg_type t ON t.oid = a.atttypid
          WHERE t.typname = 'vector' AND c.relkind = 'r'`
       )
-      tables = tablesResult.map(r => r.table_name)
+      tables = tablesResult.map((r) => r.table_name)
     }
 
     for (const table of tables) {
@@ -4600,9 +4771,12 @@ async function searchPgVectors(
           [table]
         )
 
-        const vectorCol = colsResult.find(c => c.data_type === 'USER-DEFINED')?.column_name || 'embedding'
-        const contentCol = colsResult.find(c => c.column_name === 'content' || c.column_name === 'text')?.column_name || 'content'
-        const idCol = colsResult.find(c => c.column_name === 'id')?.column_name || 'id'
+        const vectorCol =
+          colsResult.find((c) => c.data_type === 'USER-DEFINED')?.column_name || 'embedding'
+        const contentCol =
+          colsResult.find((c) => c.column_name === 'content' || c.column_name === 'text')
+            ?.column_name || 'content'
+        const idCol = colsResult.find((c) => c.column_name === 'id')?.column_name || 'id'
 
         // Cosine similarity search
         const embeddingStr = `[${embedding.join(',')}]`
@@ -4714,21 +4888,24 @@ async function vacuumPgVectorTable(tableName: string): Promise<boolean> {
 }
 
 // IPC Handlers for pgvector
-ipcMain.handle('pgvector:status', async (): Promise<PgVectorStatus> => {
+ipcMain.handle('pgvector:status', (): PgVectorStatus => {
   return checkPgVectorStatus()
 })
 
-ipcMain.handle('pgvector:search', async (
-  _event,
-  query: string,
-  table?: string,
-  limit?: number,
-  threshold?: number
-): Promise<PgVectorSearchResult[]> => {
-  return searchPgVectors(query, table, limit || 10, threshold || 0.5)
-})
+ipcMain.handle(
+  'pgvector:search',
+  (
+    _event,
+    query: string,
+    table?: string,
+    limit?: number,
+    threshold?: number
+  ): Promise<PgVectorSearchResult[]> => {
+    return searchPgVectors(query, table, limit || 10, threshold || 0.5)
+  }
+)
 
-ipcMain.handle('pgvector:embed', async (_event, text: string): Promise<number[] | null> => {
+ipcMain.handle('pgvector:embed', (_event, text: string): number[] | null => {
   return generateEmbedding(text)
 })
 
@@ -4737,82 +4914,73 @@ ipcMain.handle('pgvector:collections', async (): Promise<PgVectorCollection[]> =
   return status.collections
 })
 
-ipcMain.handle('pgvector:createIndex', async (
-  _event,
-  table: string,
-  config: PgVectorIndexConfig
-): Promise<boolean> => {
-  return createPgVectorIndex(table, config)
-})
+ipcMain.handle(
+  'pgvector:createIndex',
+  (_event, table: string, config: PgVectorIndexConfig): Promise<boolean> => {
+    return createPgVectorIndex(table, config)
+  }
+)
 
 ipcMain.handle('pgvector:rebuildIndex', async (_event, table: string): Promise<boolean> => {
   // Get current index config and rebuild
   const status = await checkPgVectorStatus()
-  const collection = status.collections.find(c => c.tableName === table)
+  const collection = status.collections.find((c) => c.tableName === table)
   if (!collection || collection.indexType === 'none') {
     return false
   }
   return createPgVectorIndex(table, { type: collection.indexType })
 })
 
-ipcMain.handle('pgvector:vacuum', async (_event, table: string): Promise<boolean> => {
+ipcMain.handle('pgvector:vacuum', (_event, table: string): boolean => {
   return vacuumPgVectorTable(table)
 })
 
-ipcMain.handle('pgvector:getAutoConfig', async (): Promise<PgVectorAutoEmbedConfig> => {
+ipcMain.handle('pgvector:getAutoConfig', (): PgVectorAutoEmbedConfig => {
   return getPgVectorConfig()
 })
 
-ipcMain.handle('pgvector:setAutoConfig', async (
-  _event,
-  config: PgVectorAutoEmbedConfig
-): Promise<boolean> => {
-  return savePgVectorConfig(config)
-})
+ipcMain.handle(
+  'pgvector:setAutoConfig',
+  (_event, config: PgVectorAutoEmbedConfig): Promise<boolean> => {
+    return savePgVectorConfig(config)
+  }
+)
 
 // ============================================================================
 // PREDICTIVE CONTEXT HANDLERS
 // ============================================================================
 
-ipcMain.handle('context:predict', async (
-  _event,
-  prompt: string,
-  projectPath: string
-): Promise<FilePrediction[]> => {
-  return predictiveContextService.predict(prompt, projectPath)
-})
+ipcMain.handle(
+  'context:predict',
+  (_event, prompt: string, projectPath: string): Promise<FilePrediction[]> => {
+    return predictiveContextService.predict(prompt, projectPath)
+  }
+)
 
-ipcMain.handle('context:patterns', async (
-  _event,
-  projectPath: string
-): Promise<FileAccessPattern[]> => {
+ipcMain.handle('context:patterns', (_event, projectPath: string): Promise<FileAccessPattern[]> => {
   return predictiveContextService.getPatterns(projectPath)
 })
 
-ipcMain.handle('context:stats', async (): Promise<PredictiveContextStats> => {
+ipcMain.handle('context:stats', (): PredictiveContextStats => {
   return predictiveContextService.getStats()
 })
 
-ipcMain.handle('context:recordAccess', async (
-  _event,
-  path: string,
-  keywords: string[]
-): Promise<void> => {
-  predictiveContextService.recordAccess(path, keywords)
-})
+ipcMain.handle(
+  'context:recordAccess',
+  (_event, path: string, keywords: string[]): Promise<void> => {
+    predictiveContextService.recordAccess(path, keywords)
+  }
+)
 
-ipcMain.handle('context:getConfig', async (): Promise<PredictiveContextConfig> => {
+ipcMain.handle('context:getConfig', (): PredictiveContextConfig => {
   return predictiveContextService.getConfig()
 })
 
-ipcMain.handle('context:setConfig', async (
-  _event,
-  config: PredictiveContextConfig
-): Promise<boolean> => {
+ipcMain.handle('context:setConfig', (_event, config: PredictiveContextConfig): Promise<boolean> => {
   return predictiveContextService.setConfig(config)
 })
 
-ipcMain.handle('context:clearCache', async (): Promise<boolean> => {
+ipcMain.handle('context:clearCache', (): boolean => {
   return predictiveContextService.clearCache()
 })
 
@@ -4820,61 +4988,57 @@ ipcMain.handle('context:clearCache', async (): Promise<boolean> => {
 // PLAN HANDLERS (Autonomous execution)
 // ============================================================================
 
-ipcMain.handle('plans:list', async (_event, projectPath?: string): Promise<Plan[]> => {
+ipcMain.handle('plans:list', (_event, projectPath?: string): Plan[] => {
   return planService.list(projectPath)
 })
 
-ipcMain.handle('plans:get', async (_event, id: string): Promise<Plan | null> => {
+ipcMain.handle('plans:get', (_event, id: string): Plan | null => {
   return planService.get(id)
 })
 
-ipcMain.handle('plans:create', async (_event, params: PlanCreateParams): Promise<Plan> => {
+ipcMain.handle('plans:create', (_event, params: PlanCreateParams): Plan => {
   return planService.create(params)
 })
 
-ipcMain.handle('plans:update', async (_event, id: string, updates: Partial<Plan>): Promise<boolean> => {
+ipcMain.handle('plans:update', (_event, id: string, updates: Partial<Plan>): boolean => {
   return planService.update(id, updates)
 })
 
-ipcMain.handle('plans:delete', async (_event, id: string): Promise<boolean> => {
+ipcMain.handle('plans:delete', (_event, id: string): boolean => {
   return planService.delete(id)
 })
 
-ipcMain.handle('plans:execute', async (_event, id: string): Promise<boolean> => {
+ipcMain.handle('plans:execute', (_event, id: string): boolean => {
   return planService.execute(id)
 })
 
-ipcMain.handle('plans:pause', async (_event, id: string): Promise<boolean> => {
+ipcMain.handle('plans:pause', (_event, id: string): boolean => {
   return planService.pause(id)
 })
 
-ipcMain.handle('plans:resume', async (_event, id: string): Promise<boolean> => {
+ipcMain.handle('plans:resume', (_event, id: string): boolean => {
   return planService.resume(id)
 })
 
-ipcMain.handle('plans:cancel', async (_event, id: string): Promise<boolean> => {
+ipcMain.handle('plans:cancel', (_event, id: string): boolean => {
   return planService.cancel(id)
 })
 
-ipcMain.handle('plans:stepComplete', async (
-  _event,
-  planId: string,
-  stepId: string,
-  output?: string
-): Promise<boolean> => {
-  return planService.stepComplete(planId, stepId, output)
-})
+ipcMain.handle(
+  'plans:stepComplete',
+  (_event, planId: string, stepId: string, output?: string): Promise<boolean> => {
+    return planService.stepComplete(planId, stepId, output)
+  }
+)
 
-ipcMain.handle('plans:stepFail', async (
-  _event,
-  planId: string,
-  stepId: string,
-  error: string
-): Promise<boolean> => {
-  return planService.stepFail(planId, stepId, error)
-})
+ipcMain.handle(
+  'plans:stepFail',
+  (_event, planId: string, stepId: string, error: string): Promise<boolean> => {
+    return planService.stepFail(planId, stepId, error)
+  }
+)
 
-ipcMain.handle('plans:stats', async (): Promise<PlanExecutionStats> => {
+ipcMain.handle('plans:stats', (): PlanExecutionStats => {
   return planService.getStats()
 })
 
@@ -4882,58 +5046,175 @@ ipcMain.handle('plans:stats', async (): Promise<PlanExecutionStats> => {
 // CONVERSATION BRANCHING - Git-like branching for conversations
 // ============================================================================
 
-ipcMain.handle('branches:list', async (_event, sessionId: string): Promise<ConversationBranch[]> => {
+ipcMain.handle('branches:list', (_event, sessionId: string): ConversationBranch[] => {
   return branchService.list(sessionId)
 })
 
-ipcMain.handle('branches:get', async (_event, branchId: string): Promise<ConversationBranch | null> => {
+ipcMain.handle('branches:get', (_event, branchId: string): ConversationBranch | null => {
   return branchService.get(branchId)
 })
 
-ipcMain.handle('branches:getTree', async (_event, sessionId: string): Promise<BranchTree | null> => {
+ipcMain.handle('branches:getTree', (_event, sessionId: string): BranchTree | null => {
   return branchService.getTree(sessionId)
 })
 
-ipcMain.handle('branches:create', async (_event, params: BranchCreateParams): Promise<ConversationBranch | null> => {
-  return branchService.create(params)
-})
+ipcMain.handle(
+  'branches:create',
+  (_event, params: BranchCreateParams): ConversationBranch | null => {
+    return branchService.create(params)
+  }
+)
 
-ipcMain.handle('branches:delete', async (_event, branchId: string): Promise<boolean> => {
+ipcMain.handle('branches:delete', (_event, branchId: string): boolean => {
   return branchService.delete(branchId)
 })
 
-ipcMain.handle('branches:rename', async (_event, branchId: string, name: string): Promise<boolean> => {
+ipcMain.handle('branches:rename', (_event, branchId: string, name: string): boolean => {
   return branchService.rename(branchId, name)
 })
 
-ipcMain.handle('branches:switch', async (_event, branchId: string): Promise<boolean> => {
+ipcMain.handle('branches:switch', (_event, branchId: string): boolean => {
   return branchService.switch(branchId)
 })
 
-ipcMain.handle('branches:addMessage', async (
-  _event, branchId: string, message: ConversationMessage
-): Promise<boolean> => {
-  return branchService.addMessage(branchId, message)
-})
+ipcMain.handle(
+  'branches:addMessage',
+  (_event, branchId: string, message: ConversationMessage): Promise<boolean> => {
+    return branchService.addMessage(branchId, message)
+  }
+)
 
-ipcMain.handle('branches:diff', async (
-  _event, branchA: string, branchB: string
-): Promise<BranchDiff | null> => {
-  return branchService.diff(branchA, branchB)
-})
+ipcMain.handle(
+  'branches:diff',
+  (_event, branchA: string, branchB: string): Promise<BranchDiff | null> => {
+    return branchService.diff(branchA, branchB)
+  }
+)
 
-ipcMain.handle('branches:merge', async (_event, params: BranchMergeParams): Promise<boolean> => {
+ipcMain.handle('branches:merge', (_event, params: BranchMergeParams): boolean => {
   return branchService.merge(params)
 })
 
-ipcMain.handle('branches:abandon', async (_event, branchId: string): Promise<boolean> => {
+ipcMain.handle('branches:abandon', (_event, branchId: string): boolean => {
   return branchService.abandon(branchId)
 })
 
-ipcMain.handle('branches:stats', async (_event, sessionId?: string): Promise<BranchStats> => {
+ipcMain.handle('branches:stats', (_event, sessionId?: string): BranchStats => {
   return branchService.stats(sessionId)
 })
 
-ipcMain.handle('branches:getActiveBranch', async (_event, sessionId: string): Promise<string | null> => {
+ipcMain.handle('branches:getActiveBranch', (_event, sessionId: string): string | null => {
   return branchService.getActiveBranch(sessionId)
 })
+
+// ============================================================================
+// AUTO-UPDATE - electron-updater handlers
+// ============================================================================
+
+// Track update state
+const updateState = {
+  checking: false,
+  downloading: false,
+  downloadProgress: 0,
+  updateAvailable: false,
+  updateDownloaded: false,
+  latestVersion: undefined as string | undefined,
+  error: undefined as string | undefined,
+}
+
+ipcMain.handle(
+  'update:check',
+  async (): Promise<{
+    updateAvailable: boolean
+    updateInfo?: { version: string; releaseDate?: string; releaseNotes?: string | null }
+    error?: string
+  }> => {
+    try {
+      updateState.checking = true
+      updateState.error = undefined
+      const result = await autoUpdater.checkForUpdates()
+
+      if (result?.updateInfo) {
+        updateState.updateAvailable = true
+        updateState.latestVersion = result.updateInfo.version
+        return {
+          updateAvailable: true,
+          updateInfo: {
+            version: result.updateInfo.version,
+            releaseDate: result.updateInfo.releaseDate,
+            releaseNotes:
+              typeof result.updateInfo.releaseNotes === 'string'
+                ? result.updateInfo.releaseNotes
+                : null,
+          },
+        }
+      }
+
+      return { updateAvailable: false }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Update check failed'
+      updateState.error = message
+      console.error('[AutoUpdate] Check failed:', message)
+      return { updateAvailable: false, error: message }
+    } finally {
+      updateState.checking = false
+    }
+  }
+)
+
+ipcMain.handle('update:download', async (): Promise<boolean> => {
+  try {
+    updateState.downloading = true
+    updateState.downloadProgress = 0
+    updateState.error = undefined
+
+    // Set up progress listener
+    autoUpdater.on('download-progress', (progress) => {
+      updateState.downloadProgress = progress.percent
+      // Notify renderer of progress
+      BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send('update:progress', {
+          percent: progress.percent,
+          bytesPerSecond: progress.bytesPerSecond,
+          transferred: progress.transferred,
+          total: progress.total,
+        })
+      })
+    })
+
+    await autoUpdater.downloadUpdate()
+    updateState.updateDownloaded = true
+    return true
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Download failed'
+    updateState.error = message
+    console.error('[AutoUpdate] Download failed:', message)
+    return false
+  } finally {
+    updateState.downloading = false
+  }
+})
+
+ipcMain.handle('update:install', (): void => {
+  // Quit and install the update
+  autoUpdater.quitAndInstall(false, true)
+})
+
+ipcMain.handle(
+  'update:getStatus',
+  (): {
+    checking: boolean
+    downloading: boolean
+    downloadProgress?: number
+    updateAvailable: boolean
+    updateDownloaded: boolean
+    currentVersion: string
+    latestVersion?: string
+    error?: string
+  } => {
+    return {
+      ...updateState,
+      currentVersion: app.getVersion(),
+    }
+  }
+)

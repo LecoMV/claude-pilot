@@ -20,7 +20,6 @@ import {
   Shield,
   Plug,
   Cpu,
-  Layers,
   Shrink,
 } from 'lucide-react'
 import { useSessionsStore, selectFilteredSessions } from '../../stores/sessions'
@@ -53,6 +52,7 @@ export function SessionManager() {
 
   const filteredSessions = useMemo(
     () => selectFilteredSessions(useSessionsStore.getState()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deps trigger recomputation on filter changes
     [sessions, searchQuery, filter, sortBy]
   )
 
@@ -69,6 +69,7 @@ export function SessionManager() {
     return () => {
       unsubscribe()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- store methods are stable
   }, [])
 
   // Refresh active sessions periodically when watching
@@ -80,6 +81,7 @@ export function SessionManager() {
     }, 30000)
 
     return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchActiveSessions is stable
   }, [isWatching])
 
   const formatDate = (timestamp: number) => {
@@ -162,7 +164,9 @@ export function SessionManager() {
             </select>
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'lastActivity' | 'startTime' | 'tokens' | 'messages')}
+              onChange={(e) =>
+                setSortBy(e.target.value as 'lastActivity' | 'startTime' | 'tokens' | 'messages')
+              }
               className="flex-1 px-3 py-1.5 bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent-purple/50"
             >
               <option value="lastActivity">Last Activity</option>
@@ -178,7 +182,9 @@ export function SessionManager() {
           <div className="px-4 py-2 bg-accent-green/10 border-b border-accent-green/30">
             <div className="flex items-center gap-2 text-accent-green text-sm">
               <Activity className="w-4 h-4" />
-              <span>{activeSessions.length} active session{activeSessions.length !== 1 ? 's' : ''}</span>
+              <span>
+                {activeSessions.length} active session{activeSessions.length !== 1 ? 's' : ''}
+              </span>
             </div>
           </div>
         )}
@@ -210,7 +216,13 @@ export function SessionManager() {
           <div className="flex justify-between">
             <span>{filteredSessions.length} sessions</span>
             <span>
-              {formatTokens(filteredSessions.reduce((sum, s) => sum + s.stats.inputTokens + s.stats.outputTokens, 0))} total tokens
+              {formatTokens(
+                filteredSessions.reduce(
+                  (sum, s) => sum + s.stats.inputTokens + s.stats.outputTokens,
+                  0
+                )
+              )}{' '}
+              total tokens
             </span>
           </div>
         </div>
@@ -231,7 +243,9 @@ export function SessionManager() {
             <div className="text-center">
               <Eye className="w-16 h-16 mx-auto mb-4 opacity-30" />
               <p className="text-lg">Select a session to view details</p>
-              <p className="text-sm mt-2">Sessions from external Claude Code instances appear here</p>
+              <p className="text-sm mt-2">
+                Sessions from external Claude Code instances appear here
+              </p>
             </div>
           </div>
         )}
@@ -304,15 +318,25 @@ interface SessionCardProps {
   formatCost: (c: number | undefined) => string
 }
 
-const SessionCard = memo(function SessionCard({ session, isSelected, onSelect, formatDate, formatTokens, formatCost }: SessionCardProps) {
+const SessionCard = memo(function SessionCard({
+  session,
+  isSelected,
+  onSelect,
+  formatDate,
+  formatTokens,
+  formatCost,
+}: SessionCardProps) {
   const processInfo = session.processInfo
 
   // Get profile badge color
   const getProfileColor = (profile: string) => {
     switch (profile) {
-      case 'engineering': return 'bg-accent-blue/20 text-accent-blue'
-      case 'security': return 'bg-accent-red/20 text-accent-red'
-      default: return 'bg-surface text-text-muted'
+      case 'engineering':
+        return 'bg-accent-blue/20 text-accent-blue'
+      case 'security':
+        return 'bg-accent-red/20 text-accent-red'
+      default:
+        return 'bg-surface text-text-muted'
     }
   }
 
@@ -372,9 +396,7 @@ const SessionCard = memo(function SessionCard({ session, isSelected, onSelect, f
       {processInfo && processInfo.activeMcpServers.length > 0 && (
         <div className="flex items-center gap-1 text-xs text-text-muted mb-2">
           <Plug className="w-3 h-3 flex-shrink-0" />
-          <span className="truncate">
-            {processInfo.activeMcpServers.join(', ')}
-          </span>
+          <span className="truncate">{processInfo.activeMcpServers.join(', ')}</span>
         </div>
       )}
 
@@ -429,7 +451,13 @@ interface SessionDetailProps {
   formatCost: (c: number | undefined) => string
 }
 
-function SessionDetail({ session, messages, formatDate, formatTokens, formatCost }: SessionDetailProps) {
+function SessionDetail({
+  session,
+  messages,
+  formatDate,
+  formatTokens,
+  formatCost,
+}: SessionDetailProps) {
   const [activeTab, setActiveTab] = useState<SessionTab>('messages')
   const [showCompaction, setShowCompaction] = useState(false)
 
@@ -442,10 +470,7 @@ function SessionDetail({ session, messages, formatDate, formatTokens, formatCost
     <>
       {/* Compaction Modal */}
       {showCompaction && (
-        <SmartCompactionPanel
-          session={session}
-          onClose={() => setShowCompaction(false)}
-        />
+        <SmartCompactionPanel session={session} onClose={() => setShowCompaction(false)} />
       )}
 
       {/* Header */}
@@ -532,13 +557,15 @@ function SessionDetail({ session, messages, formatDate, formatTokens, formatCost
             </span>
           )}
           {session.stats.serviceTier && (
-            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-              session.stats.serviceTier === 'standard'
-                ? 'bg-accent-blue/20 text-accent-blue'
-                : session.stats.serviceTier === 'scale'
-                ? 'bg-accent-purple/20 text-accent-purple'
-                : 'bg-accent-green/20 text-accent-green'
-            }`}>
+            <span
+              className={`px-2 py-0.5 rounded text-xs font-medium ${
+                session.stats.serviceTier === 'standard'
+                  ? 'bg-accent-blue/20 text-accent-blue'
+                  : session.stats.serviceTier === 'scale'
+                    ? 'bg-accent-purple/20 text-accent-purple'
+                    : 'bg-accent-green/20 text-accent-green'
+              }`}
+            >
               {session.stats.serviceTier.toUpperCase()}
             </span>
           )}
@@ -548,13 +575,15 @@ function SessionDetail({ session, messages, formatDate, formatTokens, formatCost
         {session.processInfo && (
           <div className="flex items-center gap-4 mt-2 text-xs flex-wrap">
             {/* Profile */}
-            <span className={`px-2 py-0.5 rounded font-medium ${
-              session.processInfo.profile === 'engineering'
-                ? 'bg-accent-blue/20 text-accent-blue'
-                : session.processInfo.profile === 'security'
-                ? 'bg-accent-red/20 text-accent-red'
-                : 'bg-surface text-text-muted'
-            }`}>
+            <span
+              className={`px-2 py-0.5 rounded font-medium ${
+                session.processInfo.profile === 'engineering'
+                  ? 'bg-accent-blue/20 text-accent-blue'
+                  : session.processInfo.profile === 'security'
+                    ? 'bg-accent-red/20 text-accent-red'
+                    : 'bg-surface text-text-muted'
+              }`}
+            >
               <User className="w-3 h-3 inline mr-1" />
               {session.processInfo.profile}
             </span>
@@ -656,9 +685,7 @@ function SessionDetail({ session, messages, formatDate, formatTokens, formatCost
           </div>
         )}
 
-        {activeTab === 'branches' && (
-          <BranchPanel session={session} />
-        )}
+        {activeTab === 'branches' && <BranchPanel session={session} />}
       </div>
     </>
   )
@@ -678,11 +705,15 @@ function StatCard({
 }) {
   return (
     <div className={`p-3 rounded-lg ${highlight ? 'bg-accent-yellow/10' : 'bg-surface'}`}>
-      <div className={`flex items-center gap-2 mb-1 ${highlight ? 'text-accent-yellow' : 'text-text-muted'}`}>
+      <div
+        className={`flex items-center gap-2 mb-1 ${highlight ? 'text-accent-yellow' : 'text-text-muted'}`}
+      >
         {icon}
         <span className="text-xs">{label}</span>
       </div>
-      <p className={`text-lg font-semibold ${highlight ? 'text-accent-yellow' : 'text-text-primary'}`}>
+      <p
+        className={`text-lg font-semibold ${highlight ? 'text-accent-yellow' : 'text-text-primary'}`}
+      >
         {value}
       </p>
     </div>
@@ -714,7 +745,8 @@ function getDisplayContent(message: SessionMessage): string {
       .map((block) => {
         if (typeof block === 'string') return block
         if (block?.type === 'text' && block?.text) return block.text
-        if (block?.type === 'thinking' && block?.thinking) return `[Thinking: ${block.thinking.slice(0, 100)}...]`
+        if (block?.type === 'thinking' && block?.thinking)
+          return `[Thinking: ${block.thinking.slice(0, 100)}...]`
         return ''
       })
       .filter(Boolean)

@@ -1,11 +1,59 @@
 import { app, BrowserWindow, shell, ipcMain, session } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { autoUpdater } from 'electron-updater'
+import * as Sentry from '@sentry/electron/main'
 import { registerIpcHandlers, logStreamManager } from './ipc/handlers'
 import { terminalManager, registerTerminalHandlers } from './services/terminal'
 import { credentialService } from './services/credentials'
 import { auditService } from './services/audit'
 import { setupGlobalErrorHandlers, configureErrorHandler, handleError } from './utils/error-handler'
+
+// Initialize Sentry for crash reporting (deploy-b4go)
+// DSN should be set via environment variable SENTRY_DSN
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    release: app.getVersion(),
+    environment: is.dev ? 'development' : 'production',
+    // Only send errors, not performance data
+    tracesSampleRate: 0,
+    // Don't send PII
+    sendDefaultPii: false,
+    beforeSend(event) {
+      // Scrub sensitive data from error reports
+      if (event.request?.headers) {
+        delete event.request.headers['authorization']
+        delete event.request.headers['cookie']
+      }
+      return event
+    },
+  })
+}
+
+// Configure auto-updater (deploy-9xfr)
+autoUpdater.autoDownload = false // Let user decide when to download
+autoUpdater.autoInstallOnAppQuit = true
+
+autoUpdater.on('update-available', (info) => {
+  // Notify renderer about available update
+  mainWindow?.webContents.send('update:available', {
+    version: info.version,
+    releaseDate: info.releaseDate,
+    releaseNotes: info.releaseNotes,
+  })
+})
+
+autoUpdater.on('update-downloaded', (info) => {
+  mainWindow?.webContents.send('update:downloaded', {
+    version: info.version,
+  })
+})
+
+autoUpdater.on('error', (error) => {
+  console.error('[AutoUpdater] Error:', error.message)
+  Sentry.captureException(error, { tags: { component: 'auto-updater' } })
+})
 
 /**
  * Security configuration for the application
@@ -132,10 +180,10 @@ function createWindow(): void {
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
-      sandbox: false,
+      sandbox: true, // SECURITY: Enabled per Gemini audit deploy-g1kj
       contextIsolation: true,
       nodeIntegration: false,
-    }
+    },
   })
 
   mainWindow.on('ready-to-show', () => {
@@ -171,9 +219,9 @@ app.whenReady().then(() => {
 
   // Migrate legacy credentials from environment variables
   credentialService.migrateFromEnv({
-    'CLAUDE_PG_PASSWORD': 'postgresql.password',
-    'MEMGRAPH_PASSWORD': 'memgraph.password',
-    'ANTHROPIC_API_KEY': 'anthropic.apiKey',
+    CLAUDE_PG_PASSWORD: 'postgresql.password',
+    MEMGRAPH_PASSWORD: 'memgraph.password',
+    ANTHROPIC_API_KEY: 'anthropic.apiKey',
   })
 
   // Initialize OCSF audit logging service
@@ -219,6 +267,9 @@ configureErrorHandler({
 setupGlobalErrorHandlers()
 
 // Listen for UI errors from renderer
-ipcMain.on('error:ui', (_event, data: { message: string; stack?: string; componentStack?: string }) => {
-  handleError(new Error(data.message), { component: 'renderer', operation: 'ui:render' })
-})
+ipcMain.on(
+  'error:ui',
+  (_event, data: { message: string; stack?: string; componentStack?: string }) => {
+    handleError(new Error(data.message), { component: 'renderer', operation: 'ui:render' })
+  }
+)

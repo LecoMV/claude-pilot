@@ -9,7 +9,6 @@ import { BrowserWindow } from 'electron'
 import type {
   Plan,
   PlanStep,
-  PlanStatus,
   StepStatus,
   PlanCreateParams,
   PlanExecutionStats,
@@ -59,7 +58,7 @@ class PlanService {
 
   private loadPlans(): void {
     try {
-      const files = readdirSync(PLANS_DIR).filter(f => f.endsWith('.json'))
+      const files = readdirSync(PLANS_DIR).filter((f) => f.endsWith('.json'))
       for (const file of files) {
         const plan = JSON.parse(readFileSync(join(PLANS_DIR, file), 'utf-8')) as Plan
         this.plans.set(plan.id, plan)
@@ -122,7 +121,7 @@ class PlanService {
   list(projectPath?: string): Plan[] {
     const plans = Array.from(this.plans.values())
     if (projectPath) {
-      return plans.filter(p => p.projectPath === projectPath)
+      return plans.filter((p) => p.projectPath === projectPath)
     }
     return plans.sort((a, b) => b.updatedAt - a.updatedAt)
   }
@@ -172,7 +171,7 @@ class PlanService {
     if (!plan) return false
 
     // Don't allow updating certain fields
-    const { id: _, createdAt, ...safeUpdates } = updates
+    const { id: _id, createdAt: _createdAt, ...safeUpdates } = updates
 
     Object.assign(plan, safeUpdates, { updatedAt: Date.now() })
     this.savePlan(plan)
@@ -202,7 +201,7 @@ class PlanService {
   /**
    * Start executing a plan
    */
-  async execute(id: string): Promise<boolean> {
+  execute(id: string): boolean {
     const plan = this.plans.get(id)
     if (!plan) return false
     if (plan.status === 'executing') return false
@@ -210,7 +209,7 @@ class PlanService {
     plan.status = 'executing'
     plan.startedAt = Date.now()
     plan.updatedAt = Date.now()
-    plan.currentStepIndex = plan.steps.findIndex(s => s.status === 'pending')
+    plan.currentStepIndex = plan.steps.findIndex((s) => s.status === 'pending')
 
     if (plan.currentStepIndex === -1) {
       // All steps already completed
@@ -231,13 +230,15 @@ class PlanService {
   /**
    * Execute the next pending step in a plan
    */
-  private async executeNextStep(plan: Plan): Promise<void> {
+  private executeNextStep(plan: Plan): void {
     if (plan.status !== 'executing') return
 
     const step = plan.steps[plan.currentStepIndex]
     if (!step || step.status !== 'pending') {
       // Move to next pending step
-      const nextIndex = plan.steps.findIndex((s, i) => i > plan.currentStepIndex && s.status === 'pending')
+      const nextIndex = plan.steps.findIndex(
+        (s, i) => i > plan.currentStepIndex && s.status === 'pending'
+      )
       if (nextIndex === -1) {
         // All done
         this.completePlan(plan)
@@ -252,8 +253,8 @@ class PlanService {
 
     // Check dependencies
     if (step.dependencies && step.dependencies.length > 0) {
-      const allDepsMet = step.dependencies.every(depId => {
-        const dep = plan.steps.find(s => s.id === depId)
+      const allDepsMet = step.dependencies.every((depId) => {
+        const dep = plan.steps.find((s) => s.id === depId)
         return dep && dep.status === 'completed'
       })
       if (!allDepsMet) {
@@ -261,8 +262,8 @@ class PlanService {
         const nextReady = plan.steps.findIndex((s, i) => {
           if (i <= plan.currentStepIndex || s.status !== 'pending') return false
           if (!s.dependencies || s.dependencies.length === 0) return true
-          return s.dependencies.every(depId => {
-            const dep = plan.steps.find(d => d.id === depId)
+          return s.dependencies.every((depId) => {
+            const dep = plan.steps.find((d) => d.id === depId)
             return dep && dep.status === 'completed'
           })
         })
@@ -351,7 +352,7 @@ class PlanService {
     const plan = this.plans.get(planId)
     if (!plan) return false
 
-    const step = plan.steps.find(s => s.id === stepId)
+    const step = plan.steps.find((s) => s.id === stepId)
     if (!step) return false
 
     step.status = 'completed'
@@ -385,7 +386,7 @@ class PlanService {
     const plan = this.plans.get(planId)
     if (!plan) return false
 
-    const step = plan.steps.find(s => s.id === stepId)
+    const step = plan.steps.find((s) => s.id === stepId)
     if (!step) return false
 
     step.status = 'failed'
@@ -412,7 +413,8 @@ class PlanService {
     plan.updatedAt = Date.now()
 
     this.stats.completedPlans++
-    this.stats.successRate = this.stats.completedPlans / (this.stats.completedPlans + this.stats.failedPlans)
+    this.stats.successRate =
+      this.stats.completedPlans / (this.stats.completedPlans + this.stats.failedPlans)
     // Update average duration
     const prevTotal = this.stats.avgDuration * (this.stats.completedPlans - 1)
     this.stats.avgDuration = (prevTotal + plan.totalDuration) / this.stats.completedPlans
@@ -433,7 +435,8 @@ class PlanService {
     plan.updatedAt = Date.now()
 
     this.stats.failedPlans++
-    this.stats.successRate = this.stats.completedPlans / (this.stats.completedPlans + this.stats.failedPlans)
+    this.stats.successRate =
+      this.stats.completedPlans / (this.stats.completedPlans + this.stats.failedPlans)
     this.saveStats()
 
     this.savePlan(plan)
