@@ -4,6 +4,7 @@ import { memgraphService } from '../services/memgraph'
 import { postgresService } from '../services/postgresql'
 import { credentialService } from '../services/credentials'
 import { auditService } from '../services/audit'
+import { wrapIPCHandler, createIPCContext } from '../utils/ipc-error-handler'
 import { watchdogService } from '../services/watchdog'
 import { predictiveContextService } from '../services/predictive-context'
 import { planService } from '../services/plans'
@@ -344,34 +345,35 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('mcp:toggle', async (_event, name: string, enabled: boolean): Promise<boolean> => {
-    try {
-      // Try mcp.json first (primary MCP config location)
-      const mcpJsonPath = join(CLAUDE_DIR, 'mcp.json')
-      if (existsSync(mcpJsonPath)) {
-        const mcpConfig = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'))
-        if (mcpConfig.mcpServers?.[name]) {
-          mcpConfig.mcpServers[name].disabled = !enabled
-          writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2))
-          return true
+    return wrapIPCHandler(
+      async () => {
+        // Try mcp.json first (primary MCP config location)
+        const mcpJsonPath = join(CLAUDE_DIR, 'mcp.json')
+        if (existsSync(mcpJsonPath)) {
+          const mcpConfig = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'))
+          if (mcpConfig.mcpServers?.[name]) {
+            mcpConfig.mcpServers[name].disabled = !enabled
+            writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2))
+            return true
+          }
         }
-      }
 
-      // Fallback to settings.json
-      const settingsPath = join(CLAUDE_DIR, 'settings.json')
-      if (existsSync(settingsPath)) {
-        const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-        if (settings.mcpServers?.[name]) {
-          settings.mcpServers[name].disabled = !enabled
-          writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
-          return true
+        // Fallback to settings.json
+        const settingsPath = join(CLAUDE_DIR, 'settings.json')
+        if (existsSync(settingsPath)) {
+          const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+          if (settings.mcpServers?.[name]) {
+            settings.mcpServers[name].disabled = !enabled
+            writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+            return true
+          }
         }
-      }
 
-      return false
-    } catch (error) {
-      console.error('Failed to toggle MCP server:', error)
-      return false
-    }
+        return false
+      },
+      createIPCContext('mcp:toggle', 'toggle MCP server', { name, enabled }),
+      false
+    )
   })
 
   ipcMain.handle('mcp:getServer', async (_event, name: string): Promise<MCPServer | null> => {
@@ -385,18 +387,18 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('mcp:getConfig', async (): Promise<string> => {
-    const settingsPath = join(CLAUDE_DIR, 'settings.json')
-    try {
-      if (existsSync(settingsPath)) {
-        const content = readFileSync(settingsPath, 'utf-8')
-        return content
-      }
-      // Return default config structure if file doesn't exist
-      return JSON.stringify({ mcpServers: {} }, null, 2)
-    } catch (error) {
-      console.error('Failed to read MCP config:', error)
-      return JSON.stringify({ mcpServers: {} }, null, 2)
-    }
+    return wrapIPCHandler(
+      async () => {
+        const settingsPath = join(CLAUDE_DIR, 'settings.json')
+        if (existsSync(settingsPath)) {
+          return readFileSync(settingsPath, 'utf-8')
+        }
+        // Return default config structure if file doesn't exist
+        return JSON.stringify({ mcpServers: {} }, null, 2)
+      },
+      createIPCContext('mcp:getConfig', 'read MCP configuration'),
+      JSON.stringify({ mcpServers: {} }, null, 2)
+    )
   })
 
   ipcMain.handle('mcp:saveConfig', async (_event, content: string): Promise<boolean> => {
@@ -406,20 +408,21 @@ export function registerIpcHandlers(): void {
       [content],
       ['content']
     )
-    const settingsPath = join(CLAUDE_DIR, 'settings.json')
-    try {
-      // Validate JSON before saving
-      JSON.parse(validated.content)
-      // Ensure .claude directory exists
-      if (!existsSync(CLAUDE_DIR)) {
-        mkdirSync(CLAUDE_DIR, { recursive: true })
-      }
-      writeFileSync(settingsPath, validated.content, 'utf-8')
-      return true
-    } catch (error) {
-      console.error('Failed to save MCP config:', error)
-      return false
-    }
+    return wrapIPCHandler(
+      async () => {
+        const settingsPath = join(CLAUDE_DIR, 'settings.json')
+        // Validate JSON before saving
+        JSON.parse(validated.content)
+        // Ensure .claude directory exists
+        if (!existsSync(CLAUDE_DIR)) {
+          mkdirSync(CLAUDE_DIR, { recursive: true })
+        }
+        writeFileSync(settingsPath, validated.content, 'utf-8')
+        return true
+      },
+      createIPCContext('mcp:saveConfig', 'save MCP configuration'),
+      false
+    )
   })
 
   // Memory handlers
@@ -730,48 +733,48 @@ export function registerIpcHandlers(): void {
   })
 
   // Credential handlers - secure credential storage using OS keychain
+  // Uses wrapIPCHandler for consistent error logging and audit trail
   ipcMain.handle('credentials:store', async (_event, key: string, value: string): Promise<boolean> => {
-    try {
-      return credentialService.store(key, value)
-    } catch (error) {
-      console.error('Failed to store credential:', error)
-      return false
-    }
+    return wrapIPCHandler(
+      async () => credentialService.store(key, value),
+      createIPCContext('credentials:store', 'store credential', { key }),
+      false
+    )
   })
 
   ipcMain.handle('credentials:retrieve', async (_event, key: string): Promise<string | null> => {
-    try {
-      return credentialService.retrieve(key)
-    } catch (error) {
-      console.error('Failed to retrieve credential:', error)
-      return null
-    }
+    return wrapIPCHandler(
+      async () => credentialService.retrieve(key),
+      createIPCContext('credentials:retrieve', 'retrieve credential', { key }),
+      null
+    )
   })
 
   ipcMain.handle('credentials:delete', async (_event, key: string): Promise<boolean> => {
-    try {
-      credentialService.delete(key)
-      return true
-    } catch (error) {
-      console.error('Failed to delete credential:', error)
-      return false
-    }
+    return wrapIPCHandler(
+      async () => {
+        credentialService.delete(key)
+        return true
+      },
+      createIPCContext('credentials:delete', 'delete credential', { key }),
+      false
+    )
   })
 
   ipcMain.handle('credentials:has', async (_event, key: string): Promise<boolean> => {
-    try {
-      return credentialService.has(key)
-    } catch {
-      return false
-    }
+    return wrapIPCHandler(
+      async () => credentialService.has(key),
+      createIPCContext('credentials:has', 'check credential exists', { key }),
+      false
+    )
   })
 
   ipcMain.handle('credentials:list', async (): Promise<string[]> => {
-    try {
-      return credentialService.listKeys()
-    } catch {
-      return []
-    }
+    return wrapIPCHandler(
+      async () => credentialService.listKeys(),
+      createIPCContext('credentials:list', 'list credential keys'),
+      []
+    )
   })
 
   ipcMain.handle('credentials:isEncryptionAvailable', async (): Promise<boolean> => {
