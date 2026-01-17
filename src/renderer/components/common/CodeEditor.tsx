@@ -1,6 +1,28 @@
 import { useRef } from 'react'
-import Editor, { OnMount, OnChange } from '@monaco-editor/react'
+import Editor, { OnMount, OnChange, loader } from '@monaco-editor/react'
+import * as monaco from 'monaco-editor'
 import type { editor } from 'monaco-editor'
+
+// Import Monaco workers for language features
+import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
+import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
+import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
+
+// Configure Monaco environment for local workers (fixes CSP issues with CDN)
+self.MonacoEnvironment = {
+  getWorker(_, label) {
+    if (label === 'json') {
+      return new jsonWorker()
+    }
+    if (label === 'typescript' || label === 'javascript') {
+      return new tsWorker()
+    }
+    return new editorWorker()
+  },
+}
+
+// Configure Monaco to use local bundle instead of CDN
+loader.config({ monaco })
 
 export interface CodeEditorProps {
   value: string
