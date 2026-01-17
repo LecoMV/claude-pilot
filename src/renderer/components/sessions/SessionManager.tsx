@@ -1,4 +1,5 @@
 import { useEffect, useMemo, memo, useState } from 'react'
+import { Virtuoso } from 'react-virtuoso'
 import {
   Activity,
   Clock,
@@ -189,25 +190,29 @@ export function SessionManager() {
           </div>
         )}
 
-        {/* Session List */}
-        <div className="flex-1 overflow-auto">
+        {/* Session List - Virtualized for performance */}
+        <div className="flex-1">
           {filteredSessions.length === 0 ? (
             <div className="p-8 text-center text-text-muted">
               <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
               <p>No sessions found</p>
             </div>
           ) : (
-            filteredSessions.map((session) => (
-              <SessionCard
-                key={session.id}
-                session={session}
-                isSelected={selectedSession?.id === session.id}
-                onSelect={() => selectSession(session.id)}
-                formatDate={formatDate}
-                formatTokens={formatTokens}
-                formatCost={formatCost}
-              />
-            ))
+            <Virtuoso
+              data={filteredSessions}
+              itemContent={(index, session) => (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  isSelected={selectedSession?.id === session.id}
+                  onSelect={() => selectSession(session.id)}
+                  formatDate={formatDate}
+                  formatTokens={formatTokens}
+                  formatCost={formatCost}
+                />
+              )}
+              overscan={100}
+            />
           )}
         </div>
 
@@ -671,15 +676,23 @@ function SessionDetail({
       {/* Tab Content */}
       <div className="flex-1 overflow-auto">
         {activeTab === 'messages' && (
-          <div className="p-4">
-            <h3 className="text-sm font-medium text-text-muted mb-3">Recent Messages</h3>
+          <div className="h-full flex flex-col">
+            <div className="p-4 pb-0">
+              <h3 className="text-sm font-medium text-text-muted mb-3">Recent Messages</h3>
+            </div>
             {messages.length === 0 ? (
               <p className="text-text-muted text-center py-8">No messages to display</p>
             ) : (
-              <div className="space-y-3">
-                {messages.map((msg) => (
-                  <MessageCard key={msg.uuid} message={msg} formatDate={formatDate} />
-                ))}
+              <div className="flex-1 px-4 pb-4">
+                <Virtuoso
+                  data={messages}
+                  itemContent={(index, msg) => (
+                    <div className="pb-3">
+                      <MessageCard key={msg.uuid} message={msg} formatDate={formatDate} />
+                    </div>
+                  )}
+                  overscan={50}
+                />
               </div>
             )}
           </div>
