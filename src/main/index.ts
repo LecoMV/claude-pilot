@@ -1,7 +1,8 @@
 import { app, BrowserWindow, shell, ipcMain, session } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { autoUpdater } from 'electron-updater'
+import electronUpdater from 'electron-updater'
+const { autoUpdater } = electronUpdater
 import * as Sentry from '@sentry/electron/main'
 import { registerIpcHandlers, logStreamManager } from './ipc/handlers'
 import { terminalManager, registerTerminalHandlers } from './services/terminal'
@@ -68,9 +69,9 @@ const SECURITY_CONFIG = {
     development: [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: blob: https:",
-      "font-src 'self' data:",
+      "font-src 'self' data: https://fonts.gstatic.com",
       "connect-src 'self' ws://localhost:* http://localhost:*",
       "worker-src 'self' blob:",
       "child-src 'self' blob:",
@@ -79,9 +80,9 @@ const SECURITY_CONFIG = {
     production: [
       "default-src 'self'",
       "script-src 'self'",
-      "style-src 'self' 'unsafe-inline'", // unsafe-inline needed for Tailwind
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: blob:",
-      "font-src 'self' data:",
+      "font-src 'self' data: https://fonts.gstatic.com",
       "connect-src 'self'",
       "worker-src 'self' blob:",
       "child-src 'self' blob:",
@@ -179,7 +180,7 @@ function createWindow(): void {
     trafficLightPosition: { x: 16, y: 16 },
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
+      preload: join(__dirname, '../preload/index.js'),
       sandbox: true, // SECURITY: Enabled per Gemini audit deploy-g1kj
       contextIsolation: true,
       nodeIntegration: false,

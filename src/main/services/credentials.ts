@@ -51,7 +51,7 @@ class CredentialService {
         'On Linux, ensure libsecret is installed: sudo apt install libsecret-1-dev'
       )
     } else {
-      console.log('[Credentials] Encryption available via OS keychain')
+      console.info('[Credentials] Encryption available via OS keychain')
     }
 
     this.initialized = true
@@ -62,7 +62,7 @@ class CredentialService {
    * Store a credential securely
    * Returns true if stored encrypted, false if stored in plaintext (warning)
    */
-  store(key: CredentialKey, value: string): boolean {
+  set(key: CredentialKey, value: string): boolean {
     if (!this.initialized) {
       throw new Error('CredentialService not initialized. Call initialize() first.')
     }
@@ -93,7 +93,7 @@ class CredentialService {
       credentials[key] = hexEncrypted
       this.store.set('credentials', credentials)
 
-      console.log(`[Credentials] Stored ${key} securely`)
+      console.info(`[Credentials] Stored ${key} securely`)
       return true
     } catch (error) {
       console.error(`[Credentials] Failed to encrypt ${key}:`, error)
@@ -152,7 +152,7 @@ class CredentialService {
     const credentials = this.store.get('credentials', {})
     delete credentials[key]
     this.store.set('credentials', credentials)
-    console.log(`[Credentials] Deleted ${key}`)
+    console.info(`[Credentials] Deleted ${key}`)
   }
 
   /**
@@ -194,8 +194,8 @@ class CredentialService {
     for (const [envVar, credKey] of Object.entries(envMappings)) {
       const value = process.env[envVar]
       if (value && !this.has(credKey)) {
-        console.log(`[Credentials] Migrating ${envVar} to secure storage`)
-        this.store(credKey, value)
+        console.info(`[Credentials] Migrating ${envVar} to secure storage`)
+        this.set(credKey, value)
       }
     }
   }
@@ -210,7 +210,9 @@ class CredentialService {
 
     const envValue = process.env[envVar]
     if (envValue) {
-      console.log(`[Credentials] Using ${envVar} from environment (consider migrating to secure storage)`)
+      console.info(
+        `[Credentials] Using ${envVar} from environment (consider migrating to secure storage)`
+      )
       return envValue
     }
 

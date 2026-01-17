@@ -301,6 +301,9 @@ const ALLOWED_EVENT_CHANNELS = new Set<string>([
   'update:downloaded',
   'update:progress',
   'update:error',
+
+  // Error events
+  'error:occurred',
 ])
 
 /**
@@ -573,8 +576,11 @@ const claudeAPI = {
     ) => electronAPI.invoke('observability:endSpan', spanId, status, attributes),
     recordException: (spanId: string, error: { name: string; message: string; stack?: string }) =>
       electronAPI.invoke('observability:recordException', spanId, error),
-    addEvent: (spanId: string, name: string, attributes?: Record<string, string | number | boolean>) =>
-      electronAPI.invoke('observability:addEvent', spanId, name, attributes),
+    addEvent: (
+      spanId: string,
+      name: string,
+      attributes?: Record<string, string | number | boolean>
+    ) => electronAPI.invoke('observability:addEvent', spanId, name, attributes),
     getMetrics: () => electronAPI.invoke('observability:getMetrics'),
     getStats: () => electronAPI.invoke('observability:getStats'),
     getConfig: () => electronAPI.invoke('observability:getConfig'),
@@ -596,8 +602,10 @@ const claudeAPI = {
       electronAPI.invoke('treesitter:init', config),
     parseFile: (filePath: string) => electronAPI.invoke('treesitter:parseFile', filePath),
     indexCodebase: (rootPath: string) => electronAPI.invoke('treesitter:indexCodebase', rootPath),
-    searchSymbols: (query: string, options?: Parameters<IPCChannels['treesitter:searchSymbols']>[1]) =>
-      electronAPI.invoke('treesitter:searchSymbols', query, options),
+    searchSymbols: (
+      query: string,
+      options?: Parameters<IPCChannels['treesitter:searchSymbols']>[1]
+    ) => electronAPI.invoke('treesitter:searchSymbols', query, options),
     findDefinition: (symbolName: string, rootPath?: string) =>
       electronAPI.invoke('treesitter:findDefinition', symbolName, rootPath),
     findReferences: (symbolName: string, rootPath?: string) =>

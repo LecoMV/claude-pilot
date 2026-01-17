@@ -1,5 +1,6 @@
 import { ipcMain, BrowserWindow, type WebContents, shell, dialog, app } from 'electron'
-import { autoUpdater } from 'electron-updater'
+import pkg from 'electron-updater'
+const { autoUpdater } = pkg
 import { execSync, spawn, ChildProcess } from 'child_process'
 import { memgraphService } from '../services/memgraph'
 import { postgresService } from '../services/postgresql'
@@ -464,7 +465,7 @@ export function registerIpcHandlers(): void {
     return mcpProxyService.getServers()
   })
 
-  ipcMain.handle('mcp:proxy:connect', async (_event, serverId: string): Promise<boolean> => {
+  ipcMain.handle('mcp:proxy:connect', (_event, serverId: string): Promise<boolean> => {
     return mcpProxyService.connectServer(serverId)
   })
 
@@ -493,7 +494,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'mcp:proxy:callTool',
-    async (
+    (
       _event,
       toolName: string,
       args: Record<string, unknown>
@@ -915,7 +916,7 @@ export function registerIpcHandlers(): void {
   // Uses wrapIPCHandler for consistent error logging and audit trail
   ipcMain.handle('credentials:store', (_event, key: string, value: string): boolean => {
     return wrapIPCHandler(
-      () => credentialService.store(key, value),
+      () => credentialService.set(key, value),
       createIPCContext('credentials:store', 'store credential', { key }),
       false
     )
@@ -5539,7 +5540,10 @@ ipcMain.handle(
       caseSensitive?: boolean
     }
   ) => {
-    return treeSitterService.searchSymbols(query, options as Parameters<typeof treeSitterService.searchSymbols>[1])
+    return treeSitterService.searchSymbols(
+      query,
+      options as Parameters<typeof treeSitterService.searchSymbols>[1]
+    )
   }
 )
 
