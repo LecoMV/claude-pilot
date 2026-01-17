@@ -266,7 +266,7 @@ Listen to `nativeTheme.on('updated')` and apply to Tailwind.
 | 4 | Migrate memory:raw PostgreSQL | 1.1 | ✅ DONE | queryRaw method |
 | 5 | Migrate memory:unified-search | 1.1 | ✅ DONE | Part of #2 |
 | 6 | Create CredentialService | 1.2 | ✅ DONE | Commit e72e205 |
-| 7 | Settings UI for credentials | 1.2 | 🔲 TODO | IPC handlers ready |
+| 7 | Settings UI for credentials | 1.2 | ✅ DONE | SecuritySettings component |
 | 8 | Remove all execSync psql calls | 1.1 | ✅ DONE | 39 → 36 (non-PG remain) |
 | 9 | Streaming transcript parser | 2.2 | ✅ DONE | Commit 6f216e3 |
 | 10 | GPU monitoring panel | 3.1 | 🔲 TODO | deploy-2b52 |
@@ -328,13 +328,13 @@ src/
 **Completed This Session (2026-01-16):**
 - ✅ Phase 1.1: PostgreSQL native driver migration (all handlers)
 - ✅ Phase 1.2: Credential encryption with safeStorage
+- ✅ Phase 1.2: Settings UI for credential management (SecuritySettings)
 - ✅ Phase 2.2: Streaming transcript parser
 
 **Remaining Priority Work:**
-1. Settings UI for credentials (#7) - IPC ready, need renderer component
-2. Context Bridge hardening (#12) - High risk, needs careful planning
-3. GPU monitoring panel (#10) - deploy-2b52
-4. OCSF audit logging (#11) - deploy-x2oc
+1. Context Bridge hardening (#12) - High risk, needs careful planning - deploy-usdx
+2. GPU monitoring panel (#10) - deploy-2b52
+3. OCSF audit logging (#11) - deploy-x2oc
 
 ---
 

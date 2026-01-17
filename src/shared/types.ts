@@ -669,6 +669,14 @@ export type IPCChannels = {
   'sessions:watch': (enable: boolean) => Promise<boolean>
   'sessions:getActive': () => Promise<ExternalSession[]>
 
+  // Credentials (secure storage)
+  'credentials:store': (key: string, value: string) => Promise<boolean>
+  'credentials:retrieve': (key: string) => Promise<string | null>
+  'credentials:delete': (key: string) => Promise<boolean>
+  'credentials:has': (key: string) => Promise<boolean>
+  'credentials:list': () => Promise<string[]>
+  'credentials:isEncryptionAvailable': () => Promise<boolean>
+
   // System helpers
   'system:getHomePath': () => Promise<string>
 
