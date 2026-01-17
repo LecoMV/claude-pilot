@@ -5,6 +5,8 @@ import { postgresService } from '../services/postgresql'
 import { credentialService } from '../services/credentials'
 import { auditService } from '../services/audit'
 import { watchdogService } from '../services/watchdog'
+import { predictiveContextService } from '../services/predictive-context'
+import { planService } from '../services/plans'
 import { transcriptService, type ParseOptions, type TranscriptStats } from '../services/transcript'
 import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync, statSync } from 'fs'
 import { join } from 'path'
@@ -46,6 +48,19 @@ import type {
   BeadStatus,
   BeadType,
   BeadPriority,
+  PgVectorStatus,
+  PgVectorCollection,
+  PgVectorSearchResult,
+  PgVectorIndexConfig,
+  PgVectorAutoEmbedConfig,
+  VectorIndexType,
+  FilePrediction,
+  FileAccessPattern,
+  PredictiveContextStats,
+  PredictiveContextConfig,
+  Plan,
+  PlanCreateParams,
+  PlanExecutionStats,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -4387,4 +4402,460 @@ ipcMain.handle('beads:hasBeads', async (_event, projectPath: string) => {
   } catch {
     return false
   }
+})
+
+// ============================================================================
+// PGVECTOR EMBEDDINGS HANDLERS
+// ============================================================================
+
+// Default pgvector config stored in ~/.config/claude-pilot/pgvector.json
+const PGVECTOR_CONFIG_PATH = join(HOME, '.config', 'claude-pilot', 'pgvector.json')
+
+const defaultPgVectorConfig: PgVectorAutoEmbedConfig = {
+  enableLearnings: true,
+  enableSessions: false,
+  enableCode: false,
+  enableCommits: false,
+  embeddingModel: 'nomic-embed-text',
+  batchSize: 10,
+  concurrentRequests: 2,
+  rateLimit: 100, // requests per minute
+}
+
+function getPgVectorConfig(): PgVectorAutoEmbedConfig {
+  try {
+    if (existsSync(PGVECTOR_CONFIG_PATH)) {
+      return { ...defaultPgVectorConfig, ...JSON.parse(readFileSync(PGVECTOR_CONFIG_PATH, 'utf-8')) }
+    }
+  } catch (error) {
+    console.error('Failed to load pgvector config:', error)
+  }
+  return { ...defaultPgVectorConfig }
+}
+
+function savePgVectorConfig(config: PgVectorAutoEmbedConfig): boolean {
+  try {
+    const configDir = join(HOME, '.config', 'claude-pilot')
+    if (!existsSync(configDir)) {
+      mkdirSync(configDir, { recursive: true })
+    }
+    writeFileSync(PGVECTOR_CONFIG_PATH, JSON.stringify(config, null, 2))
+    return true
+  } catch (error) {
+    console.error('Failed to save pgvector config:', error)
+    return false
+  }
+}
+
+// Check if pgvector extension is enabled
+async function checkPgVectorStatus(): Promise<PgVectorStatus> {
+  const config = getPgVectorConfig()
+  const status: PgVectorStatus = {
+    enabled: false,
+    defaultDimensions: 768, // nomic-embed-text dimensions
+    embeddingModel: config.embeddingModel,
+    collections: [],
+  }
+
+  try {
+    await postgresService.connect()
+
+    // Check if pgvector extension exists
+    const extResult = await postgresService.query<{ version: string }>(
+      `SELECT extversion as version FROM pg_extension WHERE extname = 'vector'`
+    )
+
+    if (extResult.length > 0) {
+      status.enabled = true
+      status.version = extResult[0].version
+    }
+
+    // Get all tables with vector columns
+    if (status.enabled) {
+      const tableResult = await postgresService.query<{
+        table_name: string
+        column_name: string
+        dimensions: number
+      }>(
+        `SELECT c.relname as table_name, a.attname as column_name,
+                CASE WHEN typname = 'vector' THEN atttypmod ELSE 0 END as dimensions
+         FROM pg_class c
+         JOIN pg_attribute a ON a.attrelid = c.oid
+         JOIN pg_type t ON t.oid = a.atttypid
+         WHERE t.typname = 'vector' AND c.relkind = 'r'
+         ORDER BY c.relname`
+      )
+
+      for (const row of tableResult) {
+        // Get count and size for each table
+        const countResult = await postgresService.queryScalar<number>(
+          `SELECT COUNT(*) FROM "${row.table_name}"`
+        )
+
+        const sizeResult = await postgresService.queryScalar<string>(
+          `SELECT pg_size_pretty(pg_table_size($1))`,
+          [row.table_name]
+        )
+
+        // Check for index
+        const indexResult = await postgresService.query<{
+          indexname: string
+          indexdef: string
+        }>(
+          `SELECT indexname, indexdef FROM pg_indexes
+           WHERE tablename = $1 AND indexdef LIKE '%vector%'`,
+          [row.table_name]
+        )
+
+        let indexType: VectorIndexType = 'none'
+        let indexName: string | undefined
+        if (indexResult.length > 0) {
+          indexName = indexResult[0].indexname
+          if (indexResult[0].indexdef.toLowerCase().includes('hnsw')) {
+            indexType = 'hnsw'
+          } else if (indexResult[0].indexdef.toLowerCase().includes('ivfflat')) {
+            indexType = 'ivfflat'
+          }
+        }
+
+        status.collections.push({
+          name: row.table_name,
+          tableName: row.table_name,
+          vectorCount: countResult || 0,
+          dimensions: row.dimensions || 768,
+          indexType,
+          indexName,
+          sizeBytes: parseInt(sizeResult?.replace(/[^\d]/g, '') || '0') * 1024, // rough estimate
+        })
+      }
+    }
+  } catch (error) {
+    console.error('Failed to check pgvector status:', error)
+  }
+
+  return status
+}
+
+// Search vectors using pgvector
+async function searchPgVectors(
+  query: string,
+  tableName?: string,
+  limit = 10,
+  threshold = 0.5
+): Promise<PgVectorSearchResult[]> {
+  const results: PgVectorSearchResult[] = []
+
+  try {
+    // Generate embedding using Ollama
+    const embedding = await generateEmbedding(query)
+    if (!embedding || embedding.length === 0) {
+      console.log('[pgvector] No embedding generated, falling back to text search')
+      return results
+    }
+
+    await postgresService.connect()
+
+    // If no table specified, search all tables with vectors
+    let tables: string[] = []
+    if (tableName) {
+      tables = [tableName]
+    } else {
+      const tablesResult = await postgresService.query<{ table_name: string }>(
+        `SELECT DISTINCT c.relname as table_name
+         FROM pg_class c
+         JOIN pg_attribute a ON a.attrelid = c.oid
+         JOIN pg_type t ON t.oid = a.atttypid
+         WHERE t.typname = 'vector' AND c.relkind = 'r'`
+      )
+      tables = tablesResult.map(r => r.table_name)
+    }
+
+    for (const table of tables) {
+      try {
+        // Find the vector column and content column
+        const colsResult = await postgresService.query<{
+          column_name: string
+          data_type: string
+        }>(
+          `SELECT column_name, data_type FROM information_schema.columns
+           WHERE table_name = $1`,
+          [table]
+        )
+
+        const vectorCol = colsResult.find(c => c.data_type === 'USER-DEFINED')?.column_name || 'embedding'
+        const contentCol = colsResult.find(c => c.column_name === 'content' || c.column_name === 'text')?.column_name || 'content'
+        const idCol = colsResult.find(c => c.column_name === 'id')?.column_name || 'id'
+
+        // Cosine similarity search
+        const embeddingStr = `[${embedding.join(',')}]`
+        const searchResult = await postgresService.query<{
+          id: string | number
+          content: string
+          similarity: number
+        }>(
+          `SELECT ${idCol} as id, ${contentCol} as content,
+                  1 - (${vectorCol} <=> $1::vector) as similarity
+           FROM "${table}"
+           WHERE ${vectorCol} IS NOT NULL
+           ORDER BY ${vectorCol} <=> $1::vector
+           LIMIT $2`,
+          [embeddingStr, limit]
+        )
+
+        for (const row of searchResult) {
+          if (row.similarity >= threshold) {
+            results.push({
+              id: row.id,
+              content: row.content,
+              similarity: Math.round(row.similarity * 1000) / 1000,
+              tableName: table,
+            })
+          }
+        }
+      } catch (error) {
+        console.error(`[pgvector] Failed to search table ${table}:`, error)
+      }
+    }
+
+    // Sort by similarity and limit
+    results.sort((a, b) => b.similarity - a.similarity)
+    return results.slice(0, limit)
+  } catch (error) {
+    console.error('[pgvector] Search failed:', error)
+    return results
+  }
+}
+
+// Create or rebuild index on a vector table
+async function createPgVectorIndex(
+  tableName: string,
+  config: PgVectorIndexConfig
+): Promise<boolean> {
+  try {
+    await postgresService.connect()
+
+    // Find the vector column
+    const colsResult = await postgresService.query<{ column_name: string }>(
+      `SELECT a.attname as column_name
+       FROM pg_class c
+       JOIN pg_attribute a ON a.attrelid = c.oid
+       JOIN pg_type t ON t.oid = a.atttypid
+       WHERE c.relname = $1 AND t.typname = 'vector'`,
+      [tableName]
+    )
+
+    if (colsResult.length === 0) {
+      console.error('[pgvector] No vector column found in table:', tableName)
+      return false
+    }
+
+    const vectorCol = colsResult[0].column_name
+    const indexName = `idx_${tableName}_${vectorCol}_${config.type}`
+
+    // Drop existing index if any
+    await postgresService.queryRaw(`DROP INDEX IF EXISTS "${indexName}"`)
+
+    if (config.type === 'none') {
+      return true // Just dropped the index
+    }
+
+    // Build index creation query
+    let indexSql: string
+    if (config.type === 'hnsw') {
+      const m = config.m || 16
+      const efConstruction = config.efConstruction || 64
+      indexSql = `CREATE INDEX "${indexName}" ON "${tableName}"
+                  USING hnsw ("${vectorCol}" vector_cosine_ops)
+                  WITH (m = ${m}, ef_construction = ${efConstruction})`
+    } else {
+      const lists = config.lists || 100
+      indexSql = `CREATE INDEX "${indexName}" ON "${tableName}"
+                  USING ivfflat ("${vectorCol}" vector_cosine_ops)
+                  WITH (lists = ${lists})`
+    }
+
+    await postgresService.queryRaw(indexSql)
+    return true
+  } catch (error) {
+    console.error('[pgvector] Failed to create index:', error)
+    return false
+  }
+}
+
+// Vacuum analyze a table for optimal performance
+async function vacuumPgVectorTable(tableName: string): Promise<boolean> {
+  try {
+    await postgresService.connect()
+    // VACUUM cannot be run in a transaction, so we use a raw query
+    await postgresService.queryRaw(`VACUUM ANALYZE "${tableName}"`)
+    return true
+  } catch (error) {
+    console.error('[pgvector] Failed to vacuum table:', error)
+    return false
+  }
+}
+
+// IPC Handlers for pgvector
+ipcMain.handle('pgvector:status', async (): Promise<PgVectorStatus> => {
+  return checkPgVectorStatus()
+})
+
+ipcMain.handle('pgvector:search', async (
+  _event,
+  query: string,
+  table?: string,
+  limit?: number,
+  threshold?: number
+): Promise<PgVectorSearchResult[]> => {
+  return searchPgVectors(query, table, limit || 10, threshold || 0.5)
+})
+
+ipcMain.handle('pgvector:embed', async (_event, text: string): Promise<number[] | null> => {
+  return generateEmbedding(text)
+})
+
+ipcMain.handle('pgvector:collections', async (): Promise<PgVectorCollection[]> => {
+  const status = await checkPgVectorStatus()
+  return status.collections
+})
+
+ipcMain.handle('pgvector:createIndex', async (
+  _event,
+  table: string,
+  config: PgVectorIndexConfig
+): Promise<boolean> => {
+  return createPgVectorIndex(table, config)
+})
+
+ipcMain.handle('pgvector:rebuildIndex', async (_event, table: string): Promise<boolean> => {
+  // Get current index config and rebuild
+  const status = await checkPgVectorStatus()
+  const collection = status.collections.find(c => c.tableName === table)
+  if (!collection || collection.indexType === 'none') {
+    return false
+  }
+  return createPgVectorIndex(table, { type: collection.indexType })
+})
+
+ipcMain.handle('pgvector:vacuum', async (_event, table: string): Promise<boolean> => {
+  return vacuumPgVectorTable(table)
+})
+
+ipcMain.handle('pgvector:getAutoConfig', async (): Promise<PgVectorAutoEmbedConfig> => {
+  return getPgVectorConfig()
+})
+
+ipcMain.handle('pgvector:setAutoConfig', async (
+  _event,
+  config: PgVectorAutoEmbedConfig
+): Promise<boolean> => {
+  return savePgVectorConfig(config)
+})
+
+// ============================================================================
+// PREDICTIVE CONTEXT HANDLERS
+// ============================================================================
+
+ipcMain.handle('context:predict', async (
+  _event,
+  prompt: string,
+  projectPath: string
+): Promise<FilePrediction[]> => {
+  return predictiveContextService.predict(prompt, projectPath)
+})
+
+ipcMain.handle('context:patterns', async (
+  _event,
+  projectPath: string
+): Promise<FileAccessPattern[]> => {
+  return predictiveContextService.getPatterns(projectPath)
+})
+
+ipcMain.handle('context:stats', async (): Promise<PredictiveContextStats> => {
+  return predictiveContextService.getStats()
+})
+
+ipcMain.handle('context:recordAccess', async (
+  _event,
+  path: string,
+  keywords: string[]
+): Promise<void> => {
+  predictiveContextService.recordAccess(path, keywords)
+})
+
+ipcMain.handle('context:getConfig', async (): Promise<PredictiveContextConfig> => {
+  return predictiveContextService.getConfig()
+})
+
+ipcMain.handle('context:setConfig', async (
+  _event,
+  config: PredictiveContextConfig
+): Promise<boolean> => {
+  return predictiveContextService.setConfig(config)
+})
+
+ipcMain.handle('context:clearCache', async (): Promise<boolean> => {
+  return predictiveContextService.clearCache()
+})
+
+// ============================================================================
+// PLAN HANDLERS (Autonomous execution)
+// ============================================================================
+
+ipcMain.handle('plans:list', async (_event, projectPath?: string): Promise<Plan[]> => {
+  return planService.list(projectPath)
+})
+
+ipcMain.handle('plans:get', async (_event, id: string): Promise<Plan | null> => {
+  return planService.get(id)
+})
+
+ipcMain.handle('plans:create', async (_event, params: PlanCreateParams): Promise<Plan> => {
+  return planService.create(params)
+})
+
+ipcMain.handle('plans:update', async (_event, id: string, updates: Partial<Plan>): Promise<boolean> => {
+  return planService.update(id, updates)
+})
+
+ipcMain.handle('plans:delete', async (_event, id: string): Promise<boolean> => {
+  return planService.delete(id)
+})
+
+ipcMain.handle('plans:execute', async (_event, id: string): Promise<boolean> => {
+  return planService.execute(id)
+})
+
+ipcMain.handle('plans:pause', async (_event, id: string): Promise<boolean> => {
+  return planService.pause(id)
+})
+
+ipcMain.handle('plans:resume', async (_event, id: string): Promise<boolean> => {
+  return planService.resume(id)
+})
+
+ipcMain.handle('plans:cancel', async (_event, id: string): Promise<boolean> => {
+  return planService.cancel(id)
+})
+
+ipcMain.handle('plans:stepComplete', async (
+  _event,
+  planId: string,
+  stepId: string,
+  output?: string
+): Promise<boolean> => {
+  return planService.stepComplete(planId, stepId, output)
+})
+
+ipcMain.handle('plans:stepFail', async (
+  _event,
+  planId: string,
+  stepId: string,
+  error: string
+): Promise<boolean> => {
+  return planService.stepFail(planId, stepId, error)
+})
+
+ipcMain.handle('plans:stats', async (): Promise<PlanExecutionStats> => {
+  return planService.getStats()
 })

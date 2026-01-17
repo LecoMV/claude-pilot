@@ -641,6 +641,152 @@ export interface BeadListFilter {
   limit?: number
 }
 
+// ============================================================================
+// PGVECTOR EMBEDDINGS - Semantic search types
+// ============================================================================
+
+export type VectorIndexType = 'hnsw' | 'ivfflat' | 'none'
+
+export interface PgVectorCollection {
+  name: string
+  tableName: string
+  vectorCount: number
+  dimensions: number
+  indexType: VectorIndexType
+  indexName?: string
+  sizeBytes: number
+  lastUpdated?: string
+}
+
+export interface PgVectorStatus {
+  enabled: boolean
+  version?: string
+  defaultDimensions: number
+  embeddingModel: string
+  collections: PgVectorCollection[]
+}
+
+export interface PgVectorSearchResult {
+  id: string | number
+  content: string
+  similarity: number
+  metadata?: Record<string, unknown>
+  tableName: string
+}
+
+export interface PgVectorAutoEmbedConfig {
+  enableLearnings: boolean
+  enableSessions: boolean
+  enableCode: boolean
+  enableCommits: boolean
+  embeddingModel: string
+  batchSize: number
+  concurrentRequests: number
+  rateLimit: number
+}
+
+export interface PgVectorIndexConfig {
+  type: VectorIndexType
+  m?: number // HNSW connections per layer
+  efConstruction?: number // HNSW build quality
+  efSearch?: number // HNSW search quality
+  lists?: number // IVFFlat clusters
+  probes?: number // IVFFlat search clusters
+}
+
+// ============================================================================
+// PREDICTIVE CONTEXT - File prediction types
+// ============================================================================
+
+export interface FilePrediction {
+  path: string
+  confidence: number // 0-1 score
+  reason: string // Why this file was predicted
+  source: 'keyword' | 'pattern' | 'cooccurrence' | 'recent'
+  lastAccessed?: number
+}
+
+export interface FileAccessPattern {
+  path: string
+  accessCount: number
+  lastAccessed: number
+  cooccurringFiles: string[] // Files frequently accessed together
+  keywords: string[] // Keywords that triggered access
+}
+
+export interface PredictiveContextStats {
+  totalPredictions: number
+  accuratePredictions: number
+  accuracy: number
+  trackedFiles: number
+  cacheHitRate: number
+}
+
+export interface PredictiveContextConfig {
+  enabled: boolean
+  maxPredictions: number
+  minConfidence: number
+  trackHistory: boolean
+  preloadEnabled: boolean
+  cacheSize: number
+}
+
+// ============================================================================
+// AUTONOMOUS PLAN & EXECUTE - Task planning and execution types
+// ============================================================================
+
+export type PlanStatus = 'draft' | 'ready' | 'executing' | 'paused' | 'completed' | 'failed'
+export type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+export type StepType = 'code' | 'shell' | 'research' | 'review' | 'test' | 'manual'
+
+export interface PlanStep {
+  id: string
+  name: string
+  description: string
+  type: StepType
+  status: StepStatus
+  order: number
+  command?: string // For shell/code steps
+  output?: string
+  error?: string
+  startedAt?: number
+  completedAt?: number
+  estimatedDuration?: number // seconds
+  dependencies?: string[] // Step IDs that must complete first
+}
+
+export interface Plan {
+  id: string
+  title: string
+  description: string
+  projectPath: string
+  status: PlanStatus
+  steps: PlanStep[]
+  currentStepIndex: number
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  completedAt?: number
+  totalDuration?: number
+  error?: string
+}
+
+export interface PlanCreateParams {
+  title: string
+  description: string
+  projectPath: string
+  steps: Omit<PlanStep, 'id' | 'status' | 'order'>[]
+}
+
+export interface PlanExecutionStats {
+  totalPlans: number
+  completedPlans: number
+  failedPlans: number
+  successRate: number
+  avgDuration: number
+  totalStepsExecuted: number
+}
+
 // IPC Channel definitions
 export type IPCChannels = {
   // System
@@ -823,6 +969,40 @@ export type IPCChannels = {
   'beads:blocked': () => Promise<Bead[]>
   'beads:hasBeads': (projectPath: string) => Promise<boolean>
 
+  // pgvector (embeddings)
+  'pgvector:status': () => Promise<PgVectorStatus>
+  'pgvector:search': (query: string, table?: string, limit?: number, threshold?: number) => Promise<PgVectorSearchResult[]>
+  'pgvector:embed': (text: string) => Promise<number[] | null>
+  'pgvector:collections': () => Promise<PgVectorCollection[]>
+  'pgvector:createIndex': (table: string, config: PgVectorIndexConfig) => Promise<boolean>
+  'pgvector:rebuildIndex': (table: string) => Promise<boolean>
+  'pgvector:vacuum': (table: string) => Promise<boolean>
+  'pgvector:getAutoConfig': () => Promise<PgVectorAutoEmbedConfig>
+  'pgvector:setAutoConfig': (config: PgVectorAutoEmbedConfig) => Promise<boolean>
+
+  // Predictive context
+  'context:predict': (prompt: string, projectPath: string) => Promise<FilePrediction[]>
+  'context:patterns': (projectPath: string) => Promise<FileAccessPattern[]>
+  'context:stats': () => Promise<PredictiveContextStats>
+  'context:recordAccess': (path: string, keywords: string[]) => Promise<void>
+  'context:getConfig': () => Promise<PredictiveContextConfig>
+  'context:setConfig': (config: PredictiveContextConfig) => Promise<boolean>
+  'context:clearCache': () => Promise<boolean>
+
+  // Plans (autonomous execution)
+  'plans:list': (projectPath?: string) => Promise<Plan[]>
+  'plans:get': (id: string) => Promise<Plan | null>
+  'plans:create': (params: PlanCreateParams) => Promise<Plan>
+  'plans:update': (id: string, updates: Partial<Plan>) => Promise<boolean>
+  'plans:delete': (id: string) => Promise<boolean>
+  'plans:execute': (id: string) => Promise<boolean>
+  'plans:pause': (id: string) => Promise<boolean>
+  'plans:resume': (id: string) => Promise<boolean>
+  'plans:cancel': (id: string) => Promise<boolean>
+  'plans:stepComplete': (planId: string, stepId: string, output?: string) => Promise<boolean>
+  'plans:stepFail': (planId: string, stepId: string, error: string) => Promise<boolean>
+  'plans:stats': () => Promise<PlanExecutionStats>
+
   // System helpers
   'system:getHomePath': () => Promise<string>
 
@@ -888,6 +1068,40 @@ export interface ClaudeAPI {
     close: (id: string, reason?: string) => ReturnType<IPCChannels['beads:close']>
     ready: () => ReturnType<IPCChannels['beads:ready']>
     blocked: () => ReturnType<IPCChannels['beads:blocked']>
+  }
+  pgvector: {
+    getStatus: () => ReturnType<IPCChannels['pgvector:status']>
+    search: (query: string, table?: string, limit?: number, threshold?: number) => ReturnType<IPCChannels['pgvector:search']>
+    embed: (text: string) => ReturnType<IPCChannels['pgvector:embed']>
+    getCollections: () => ReturnType<IPCChannels['pgvector:collections']>
+    createIndex: (table: string, config: PgVectorIndexConfig) => ReturnType<IPCChannels['pgvector:createIndex']>
+    rebuildIndex: (table: string) => ReturnType<IPCChannels['pgvector:rebuildIndex']>
+    vacuum: (table: string) => ReturnType<IPCChannels['pgvector:vacuum']>
+    getAutoConfig: () => ReturnType<IPCChannels['pgvector:getAutoConfig']>
+    setAutoConfig: (config: PgVectorAutoEmbedConfig) => ReturnType<IPCChannels['pgvector:setAutoConfig']>
+  }
+  predictiveContext: {
+    predict: (prompt: string, projectPath: string) => ReturnType<IPCChannels['context:predict']>
+    getPatterns: (projectPath: string) => ReturnType<IPCChannels['context:patterns']>
+    getStats: () => ReturnType<IPCChannels['context:stats']>
+    recordAccess: (path: string, keywords: string[]) => ReturnType<IPCChannels['context:recordAccess']>
+    getConfig: () => ReturnType<IPCChannels['context:getConfig']>
+    setConfig: (config: PredictiveContextConfig) => ReturnType<IPCChannels['context:setConfig']>
+    clearCache: () => ReturnType<IPCChannels['context:clearCache']>
+  }
+  plans: {
+    list: (projectPath?: string) => ReturnType<IPCChannels['plans:list']>
+    get: (id: string) => ReturnType<IPCChannels['plans:get']>
+    create: (params: PlanCreateParams) => ReturnType<IPCChannels['plans:create']>
+    update: (id: string, updates: Partial<Plan>) => ReturnType<IPCChannels['plans:update']>
+    delete: (id: string) => ReturnType<IPCChannels['plans:delete']>
+    execute: (id: string) => ReturnType<IPCChannels['plans:execute']>
+    pause: (id: string) => ReturnType<IPCChannels['plans:pause']>
+    resume: (id: string) => ReturnType<IPCChannels['plans:resume']>
+    cancel: (id: string) => ReturnType<IPCChannels['plans:cancel']>
+    stepComplete: (planId: string, stepId: string, output?: string) => ReturnType<IPCChannels['plans:stepComplete']>
+    stepFail: (planId: string, stepId: string, error: string) => ReturnType<IPCChannels['plans:stepFail']>
+    getStats: () => ReturnType<IPCChannels['plans:stats']>
   }
 }
 

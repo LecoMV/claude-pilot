@@ -154,6 +154,40 @@ const ALLOWED_CHANNELS = new Set<string>([
   'beads:ready',
   'beads:blocked',
   'beads:hasBeads',
+
+  // pgvector (embeddings)
+  'pgvector:status',
+  'pgvector:search',
+  'pgvector:embed',
+  'pgvector:collections',
+  'pgvector:createIndex',
+  'pgvector:rebuildIndex',
+  'pgvector:vacuum',
+  'pgvector:getAutoConfig',
+  'pgvector:setAutoConfig',
+
+  // Predictive context
+  'context:predict',
+  'context:patterns',
+  'context:stats',
+  'context:recordAccess',
+  'context:getConfig',
+  'context:setConfig',
+  'context:clearCache',
+
+  // Plans (autonomous execution)
+  'plans:list',
+  'plans:get',
+  'plans:create',
+  'plans:update',
+  'plans:delete',
+  'plans:execute',
+  'plans:pause',
+  'plans:resume',
+  'plans:cancel',
+  'plans:stepComplete',
+  'plans:stepFail',
+  'plans:stats',
 ])
 
 /**
@@ -176,6 +210,9 @@ const ALLOWED_EVENT_CHANNELS = new Set<string>([
   'chat:stream',
   'chat:complete',
   'chat:error',
+
+  // Plan events
+  'plan:updated',
 ])
 
 /**
@@ -293,6 +330,57 @@ const claudeAPI = {
       electronAPI.invoke('beads:close', id, reason),
     ready: () => electronAPI.invoke('beads:ready'),
     blocked: () => electronAPI.invoke('beads:blocked'),
+  },
+
+  // pgvector (embeddings)
+  pgvector: {
+    getStatus: () => electronAPI.invoke('pgvector:status'),
+    search: (query: string, table?: string, limit?: number, threshold?: number) =>
+      electronAPI.invoke('pgvector:search', query, table, limit, threshold),
+    embed: (text: string) => electronAPI.invoke('pgvector:embed', text),
+    getCollections: () => electronAPI.invoke('pgvector:collections'),
+    createIndex: (table: string, config: Parameters<IPCChannels['pgvector:createIndex']>[1]) =>
+      electronAPI.invoke('pgvector:createIndex', table, config),
+    rebuildIndex: (table: string) => electronAPI.invoke('pgvector:rebuildIndex', table),
+    vacuum: (table: string) => electronAPI.invoke('pgvector:vacuum', table),
+    getAutoConfig: () => electronAPI.invoke('pgvector:getAutoConfig'),
+    setAutoConfig: (config: Parameters<IPCChannels['pgvector:setAutoConfig']>[0]) =>
+      electronAPI.invoke('pgvector:setAutoConfig', config),
+  },
+
+  // Predictive context
+  predictiveContext: {
+    predict: (prompt: string, projectPath: string) =>
+      electronAPI.invoke('context:predict', prompt, projectPath),
+    getPatterns: (projectPath: string) =>
+      electronAPI.invoke('context:patterns', projectPath),
+    getStats: () => electronAPI.invoke('context:stats'),
+    recordAccess: (path: string, keywords: string[]) =>
+      electronAPI.invoke('context:recordAccess', path, keywords),
+    getConfig: () => electronAPI.invoke('context:getConfig'),
+    setConfig: (config: Parameters<IPCChannels['context:setConfig']>[0]) =>
+      electronAPI.invoke('context:setConfig', config),
+    clearCache: () => electronAPI.invoke('context:clearCache'),
+  },
+
+  // Plans (autonomous execution)
+  plans: {
+    list: (projectPath?: string) => electronAPI.invoke('plans:list', projectPath),
+    get: (id: string) => electronAPI.invoke('plans:get', id),
+    create: (params: Parameters<IPCChannels['plans:create']>[0]) =>
+      electronAPI.invoke('plans:create', params),
+    update: (id: string, updates: Partial<Parameters<IPCChannels['plans:get']>>) =>
+      electronAPI.invoke('plans:update', id, updates),
+    delete: (id: string) => electronAPI.invoke('plans:delete', id),
+    execute: (id: string) => electronAPI.invoke('plans:execute', id),
+    pause: (id: string) => electronAPI.invoke('plans:pause', id),
+    resume: (id: string) => electronAPI.invoke('plans:resume', id),
+    cancel: (id: string) => electronAPI.invoke('plans:cancel', id),
+    stepComplete: (planId: string, stepId: string, output?: string) =>
+      electronAPI.invoke('plans:stepComplete', planId, stepId, output),
+    stepFail: (planId: string, stepId: string, error: string) =>
+      electronAPI.invoke('plans:stepFail', planId, stepId, error),
+    getStats: () => electronAPI.invoke('plans:stats'),
   },
 }
 
