@@ -1,10 +1,10 @@
 # Default owners for everything
-* @alexmayhew
+* @LecoMV
 
 # Security-critical files require security review
-src/preload/**          @alexmayhew
-src/main/services/credentials.ts @alexmayhew
-src/shared/validation.ts @alexmayhew
+src/preload/**          @LecoMV
+src/main/services/credentials.ts @LecoMV
+src/shared/validation.ts @LecoMV
 
 # CI/CD changes require review
-.github/**              @alexmayhew
+.github/**              @LecoMV

@@ -10,7 +10,7 @@
   "homepage": "https://alexmayhew.dev/claude-pilot",
   "repository": {
     "type": "git",
-    "url": "https://github.com/alexmayhew/claude-pilot"
+    "url": "https://github.com/LecoMV/claude-pilot"
   },
   "scripts": {
     "dev": "electron-vite dev",
@@ -193,7 +193,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "alexmayhew",
+      "owner": "LecoMV",
       "repo": "claude-pilot",
       "releaseType": "release"
     }
