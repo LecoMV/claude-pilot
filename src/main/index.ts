@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers, logStreamManager } from './ipc/handlers'
 import { terminalManager, registerTerminalHandlers } from './services/terminal'
 import { credentialService } from './services/credentials'
+import { auditService } from './services/audit'
 import { setupGlobalErrorHandlers, configureErrorHandler, handleError } from './utils/error-handler'
 
 /**
@@ -174,6 +175,9 @@ app.whenReady().then(() => {
     'MEMGRAPH_PASSWORD': 'memgraph.password',
     'ANTHROPIC_API_KEY': 'anthropic.apiKey',
   })
+
+  // Initialize OCSF audit logging service
+  auditService.initialize()
 
   // Default open or close DevTools by F12 in development
   app.on('browser-window-created', (_, window) => {

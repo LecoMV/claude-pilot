@@ -413,6 +413,40 @@ export interface ClaudeCodeProfile {
   updatedAt: number
 }
 
+// Audit types (OCSF-compliant)
+export interface AuditEvent {
+  id?: number
+  time: number
+  class_uid: number
+  class_name: string
+  category_uid: number
+  category_name: string
+  activity_id: number
+  activity_name: string
+  severity_id: number
+  status_id: number
+  status_detail?: string
+  message: string
+  actor_user?: string
+  actor_process?: string
+  actor_session?: string
+  target_type?: string
+  target_name?: string
+  target_data?: string
+  metadata_version: string
+  metadata_product_name: string
+  metadata_product_version: string
+  raw_data?: string
+}
+
+export interface AuditStats {
+  totalEvents: number
+  eventsByCategory: Record<string, number>
+  eventsByActivity: Record<string, number>
+  last24hCount: number
+  dbSizeMB: number
+}
+
 // Logs types
 export type LogSource = 'claude' | 'mcp' | 'system' | 'agent' | 'workflow' | 'all'
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -677,6 +711,19 @@ export type IPCChannels = {
   'credentials:list': () => Promise<string[]>
   'credentials:isEncryptionAvailable': () => Promise<boolean>
 
+  // Audit (OCSF-compliant logging)
+  'audit:query': (params?: {
+    startTime?: number
+    endTime?: number
+    category?: string
+    activity?: number
+    targetType?: string
+    limit?: number
+    offset?: number
+  }) => Promise<AuditEvent[]>
+  'audit:stats': () => Promise<AuditStats>
+  'audit:export': (format: 'json' | 'csv', params?: { startTime?: number; endTime?: number }) => Promise<string>
+
   // System helpers
   'system:getHomePath': () => Promise<string>
 
@@ -703,8 +750,41 @@ export interface ElectronAPI {
   send(channel: string, ...args: unknown[]): void
 }
 
+// Domain-specific API type (from preload)
+export interface ClaudeAPI {
+  system: {
+    getStatus: () => Promise<SystemStatus>
+    getResources: () => Promise<ResourceUsage>
+  }
+  memory: {
+    search: (query: string, limit?: number) => ReturnType<IPCChannels['memory:unified-search']>
+    getLearnings: (query?: string, limit?: number) => ReturnType<IPCChannels['memory:learnings']>
+    getStats: () => ReturnType<IPCChannels['memory:stats']>
+  }
+  sessions: {
+    discover: () => ReturnType<IPCChannels['sessions:discover']>
+    get: (id: string) => ReturnType<IPCChannels['sessions:get']>
+    getMessages: (id: string, limit?: number) => ReturnType<IPCChannels['sessions:getMessages']>
+    getActive: () => ReturnType<IPCChannels['sessions:getActive']>
+  }
+  credentials: {
+    store: (key: string, value: string) => Promise<boolean>
+    retrieve: (key: string) => Promise<string | null>
+    delete: (key: string) => Promise<boolean>
+    has: (key: string) => Promise<boolean>
+    list: () => Promise<string[]>
+    isEncryptionAvailable: () => Promise<boolean>
+  }
+  audit: {
+    query: (params?: Parameters<IPCChannels['audit:query']>[0]) => ReturnType<IPCChannels['audit:query']>
+    getStats: () => ReturnType<IPCChannels['audit:stats']>
+    export: (format: 'json' | 'csv', params?: { startTime?: number; endTime?: number }) => Promise<string>
+  }
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI
+    claude: ClaudeAPI
   }
 }

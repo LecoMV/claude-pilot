@@ -3,6 +3,7 @@ import { execSync, spawn, ChildProcess } from 'child_process'
 import { memgraphService } from '../services/memgraph'
 import { postgresService } from '../services/postgresql'
 import { credentialService } from '../services/credentials'
+import { auditService } from '../services/audit'
 import { transcriptService, type ParseOptions, type TranscriptStats } from '../services/transcript'
 import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync, statSync } from 'fs'
 import { join } from 'path'
@@ -743,6 +744,33 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('credentials:isEncryptionAvailable', async (): Promise<boolean> => {
     return credentialService.isEncryptionAvailable()
+  })
+
+  // ==================== Audit Handlers (OCSF) ====================
+  ipcMain.handle('audit:query', async (_event, params?: {
+    startTime?: number
+    endTime?: number
+    category?: string
+    activity?: number
+    targetType?: string
+    limit?: number
+    offset?: number
+  }) => {
+    return auditService.query(params as Parameters<typeof auditService.query>[0])
+  })
+
+  ipcMain.handle('audit:stats', async () => {
+    return auditService.getStats()
+  })
+
+  ipcMain.handle('audit:export', async (_event, format: 'json' | 'csv', params?: {
+    startTime?: number
+    endTime?: number
+  }) => {
+    if (format === 'csv') {
+      return auditService.exportCSV(params)
+    }
+    return auditService.exportJSON(params)
   })
 
   // System helpers

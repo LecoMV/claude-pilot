@@ -5,6 +5,11 @@ export interface MetricDataPoint {
   cpu: number
   memory: number
   diskUsed: number
+  // GPU metrics (optional - only present when GPU available)
+  gpuUtilization?: number
+  gpuMemoryUsed?: number
+  gpuMemoryTotal?: number
+  gpuTemperature?: number
 }
 
 interface MetricsHistoryState {

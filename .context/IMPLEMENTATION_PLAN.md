@@ -269,9 +269,9 @@ Listen to `nativeTheme.on('updated')` and apply to Tailwind.
 | 7 | Settings UI for credentials | 1.2 | ✅ DONE | SecuritySettings component |
 | 8 | Remove all execSync psql calls | 1.1 | ✅ DONE | 39 → 36 (non-PG remain) |
 | 9 | Streaming transcript parser | 2.2 | ✅ DONE | Commit 6f216e3 |
-| 10 | GPU monitoring panel | 3.1 | 🔲 TODO | deploy-2b52 |
-| 11 | OCSF audit logging | 3.3 | 🔲 TODO | deploy-x2oc |
-| 12 | Context Bridge hardening | 1.3 | 🔲 TODO | deploy-usdx (High Risk) |
+| 10 | GPU monitoring panel | 3.1 | ✅ DONE | GPUPanel.tsx with charts |
+| 11 | OCSF audit logging | 3.3 | ✅ DONE | SQLite + log rotation |
+| 12 | Context Bridge hardening | 1.3 | ✅ DONE | Channel whitelist + domain API |
 
 ---
 
@@ -329,12 +329,18 @@ src/
 - ✅ Phase 1.1: PostgreSQL native driver migration (all handlers)
 - ✅ Phase 1.2: Credential encryption with safeStorage
 - ✅ Phase 1.2: Settings UI for credential management (SecuritySettings)
+- ✅ Phase 1.3: Context Bridge hardening (channel whitelist + domain API)
 - ✅ Phase 2.2: Streaming transcript parser
+- ✅ Phase 3.1: GPU monitoring panel with history charts
+- ✅ Phase 3.3: OCSF audit logging (SQLite, log rotation, export)
 
-**Remaining Priority Work:**
-1. Context Bridge hardening (#12) - High risk, needs careful planning - deploy-usdx
-2. GPU monitoring panel (#10) - deploy-2b52
-3. OCSF audit logging (#11) - deploy-x2oc
+**All Priority Tasks Complete!**
+
+**Future Enhancements:**
+- Migrate renderer code to use `window.claude.*` domain API
+- Add audit log viewer component
+- Add session transcript viewer (deploy-r9f1)
+- Add watchdog auto-recovery (deploy-0k8i)
 
 ---
 

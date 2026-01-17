@@ -50,12 +50,20 @@ export function MetricsChart() {
   // Add new data point whenever status changes
   useEffect(() => {
     if (status?.resources) {
+      const gpu = status.resources.gpu
       addDataPoint({
         cpu: status.resources.cpu,
         memory: status.resources.memory,
         diskUsed: status.resources.disk.total
           ? (status.resources.disk.used / status.resources.disk.total) * 100
           : 0,
+        // Include GPU metrics if available
+        ...(gpu?.available && gpu?.utilization !== undefined ? {
+          gpuUtilization: gpu.utilization,
+          gpuMemoryUsed: gpu.memoryUsed,
+          gpuMemoryTotal: gpu.memoryTotal,
+          gpuTemperature: gpu.temperature,
+        } : {}),
       })
     }
   }, [status, addDataPoint])

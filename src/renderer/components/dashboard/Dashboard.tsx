@@ -18,6 +18,7 @@ import {
 import { formatBytes, cn } from '@/lib/utils'
 import { useSystemStatus } from '@/hooks/useSystemStatus'
 import { MetricsChart } from './MetricsChart'
+import { GPUPanel } from './GPUPanel'
 import type { GPUUsage } from '@shared/types'
 
 interface DashboardProps {
@@ -145,6 +146,14 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         <h2 className="text-lg font-semibold text-text-primary mb-4">Performance History</h2>
         <MetricsChart />
       </section>
+
+      {/* GPU Monitoring Panel */}
+      {status?.resources.gpu?.available && (
+        <section>
+          <h2 className="text-lg font-semibold text-text-primary mb-4">GPU Monitor</h2>
+          <GPUPanel gpu={status.resources.gpu} />
+        </section>
+      )}
 
       {/* Memory systems detail */}
       <section>
