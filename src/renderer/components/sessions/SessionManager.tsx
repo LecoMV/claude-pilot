@@ -1,4 +1,4 @@
-import { useEffect, useMemo, memo } from 'react'
+import { useEffect, useMemo, memo, useState } from 'react'
 import {
   Activity,
   Clock,
@@ -20,9 +20,15 @@ import {
   Shield,
   Plug,
   Cpu,
+  Layers,
+  Shrink,
 } from 'lucide-react'
 import { useSessionsStore, selectFilteredSessions } from '../../stores/sessions'
 import type { ExternalSession, SessionMessage } from '../../../shared/types'
+import { BranchPanel } from '../branches/BranchPanel'
+import { SmartCompactionPanel } from '../context/SmartCompactionPanel'
+
+type SessionTab = 'messages' | 'branches' | 'compaction'
 
 export function SessionManager() {
   const {
@@ -424,8 +430,24 @@ interface SessionDetailProps {
 }
 
 function SessionDetail({ session, messages, formatDate, formatTokens, formatCost }: SessionDetailProps) {
+  const [activeTab, setActiveTab] = useState<SessionTab>('messages')
+  const [showCompaction, setShowCompaction] = useState(false)
+
+  const tabs = [
+    { id: 'messages' as const, label: 'Messages', icon: MessageSquare },
+    { id: 'branches' as const, label: 'Branches', icon: GitBranch },
+  ]
+
   return (
     <>
+      {/* Compaction Modal */}
+      {showCompaction && (
+        <SmartCompactionPanel
+          session={session}
+          onClose={() => setShowCompaction(false)}
+        />
+      )}
+
       {/* Header */}
       <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between mb-3">
@@ -441,9 +463,18 @@ function SessionDetail({ session, messages, formatDate, formatTokens, formatCost
               {session.projectPath}
             </p>
           </div>
-          <div className="text-right text-sm text-text-muted">
-            <p>Started {formatDate(session.startTime)}</p>
-            <p>Last activity {formatDate(session.lastActivity)}</p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowCompaction(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20 transition-colors text-sm font-medium"
+            >
+              <Shrink className="w-4 h-4" />
+              Smart Compact
+            </button>
+            <div className="text-right text-sm text-text-muted">
+              <p>Started {formatDate(session.startTime)}</p>
+              <p>Last activity {formatDate(session.lastActivity)}</p>
+            </div>
           </div>
         </div>
 
@@ -588,19 +619,45 @@ function SessionDetail({ session, messages, formatDate, formatTokens, formatCost
             <span className="font-mono">{session.workingDirectory}</span>
           </div>
         )}
+
+        {/* Tab Bar */}
+        <div className="flex items-center gap-1 mt-4 border-t border-border pt-4">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-accent-purple/10 text-accent-purple'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface'
+              }`}
+            >
+              <tab.icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-auto p-4">
-        <h3 className="text-sm font-medium text-text-muted mb-3">Recent Messages</h3>
-        {messages.length === 0 ? (
-          <p className="text-text-muted text-center py-8">No messages to display</p>
-        ) : (
-          <div className="space-y-3">
-            {messages.map((msg) => (
-              <MessageCard key={msg.uuid} message={msg} formatDate={formatDate} />
-            ))}
+      {/* Tab Content */}
+      <div className="flex-1 overflow-auto">
+        {activeTab === 'messages' && (
+          <div className="p-4">
+            <h3 className="text-sm font-medium text-text-muted mb-3">Recent Messages</h3>
+            {messages.length === 0 ? (
+              <p className="text-text-muted text-center py-8">No messages to display</p>
+            ) : (
+              <div className="space-y-3">
+                {messages.map((msg) => (
+                  <MessageCard key={msg.uuid} message={msg} formatDate={formatDate} />
+                ))}
+              </div>
+            )}
           </div>
+        )}
+
+        {activeTab === 'branches' && (
+          <BranchPanel session={session} />
         )}
       </div>
     </>
