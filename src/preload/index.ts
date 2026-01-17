@@ -271,6 +271,30 @@ const ALLOWED_CHANNELS = new Set<string>([
   'branches:abandon',
   'branches:stats',
   'branches:getActiveBranch',
+
+  // Auto-embedding pipeline
+  'embedding:status',
+  'embedding:metrics',
+  'embedding:startAutoEmbed',
+  'embedding:stopAutoEmbed',
+  'embedding:search',
+  'embedding:embedAndStore',
+  'embedding:embed',
+  'embedding:cacheStats',
+  'embedding:vectorStoreStats',
+  'embedding:resetMetrics',
+  'embedding:deadLetterQueue',
+  'embedding:retryDeadLetterQueue',
+  'embedding:clearDeadLetterQueue',
+  'embedding:warmupModel',
+  'embedding:unloadModel',
+  'embedding:updateOllamaConfig',
+  'embedding:pruneCache',
+  'embedding:clearCache',
+  'embedding:processSession',
+  'embedding:resetSessionPosition',
+  'embedding:resetAllSessionPositions',
+  'embedding:deleteSessionEmbeddings',
 ])
 
 /**
@@ -646,6 +670,55 @@ const claudeAPI = {
     getConfig: () => electronAPI.invoke('treesitter:getConfig'),
     updateConfig: (config: Parameters<IPCChannels['treesitter:updateConfig']>[0]) =>
       electronAPI.invoke('treesitter:updateConfig', config),
+  },
+
+  // Auto-embedding pipeline
+  embedding: {
+    getStatus: () => electronAPI.invoke('embedding:status'),
+    getMetrics: () => electronAPI.invoke('embedding:metrics'),
+    startAutoEmbed: () => electronAPI.invoke('embedding:startAutoEmbed'),
+    stopAutoEmbed: () => electronAPI.invoke('embedding:stopAutoEmbed'),
+    search: (query: string, options?: {
+      limit?: number
+      threshold?: number
+      sourceType?: string
+      sessionId?: string
+      projectPath?: string
+      includeContent?: boolean
+    }) => electronAPI.invoke('embedding:search', query, options),
+    embedAndStore: (
+      content: string,
+      contentType: 'code' | 'conversation' | 'tool_result' | 'learning' | 'documentation',
+      metadata: Record<string, unknown>
+    ) => electronAPI.invoke('embedding:embedAndStore', content, contentType, metadata),
+    embed: (text: string) => electronAPI.invoke('embedding:embed', text),
+    getCacheStats: () => electronAPI.invoke('embedding:cacheStats'),
+    getVectorStoreStats: () => electronAPI.invoke('embedding:vectorStoreStats'),
+    resetMetrics: () => electronAPI.invoke('embedding:resetMetrics'),
+    getDeadLetterQueue: () => electronAPI.invoke('embedding:deadLetterQueue'),
+    retryDeadLetterQueue: () => electronAPI.invoke('embedding:retryDeadLetterQueue'),
+    clearDeadLetterQueue: () => electronAPI.invoke('embedding:clearDeadLetterQueue'),
+    warmupModel: () => electronAPI.invoke('embedding:warmupModel'),
+    unloadModel: () => electronAPI.invoke('embedding:unloadModel'),
+    updateOllamaConfig: (config: {
+      model?: string
+      dimensions?: number
+      keepAlive?: string
+      batchSize?: number
+      maxConcurrent?: number
+      healthCheckInterval?: number
+      warmupOnInit?: boolean
+      baseUrl?: string
+    }) => electronAPI.invoke('embedding:updateOllamaConfig', config),
+    pruneCache: (maxEntries?: number, maxAge?: number) =>
+      electronAPI.invoke('embedding:pruneCache', maxEntries, maxAge),
+    clearCache: () => electronAPI.invoke('embedding:clearCache'),
+    processSession: (filePath: string) => electronAPI.invoke('embedding:processSession', filePath),
+    resetSessionPosition: (filePath: string) =>
+      electronAPI.invoke('embedding:resetSessionPosition', filePath),
+    resetAllSessionPositions: () => electronAPI.invoke('embedding:resetAllSessionPositions'),
+    deleteSessionEmbeddings: (sessionId: string) =>
+      electronAPI.invoke('embedding:deleteSessionEmbeddings', sessionId),
   },
 }
 

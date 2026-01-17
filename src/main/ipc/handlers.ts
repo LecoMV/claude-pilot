@@ -5628,3 +5628,180 @@ ipcMain.handle(
     treeSitterService.updateConfig(config)
   }
 )
+
+// ============================================================================
+// AUTO-EMBEDDING PIPELINE HANDLERS
+// ============================================================================
+
+import {
+  getEmbeddingManager,
+  initializeEmbeddingManager,
+  shutdownEmbeddingManager,
+  type EmbeddingManagerStatus,
+} from '../services/embeddings'
+import type {
+  PipelineMetrics,
+  SearchResult,
+  SearchOptions,
+  ContentType,
+  ChunkMetadata,
+  DeadLetterItem,
+  OllamaConfig,
+} from '../services/embeddings/types'
+
+// Initialize embedding manager on startup
+let embeddingManagerInitialized = false
+
+async function ensureEmbeddingManager() {
+  if (!embeddingManagerInitialized) {
+    await initializeEmbeddingManager({
+      pgvectorUrl: 'postgresql://localhost:5433/claude_memory',
+      qdrantUrl: 'http://localhost:6333',
+      autoStart: false, // Don't auto-start, let user control
+    })
+    embeddingManagerInitialized = true
+  }
+  return getEmbeddingManager()
+}
+
+ipcMain.handle('embedding:status', async (): Promise<EmbeddingManagerStatus> => {
+  const manager = await ensureEmbeddingManager()
+  return manager.getStatus()
+})
+
+ipcMain.handle('embedding:metrics', async (): Promise<PipelineMetrics> => {
+  const manager = await ensureEmbeddingManager()
+  return manager.getMetrics()
+})
+
+ipcMain.handle('embedding:startAutoEmbed', async (): Promise<boolean> => {
+  const manager = await ensureEmbeddingManager()
+  return manager.startAutoEmbedding()
+})
+
+ipcMain.handle('embedding:stopAutoEmbed', async (): Promise<void> => {
+  const manager = await ensureEmbeddingManager()
+  await manager.stopAutoEmbedding()
+})
+
+ipcMain.handle(
+  'embedding:search',
+  async (
+    _event,
+    query: string,
+    options?: SearchOptions
+  ): Promise<SearchResult[]> => {
+    const manager = await ensureEmbeddingManager()
+    return manager.search(query, options)
+  }
+)
+
+ipcMain.handle(
+  'embedding:embedAndStore',
+  async (
+    _event,
+    content: string,
+    contentType: ContentType,
+    metadata: Partial<ChunkMetadata>
+  ): Promise<number> => {
+    const manager = await ensureEmbeddingManager()
+    return manager.embedAndStore(content, contentType, metadata)
+  }
+)
+
+ipcMain.handle('embedding:embed', async (_event, text: string): Promise<number[] | null> => {
+  const manager = await ensureEmbeddingManager()
+  const result = await manager.embed(text)
+  return result?.embedding || null
+})
+
+ipcMain.handle('embedding:cacheStats', async () => {
+  const manager = await ensureEmbeddingManager()
+  return manager.getCacheStats()
+})
+
+ipcMain.handle('embedding:vectorStoreStats', async () => {
+  const manager = await ensureEmbeddingManager()
+  return manager.getVectorStoreStats()
+})
+
+ipcMain.handle('embedding:resetMetrics', async (): Promise<void> => {
+  const manager = await ensureEmbeddingManager()
+  manager.resetMetrics()
+})
+
+ipcMain.handle('embedding:deadLetterQueue', async (): Promise<DeadLetterItem[]> => {
+  const manager = await ensureEmbeddingManager()
+  return manager.getDeadLetterQueue()
+})
+
+ipcMain.handle('embedding:retryDeadLetterQueue', async (): Promise<number> => {
+  const manager = await ensureEmbeddingManager()
+  return manager.retryDeadLetterQueue()
+})
+
+ipcMain.handle('embedding:clearDeadLetterQueue', async (): Promise<number> => {
+  const manager = await ensureEmbeddingManager()
+  return manager.clearDeadLetterQueue()
+})
+
+ipcMain.handle('embedding:warmupModel', async (): Promise<boolean> => {
+  const manager = await ensureEmbeddingManager()
+  return manager.warmupModel()
+})
+
+ipcMain.handle('embedding:unloadModel', async (): Promise<boolean> => {
+  const manager = await ensureEmbeddingManager()
+  return manager.unloadModel()
+})
+
+ipcMain.handle(
+  'embedding:updateOllamaConfig',
+  async (_event, config: Partial<OllamaConfig>): Promise<void> => {
+    const manager = await ensureEmbeddingManager()
+    await manager.updateOllamaConfig(config)
+  }
+)
+
+ipcMain.handle(
+  'embedding:pruneCache',
+  async (_event, maxEntries?: number, maxAge?: number): Promise<number> => {
+    const manager = await ensureEmbeddingManager()
+    return manager.pruneCache(maxEntries, maxAge)
+  }
+)
+
+ipcMain.handle('embedding:clearCache', async (): Promise<number> => {
+  const manager = await ensureEmbeddingManager()
+  return manager.clearCache()
+})
+
+ipcMain.handle('embedding:processSession', async (_event, filePath: string): Promise<number> => {
+  const manager = await ensureEmbeddingManager()
+  return manager.processSessionFile(filePath)
+})
+
+ipcMain.handle('embedding:resetSessionPosition', async (_event, filePath: string): Promise<void> => {
+  const manager = await ensureEmbeddingManager()
+  manager.resetSessionPosition(filePath)
+})
+
+ipcMain.handle('embedding:resetAllSessionPositions', async (): Promise<void> => {
+  const manager = await ensureEmbeddingManager()
+  manager.resetAllSessionPositions()
+})
+
+ipcMain.handle(
+  'embedding:deleteSessionEmbeddings',
+  async (_event, sessionId: string): Promise<number> => {
+    const manager = await ensureEmbeddingManager()
+    return manager.deleteSessionEmbeddings(sessionId)
+  }
+)
+
+// Shutdown handler for graceful cleanup
+app.on('before-quit', async () => {
+  if (embeddingManagerInitialized) {
+    await shutdownEmbeddingManager()
+  }
+})
