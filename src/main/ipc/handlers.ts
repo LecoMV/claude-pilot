@@ -7,6 +7,7 @@ import { auditService } from '../services/audit'
 import { watchdogService } from '../services/watchdog'
 import { predictiveContextService } from '../services/predictive-context'
 import { planService } from '../services/plans'
+import { branchService } from '../services/branches'
 import { transcriptService, type ParseOptions, type TranscriptStats } from '../services/transcript'
 import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync, statSync } from 'fs'
 import { join } from 'path'
@@ -61,6 +62,13 @@ import type {
   Plan,
   PlanCreateParams,
   PlanExecutionStats,
+  ConversationBranch,
+  ConversationMessage,
+  BranchTree,
+  BranchDiff,
+  BranchMergeParams,
+  BranchCreateParams,
+  BranchStats,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -4858,4 +4866,64 @@ ipcMain.handle('plans:stepFail', async (
 
 ipcMain.handle('plans:stats', async (): Promise<PlanExecutionStats> => {
   return planService.getStats()
+})
+
+// ============================================================================
+// CONVERSATION BRANCHING - Git-like branching for conversations
+// ============================================================================
+
+ipcMain.handle('branches:list', async (_event, sessionId: string): Promise<ConversationBranch[]> => {
+  return branchService.list(sessionId)
+})
+
+ipcMain.handle('branches:get', async (_event, branchId: string): Promise<ConversationBranch | null> => {
+  return branchService.get(branchId)
+})
+
+ipcMain.handle('branches:getTree', async (_event, sessionId: string): Promise<BranchTree | null> => {
+  return branchService.getTree(sessionId)
+})
+
+ipcMain.handle('branches:create', async (_event, params: BranchCreateParams): Promise<ConversationBranch | null> => {
+  return branchService.create(params)
+})
+
+ipcMain.handle('branches:delete', async (_event, branchId: string): Promise<boolean> => {
+  return branchService.delete(branchId)
+})
+
+ipcMain.handle('branches:rename', async (_event, branchId: string, name: string): Promise<boolean> => {
+  return branchService.rename(branchId, name)
+})
+
+ipcMain.handle('branches:switch', async (_event, branchId: string): Promise<boolean> => {
+  return branchService.switch(branchId)
+})
+
+ipcMain.handle('branches:addMessage', async (
+  _event, branchId: string, message: ConversationMessage
+): Promise<boolean> => {
+  return branchService.addMessage(branchId, message)
+})
+
+ipcMain.handle('branches:diff', async (
+  _event, branchA: string, branchB: string
+): Promise<BranchDiff | null> => {
+  return branchService.diff(branchA, branchB)
+})
+
+ipcMain.handle('branches:merge', async (_event, params: BranchMergeParams): Promise<boolean> => {
+  return branchService.merge(params)
+})
+
+ipcMain.handle('branches:abandon', async (_event, branchId: string): Promise<boolean> => {
+  return branchService.abandon(branchId)
+})
+
+ipcMain.handle('branches:stats', async (_event, sessionId?: string): Promise<BranchStats> => {
+  return branchService.stats(sessionId)
+})
+
+ipcMain.handle('branches:getActiveBranch', async (_event, sessionId: string): Promise<string | null> => {
+  return branchService.getActiveBranch(sessionId)
 })

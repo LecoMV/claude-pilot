@@ -188,6 +188,21 @@ const ALLOWED_CHANNELS = new Set<string>([
   'plans:stepComplete',
   'plans:stepFail',
   'plans:stats',
+
+  // Branches (conversation branching)
+  'branches:list',
+  'branches:get',
+  'branches:getTree',
+  'branches:create',
+  'branches:delete',
+  'branches:rename',
+  'branches:switch',
+  'branches:addMessage',
+  'branches:diff',
+  'branches:merge',
+  'branches:abandon',
+  'branches:stats',
+  'branches:getActiveBranch',
 ])
 
 /**
@@ -213,6 +228,9 @@ const ALLOWED_EVENT_CHANNELS = new Set<string>([
 
   // Plan events
   'plan:updated',
+
+  // Branch events
+  'branches:updated',
 ])
 
 /**
@@ -381,6 +399,38 @@ const claudeAPI = {
     stepFail: (planId: string, stepId: string, error: string) =>
       electronAPI.invoke('plans:stepFail', planId, stepId, error),
     getStats: () => electronAPI.invoke('plans:stats'),
+  },
+
+  // Branches (conversation branching)
+  branches: {
+    list: (sessionId: string) => electronAPI.invoke('branches:list', sessionId),
+    get: (branchId: string) => electronAPI.invoke('branches:get', branchId),
+    getTree: (sessionId: string) => electronAPI.invoke('branches:getTree', sessionId),
+    create: (params: { sessionId: string; branchPointMessageId: string; name: string; description?: string }) =>
+      electronAPI.invoke('branches:create', params),
+    delete: (branchId: string) => electronAPI.invoke('branches:delete', branchId),
+    rename: (branchId: string, name: string) => electronAPI.invoke('branches:rename', branchId, name),
+    switch: (branchId: string) => electronAPI.invoke('branches:switch', branchId),
+    addMessage: (branchId: string, message: {
+      id: string
+      role: 'user' | 'assistant' | 'tool-result'
+      content: string
+      timestamp: number
+      toolName?: string
+      toolInput?: Record<string, unknown>
+      toolOutput?: string
+      parentId?: string
+    }) => electronAPI.invoke('branches:addMessage', branchId, message),
+    diff: (branchA: string, branchB: string) => electronAPI.invoke('branches:diff', branchA, branchB),
+    merge: (params: {
+      sourceBranchId: string
+      targetBranchId: string
+      strategy: 'replace' | 'append' | 'cherry-pick'
+      messageIds?: string[]
+    }) => electronAPI.invoke('branches:merge', params),
+    abandon: (branchId: string) => electronAPI.invoke('branches:abandon', branchId),
+    getStats: (sessionId?: string) => electronAPI.invoke('branches:stats', sessionId),
+    getActiveBranch: (sessionId: string) => electronAPI.invoke('branches:getActiveBranch', sessionId),
   },
 }
 

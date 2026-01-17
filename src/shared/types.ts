@@ -787,6 +787,84 @@ export interface PlanExecutionStats {
   totalStepsExecuted: number
 }
 
+// ============================================================================
+// CONVERSATION BRANCHING - Git-like branching for conversations
+// ============================================================================
+
+export type BranchStatus = 'active' | 'merged' | 'abandoned'
+
+export interface ConversationMessage {
+  id: string
+  role: 'user' | 'assistant' | 'tool-result'
+  content: string
+  timestamp: number
+  toolName?: string
+  toolInput?: Record<string, unknown>
+  toolOutput?: string
+  parentId?: string // For tracking message tree
+}
+
+export interface ConversationBranch {
+  id: string
+  name: string
+  sessionId: string
+  parentBranchId: string | null // null for main branch
+  branchPointMessageId: string // Message where this branch diverges
+  status: BranchStatus
+  createdAt: number
+  updatedAt: number
+  messages: ConversationMessage[] // Messages unique to this branch (after branch point)
+  description?: string
+  mergedInto?: string // Branch ID if merged
+}
+
+export interface BranchTree {
+  sessionId: string
+  mainBranchId: string
+  branches: ConversationBranch[]
+}
+
+export interface BranchNode {
+  id: string
+  name: string
+  parentId: string | null
+  messageCount: number
+  status: BranchStatus
+  createdAt: number
+  isMainBranch: boolean
+  children: BranchNode[]
+}
+
+export interface BranchDiff {
+  branchA: string
+  branchB: string
+  commonAncestorId: string
+  messagesOnlyInA: ConversationMessage[]
+  messagesOnlyInB: ConversationMessage[]
+}
+
+export interface BranchMergeParams {
+  sourceBranchId: string
+  targetBranchId: string
+  strategy: 'replace' | 'append' | 'cherry-pick'
+  messageIds?: string[] // For cherry-pick strategy
+}
+
+export interface BranchCreateParams {
+  sessionId: string
+  branchPointMessageId: string
+  name: string
+  description?: string
+}
+
+export interface BranchStats {
+  totalBranches: number
+  activeBranches: number
+  mergedBranches: number
+  abandonedBranches: number
+  avgMessagesPerBranch: number
+}
+
 // IPC Channel definitions
 export type IPCChannels = {
   // System
@@ -1003,6 +1081,21 @@ export type IPCChannels = {
   'plans:stepFail': (planId: string, stepId: string, error: string) => Promise<boolean>
   'plans:stats': () => Promise<PlanExecutionStats>
 
+  // Branches (conversation branching)
+  'branches:list': (sessionId: string) => Promise<ConversationBranch[]>
+  'branches:get': (branchId: string) => Promise<ConversationBranch | null>
+  'branches:getTree': (sessionId: string) => Promise<BranchTree | null>
+  'branches:create': (params: BranchCreateParams) => Promise<ConversationBranch | null>
+  'branches:delete': (branchId: string) => Promise<boolean>
+  'branches:rename': (branchId: string, name: string) => Promise<boolean>
+  'branches:switch': (branchId: string) => Promise<boolean>
+  'branches:addMessage': (branchId: string, message: ConversationMessage) => Promise<boolean>
+  'branches:diff': (branchA: string, branchB: string) => Promise<BranchDiff | null>
+  'branches:merge': (params: BranchMergeParams) => Promise<boolean>
+  'branches:abandon': (branchId: string) => Promise<boolean>
+  'branches:stats': (sessionId?: string) => Promise<BranchStats>
+  'branches:getActiveBranch': (sessionId: string) => Promise<string | null>
+
   // System helpers
   'system:getHomePath': () => Promise<string>
 
@@ -1102,6 +1195,21 @@ export interface ClaudeAPI {
     stepComplete: (planId: string, stepId: string, output?: string) => ReturnType<IPCChannels['plans:stepComplete']>
     stepFail: (planId: string, stepId: string, error: string) => ReturnType<IPCChannels['plans:stepFail']>
     getStats: () => ReturnType<IPCChannels['plans:stats']>
+  }
+  branches: {
+    list: (sessionId: string) => ReturnType<IPCChannels['branches:list']>
+    get: (branchId: string) => ReturnType<IPCChannels['branches:get']>
+    getTree: (sessionId: string) => ReturnType<IPCChannels['branches:getTree']>
+    create: (params: BranchCreateParams) => ReturnType<IPCChannels['branches:create']>
+    delete: (branchId: string) => ReturnType<IPCChannels['branches:delete']>
+    rename: (branchId: string, name: string) => ReturnType<IPCChannels['branches:rename']>
+    switch: (branchId: string) => ReturnType<IPCChannels['branches:switch']>
+    addMessage: (branchId: string, message: ConversationMessage) => ReturnType<IPCChannels['branches:addMessage']>
+    diff: (branchA: string, branchB: string) => ReturnType<IPCChannels['branches:diff']>
+    merge: (params: BranchMergeParams) => ReturnType<IPCChannels['branches:merge']>
+    abandon: (branchId: string) => ReturnType<IPCChannels['branches:abandon']>
+    getStats: (sessionId?: string) => ReturnType<IPCChannels['branches:stats']>
+    getActiveBranch: (sessionId: string) => ReturnType<IPCChannels['branches:getActiveBranch']>
   }
 }
 
