@@ -155,6 +155,58 @@ export interface MCPServerConfig {
   disabled?: boolean
 }
 
+// MCP Proxy/Federation (deploy-zebp)
+export interface MCPFederatedServer {
+  id: string
+  name: string
+  command: string
+  args: string[]
+  env?: Record<string, string>
+  status: 'disconnected' | 'connecting' | 'connected' | 'error'
+  lastPing?: number
+  toolCount: number
+  resourceCount: number
+  promptCount: number
+  error?: string
+}
+
+export interface MCPProxyTool {
+  name: string
+  description: string
+  inputSchema: Record<string, unknown>
+  serverId: string
+}
+
+export interface MCPProxyResource {
+  uri: string
+  name: string
+  description?: string
+  mimeType?: string
+  serverId: string
+}
+
+export interface MCPProxyPrompt {
+  name: string
+  description?: string
+  arguments?: Array<{ name: string; description?: string; required?: boolean }>
+  serverId: string
+}
+
+export interface MCPProxyConfig {
+  loadBalancing: 'round-robin' | 'least-connections' | 'capability-based'
+  healthCheckInterval: number
+  connectionTimeout: number
+  retryAttempts: number
+  cacheToolsFor: number
+}
+
+export interface MCPProxyStats {
+  totalRequests: number
+  totalErrors: number
+  serverStats: Record<string, { requests: number; errors: number; avgLatency: number }>
+  uptime: number
+}
+
 export interface MemoryStatus {
   postgresql: DatabaseStatus
   memgraph: DatabaseStatus
@@ -967,6 +1019,198 @@ export interface BranchStats {
 }
 
 // ============================================================================
+// OBSERVABILITY - OpenTelemetry types (deploy-rjvh)
+// ============================================================================
+
+export interface TraceContext {
+  traceId: string
+  spanId: string
+  parentSpanId?: string
+  traceFlags: number
+}
+
+export type SpanAttributeValue = string | number | boolean | string[] | number[] | boolean[]
+
+export interface SpanData {
+  traceId: string
+  spanId: string
+  parentSpanId?: string
+  name: string
+  kind: 'internal' | 'server' | 'client' | 'producer' | 'consumer'
+  startTime: number
+  endTime?: number
+  status: { code: 'unset' | 'ok' | 'error'; message?: string }
+  attributes: Record<string, SpanAttributeValue>
+  events: Array<{ name: string; timestamp: number; attributes?: Record<string, SpanAttributeValue> }>
+  links: Array<{ traceId: string; spanId: string; attributes?: Record<string, SpanAttributeValue> }>
+}
+
+export interface HistogramMetricData {
+  name: string
+  count: number
+  sum: number
+  min: number
+  max: number
+  avg: number
+  buckets: number[]
+  counts: number[]
+}
+
+export interface ObservabilityMetrics {
+  counters: Record<string, number>
+  gauges: Record<string, number>
+  histograms: Record<string, HistogramMetricData>
+}
+
+export interface ObservabilityStats {
+  tracesCreated: number
+  spansCreated: number
+  spansExported: number
+  metricsRecorded: number
+  errorsRecorded: number
+  exportErrors: number
+  activeSpans: number
+  uptime: number
+}
+
+export interface ObservabilityConfig {
+  serviceName: string
+  serviceVersion: string
+  environment: string
+  sampleRate: number
+  enableAutoInstrumentation: boolean
+  maxSpansPerTrace: number
+  maxAttributeLength: number
+  enabledInstrumentations: string[]
+}
+
+// ============================================================================
+// TREE-SITTER - Code parsing types (deploy-4u2e)
+// ============================================================================
+
+export type CodeSymbolKind =
+  | 'function'
+  | 'method'
+  | 'class'
+  | 'interface'
+  | 'type'
+  | 'variable'
+  | 'constant'
+  | 'enum'
+  | 'property'
+  | 'parameter'
+  | 'module'
+  | 'namespace'
+  | 'import'
+  | 'export'
+
+export interface CodeSymbol {
+  name: string
+  kind: CodeSymbolKind
+  filePath: string
+  startLine: number
+  endLine: number
+  startColumn: number
+  endColumn: number
+  signature?: string
+  docstring?: string
+  parent?: string
+  children?: string[]
+  modifiers?: string[]
+  returnType?: string
+  parameters?: Array<{ name: string; type?: string; defaultValue?: string }>
+}
+
+export interface FileParseResult {
+  filePath: string
+  language: string
+  symbols: CodeSymbol[]
+  imports: Array<{ module: string; symbols: string[]; alias?: string; line: number }>
+  exports: Array<{ name: string; kind: CodeSymbolKind; line: number }>
+  parseTime: number
+  errors: Array<{ message: string; line: number; column: number }>
+  size: number
+  lineCount: number
+}
+
+export interface CodebaseIndexStats {
+  totalFiles: number
+  totalSymbols: number
+  byLanguage: Record<string, number>
+  byKind: Record<CodeSymbolKind, number>
+}
+
+export interface TreeSitterConfig {
+  maxFileSize: number
+  excludePatterns: string[]
+  includeExtensions: string[]
+  maxDepth: number
+  parallelParsing: boolean
+  cacheResults: boolean
+}
+
+export interface TreeSitterStats {
+  filesParsed: number
+  symbolsExtracted: number
+  parseErrors: number
+  cacheHits: number
+  cacheMisses: number
+  avgParseTime: number
+  indexedProjects: number
+}
+
+export interface CodebaseStructureItem {
+  path: string
+  name: string
+  type: 'file' | 'directory'
+  language?: string
+  symbolCount?: number
+  children?: CodebaseStructureItem[]
+}
+
+// ============================================================================
+// COSMOGRAPH - Large graph visualization types (deploy-6elk)
+// ============================================================================
+
+export interface GraphVisualizationNode {
+  id: string
+  label?: string
+  type?: string
+  color?: string
+  size?: number
+  x?: number
+  y?: number
+  properties?: Record<string, unknown>
+}
+
+export interface GraphVisualizationEdge {
+  source: string
+  target: string
+  id?: string
+  label?: string
+  type?: string
+  color?: string
+  width?: number
+  properties?: Record<string, unknown>
+}
+
+export interface GraphVisualizationData {
+  nodes: GraphVisualizationNode[]
+  edges: GraphVisualizationEdge[]
+}
+
+export interface GraphVisualizationConfig {
+  nodeSize: number
+  nodeColor: string
+  nodeLabels: boolean
+  edgeWidth: number
+  edgeColor: string
+  edgeArrows: boolean
+  simulation: boolean
+  backgroundColor: string
+}
+
+// ============================================================================
 // AUTO-UPDATE - electron-updater types
 // ============================================================================
 
@@ -1011,6 +1255,22 @@ export type IPCChannels = {
   'mcp:getServer': (name: string) => Promise<MCPServer | null>
   'mcp:getConfig': () => Promise<string>
   'mcp:saveConfig': (content: string) => Promise<boolean>
+  // MCP Proxy/Federation (deploy-zebp)
+  'mcp:proxy:init': (config?: Partial<MCPProxyConfig>) => Promise<void>
+  'mcp:proxy:servers': () => Promise<MCPFederatedServer[]>
+  'mcp:proxy:connect': (serverId: string) => Promise<boolean>
+  'mcp:proxy:connectAll': () => Promise<void>
+  'mcp:proxy:disconnect': (serverId: string) => Promise<void>
+  'mcp:proxy:tools': () => Promise<MCPProxyTool[]>
+  'mcp:proxy:resources': () => Promise<MCPProxyResource[]>
+  'mcp:proxy:prompts': () => Promise<MCPProxyPrompt[]>
+  'mcp:proxy:callTool': (
+    toolName: string,
+    args: Record<string, unknown>
+  ) => Promise<{ content: unknown; isError?: boolean }>
+  'mcp:proxy:stats': () => Promise<MCPProxyStats>
+  'mcp:proxy:config': () => Promise<MCPProxyConfig>
+  'mcp:proxy:updateConfig': (config: Partial<MCPProxyConfig>) => Promise<void>
 
   // Memory
   'memory:learnings': (query?: string, limit?: number) => Promise<Learning[]>
@@ -1306,6 +1566,60 @@ export type IPCChannels = {
   'update:download': () => Promise<boolean>
   'update:install': () => Promise<void>
   'update:getStatus': () => Promise<UpdateStatus>
+
+  // Observability - OpenTelemetry (deploy-rjvh)
+  'observability:init': (config?: Partial<ObservabilityConfig>) => Promise<void>
+  'observability:startTrace': (
+    name: string,
+    attributes?: Record<string, SpanAttributeValue>
+  ) => Promise<TraceContext>
+  'observability:startSpan': (
+    name: string,
+    kind?: 'internal' | 'server' | 'client' | 'producer' | 'consumer',
+    attributes?: Record<string, SpanAttributeValue>
+  ) => Promise<string>
+  'observability:endSpan': (
+    spanId: string,
+    status?: { code: 'unset' | 'ok' | 'error'; message?: string },
+    attributes?: Record<string, SpanAttributeValue>
+  ) => Promise<void>
+  'observability:recordException': (spanId: string, error: { name: string; message: string; stack?: string }) => Promise<void>
+  'observability:addEvent': (spanId: string, name: string, attributes?: Record<string, SpanAttributeValue>) => Promise<void>
+  'observability:getMetrics': () => Promise<ObservabilityMetrics>
+  'observability:getStats': () => Promise<ObservabilityStats>
+  'observability:getConfig': () => Promise<ObservabilityConfig>
+  'observability:updateConfig': (config: Partial<ObservabilityConfig>) => Promise<void>
+  'observability:recordMetric': (
+    name: string,
+    value: number,
+    type: 'counter' | 'gauge' | 'histogram',
+    attributes?: Record<string, string>
+  ) => Promise<void>
+  'observability:getActiveSpans': () => Promise<SpanData[]>
+  'observability:getRecentSpans': (limit?: number) => Promise<SpanData[]>
+
+  // Tree-sitter - Code parsing (deploy-4u2e)
+  'treesitter:init': (config?: Partial<TreeSitterConfig>) => Promise<void>
+  'treesitter:parseFile': (filePath: string) => Promise<FileParseResult | null>
+  'treesitter:indexCodebase': (rootPath: string) => Promise<CodebaseIndexStats>
+  'treesitter:searchSymbols': (
+    query: string,
+    options?: {
+      kind?: CodeSymbolKind
+      rootPath?: string
+      limit?: number
+      caseSensitive?: boolean
+    }
+  ) => Promise<CodeSymbol[]>
+  'treesitter:findDefinition': (symbolName: string, rootPath?: string) => Promise<CodeSymbol | null>
+  'treesitter:findReferences': (symbolName: string, rootPath?: string) => Promise<CodeSymbol[]>
+  'treesitter:getFileOutline': (filePath: string) => Promise<CodeSymbol[]>
+  'treesitter:getCodebaseStructure': (rootPath: string) => Promise<CodebaseStructureItem[]>
+  'treesitter:clearCache': (filePath?: string) => Promise<void>
+  'treesitter:clearIndex': (rootPath: string) => Promise<void>
+  'treesitter:getStats': () => Promise<TreeSitterStats>
+  'treesitter:getConfig': () => Promise<TreeSitterConfig>
+  'treesitter:updateConfig': (config: Partial<TreeSitterConfig>) => Promise<void>
 }
 
 // Window API exposed to renderer

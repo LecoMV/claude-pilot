@@ -25,6 +25,20 @@ const ALLOWED_CHANNELS = new Set<string>([
   'mcp:getConfig',
   'mcp:saveConfig',
 
+  // MCP Proxy/Federation (deploy-zebp)
+  'mcp:proxy:init',
+  'mcp:proxy:servers',
+  'mcp:proxy:connect',
+  'mcp:proxy:connectAll',
+  'mcp:proxy:disconnect',
+  'mcp:proxy:tools',
+  'mcp:proxy:resources',
+  'mcp:proxy:prompts',
+  'mcp:proxy:callTool',
+  'mcp:proxy:stats',
+  'mcp:proxy:config',
+  'mcp:proxy:updateConfig',
+
   // Memory
   'memory:learnings',
   'memory:stats',
@@ -163,6 +177,36 @@ const ALLOWED_CHANNELS = new Set<string>([
   'update:download',
   'update:install',
   'update:getStatus',
+
+  // Observability - OpenTelemetry (deploy-rjvh)
+  'observability:init',
+  'observability:startTrace',
+  'observability:startSpan',
+  'observability:endSpan',
+  'observability:recordException',
+  'observability:addEvent',
+  'observability:getMetrics',
+  'observability:getStats',
+  'observability:getConfig',
+  'observability:updateConfig',
+  'observability:recordMetric',
+  'observability:getActiveSpans',
+  'observability:getRecentSpans',
+
+  // Tree-sitter - Code parsing (deploy-4u2e)
+  'treesitter:init',
+  'treesitter:parseFile',
+  'treesitter:indexCodebase',
+  'treesitter:searchSymbols',
+  'treesitter:findDefinition',
+  'treesitter:findReferences',
+  'treesitter:getFileOutline',
+  'treesitter:getCodebaseStructure',
+  'treesitter:clearCache',
+  'treesitter:clearIndex',
+  'treesitter:getStats',
+  'treesitter:getConfig',
+  'treesitter:updateConfig',
 
   // Beads (work tracking)
   'beads:list',
@@ -325,6 +369,25 @@ const claudeAPI = {
     getLearnings: (query?: string, limit?: number) =>
       electronAPI.invoke('memory:learnings', query, limit),
     getStats: () => electronAPI.invoke('memory:stats'),
+  },
+
+  // MCP Proxy/Federation (deploy-zebp)
+  mcpProxy: {
+    init: (config?: Parameters<IPCChannels['mcp:proxy:init']>[0]) =>
+      electronAPI.invoke('mcp:proxy:init', config),
+    getServers: () => electronAPI.invoke('mcp:proxy:servers'),
+    connect: (serverId: string) => electronAPI.invoke('mcp:proxy:connect', serverId),
+    connectAll: () => electronAPI.invoke('mcp:proxy:connectAll'),
+    disconnect: (serverId: string) => electronAPI.invoke('mcp:proxy:disconnect', serverId),
+    getTools: () => electronAPI.invoke('mcp:proxy:tools'),
+    getResources: () => electronAPI.invoke('mcp:proxy:resources'),
+    getPrompts: () => electronAPI.invoke('mcp:proxy:prompts'),
+    callTool: (toolName: string, args: Record<string, unknown>) =>
+      electronAPI.invoke('mcp:proxy:callTool', toolName, args),
+    getStats: () => electronAPI.invoke('mcp:proxy:stats'),
+    getConfig: () => electronAPI.invoke('mcp:proxy:config'),
+    updateConfig: (config: Parameters<IPCChannels['mcp:proxy:updateConfig']>[0]) =>
+      electronAPI.invoke('mcp:proxy:updateConfig', config),
   },
 
   // Sessions
@@ -490,6 +553,64 @@ const claudeAPI = {
     download: () => electronAPI.invoke('update:download'),
     install: () => electronAPI.invoke('update:install'),
     getStatus: () => electronAPI.invoke('update:getStatus'),
+  },
+
+  // Observability - OpenTelemetry (deploy-rjvh)
+  observability: {
+    init: (config?: Parameters<IPCChannels['observability:init']>[0]) =>
+      electronAPI.invoke('observability:init', config),
+    startTrace: (name: string, attributes?: Record<string, string | number | boolean>) =>
+      electronAPI.invoke('observability:startTrace', name, attributes),
+    startSpan: (
+      name: string,
+      kind?: 'internal' | 'server' | 'client' | 'producer' | 'consumer',
+      attributes?: Record<string, string | number | boolean>
+    ) => electronAPI.invoke('observability:startSpan', name, kind, attributes),
+    endSpan: (
+      spanId: string,
+      status?: { code: 'unset' | 'ok' | 'error'; message?: string },
+      attributes?: Record<string, string | number | boolean>
+    ) => electronAPI.invoke('observability:endSpan', spanId, status, attributes),
+    recordException: (spanId: string, error: { name: string; message: string; stack?: string }) =>
+      electronAPI.invoke('observability:recordException', spanId, error),
+    addEvent: (spanId: string, name: string, attributes?: Record<string, string | number | boolean>) =>
+      electronAPI.invoke('observability:addEvent', spanId, name, attributes),
+    getMetrics: () => electronAPI.invoke('observability:getMetrics'),
+    getStats: () => electronAPI.invoke('observability:getStats'),
+    getConfig: () => electronAPI.invoke('observability:getConfig'),
+    updateConfig: (config: Parameters<IPCChannels['observability:updateConfig']>[0]) =>
+      electronAPI.invoke('observability:updateConfig', config),
+    recordMetric: (
+      name: string,
+      value: number,
+      type: 'counter' | 'gauge' | 'histogram',
+      attributes?: Record<string, string>
+    ) => electronAPI.invoke('observability:recordMetric', name, value, type, attributes),
+    getActiveSpans: () => electronAPI.invoke('observability:getActiveSpans'),
+    getRecentSpans: (limit?: number) => electronAPI.invoke('observability:getRecentSpans', limit),
+  },
+
+  // Tree-sitter - Code parsing (deploy-4u2e)
+  treeSitter: {
+    init: (config?: Parameters<IPCChannels['treesitter:init']>[0]) =>
+      electronAPI.invoke('treesitter:init', config),
+    parseFile: (filePath: string) => electronAPI.invoke('treesitter:parseFile', filePath),
+    indexCodebase: (rootPath: string) => electronAPI.invoke('treesitter:indexCodebase', rootPath),
+    searchSymbols: (query: string, options?: Parameters<IPCChannels['treesitter:searchSymbols']>[1]) =>
+      electronAPI.invoke('treesitter:searchSymbols', query, options),
+    findDefinition: (symbolName: string, rootPath?: string) =>
+      electronAPI.invoke('treesitter:findDefinition', symbolName, rootPath),
+    findReferences: (symbolName: string, rootPath?: string) =>
+      electronAPI.invoke('treesitter:findReferences', symbolName, rootPath),
+    getFileOutline: (filePath: string) => electronAPI.invoke('treesitter:getFileOutline', filePath),
+    getCodebaseStructure: (rootPath: string) =>
+      electronAPI.invoke('treesitter:getCodebaseStructure', rootPath),
+    clearCache: (filePath?: string) => electronAPI.invoke('treesitter:clearCache', filePath),
+    clearIndex: (rootPath: string) => electronAPI.invoke('treesitter:clearIndex', rootPath),
+    getStats: () => electronAPI.invoke('treesitter:getStats'),
+    getConfig: () => electronAPI.invoke('treesitter:getConfig'),
+    updateConfig: (config: Parameters<IPCChannels['treesitter:updateConfig']>[0]) =>
+      electronAPI.invoke('treesitter:updateConfig', config),
   },
 }
 

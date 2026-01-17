@@ -5,6 +5,9 @@ import { memgraphService } from '../services/memgraph'
 import { postgresService } from '../services/postgresql'
 import { credentialService } from '../services/credentials'
 import { auditService } from '../services/audit'
+import { mcpProxyService } from '../services/mcp-proxy'
+import { observabilityService } from '../services/observability'
+import { treeSitterService } from '../services/treesitter'
 import { wrapIPCHandler, createIPCContext } from '../utils/ipc-error-handler'
 import { watchdogService } from '../services/watchdog'
 import { predictiveContextService } from '../services/predictive-context'
@@ -439,6 +442,89 @@ export function registerIpcHandlers(): void {
       false
     )
   })
+
+  // MCP Proxy/Federation handlers (deploy-zebp)
+  ipcMain.handle(
+    'mcp:proxy:init',
+    async (
+      _event,
+      config?: {
+        loadBalancing?: 'round-robin' | 'least-connections' | 'capability-based'
+        healthCheckInterval?: number
+        connectionTimeout?: number
+        retryAttempts?: number
+        cacheToolsFor?: number
+      }
+    ): Promise<void> => {
+      await mcpProxyService.initialize(config)
+    }
+  )
+
+  ipcMain.handle('mcp:proxy:servers', () => {
+    return mcpProxyService.getServers()
+  })
+
+  ipcMain.handle('mcp:proxy:connect', async (_event, serverId: string): Promise<boolean> => {
+    return mcpProxyService.connectServer(serverId)
+  })
+
+  ipcMain.handle('mcp:proxy:connectAll', async (): Promise<void> => {
+    await mcpProxyService.connectAll()
+  })
+
+  ipcMain.handle('mcp:proxy:disconnect', (_event, serverId: string): void => {
+    const server = mcpProxyService.getServer(serverId)
+    if (server) {
+      mcpProxyService.unregisterServer(serverId)
+    }
+  })
+
+  ipcMain.handle('mcp:proxy:tools', () => {
+    return mcpProxyService.getAllTools()
+  })
+
+  ipcMain.handle('mcp:proxy:resources', () => {
+    return mcpProxyService.getAllResources()
+  })
+
+  ipcMain.handle('mcp:proxy:prompts', () => {
+    return mcpProxyService.getAllPrompts()
+  })
+
+  ipcMain.handle(
+    'mcp:proxy:callTool',
+    async (
+      _event,
+      toolName: string,
+      args: Record<string, unknown>
+    ): Promise<{ content: unknown; isError?: boolean }> => {
+      return mcpProxyService.callTool(toolName, args)
+    }
+  )
+
+  ipcMain.handle('mcp:proxy:stats', () => {
+    return mcpProxyService.getStats()
+  })
+
+  ipcMain.handle('mcp:proxy:config', () => {
+    return mcpProxyService.getConfig()
+  })
+
+  ipcMain.handle(
+    'mcp:proxy:updateConfig',
+    (
+      _event,
+      config: Partial<{
+        loadBalancing: 'round-robin' | 'least-connections' | 'capability-based'
+        healthCheckInterval: number
+        connectionTimeout: number
+        retryAttempts: number
+        cacheToolsFor: number
+      }>
+    ): void => {
+      mcpProxyService.updateConfig(config)
+    }
+  )
 
   // Memory handlers
   ipcMain.handle('memory:learnings', (_event, query?: string, limit = 50): Learning[] => {
@@ -5269,5 +5355,239 @@ ipcMain.handle(
       ...updateState,
       currentVersion: app.getVersion(),
     }
+  }
+)
+
+// Observability - OpenTelemetry handlers (deploy-rjvh)
+ipcMain.handle(
+  'observability:init',
+  async (
+    _event,
+    config?: {
+      serviceName?: string
+      serviceVersion?: string
+      environment?: string
+      sampleRate?: number
+      enableAutoInstrumentation?: boolean
+      maxSpansPerTrace?: number
+      maxAttributeLength?: number
+      enabledInstrumentations?: string[]
+    }
+  ): Promise<void> => {
+    await observabilityService.initialize(config)
+  }
+)
+
+ipcMain.handle(
+  'observability:startTrace',
+  (
+    _event,
+    name: string,
+    attributes?: Record<string, string | number | boolean | string[] | number[] | boolean[]>
+  ) => {
+    return observabilityService.startTrace(name, attributes)
+  }
+)
+
+ipcMain.handle(
+  'observability:startSpan',
+  (
+    _event,
+    name: string,
+    kind: 'internal' | 'server' | 'client' | 'producer' | 'consumer' = 'internal',
+    attributes?: Record<string, string | number | boolean | string[] | number[] | boolean[]>
+  ): string => {
+    return observabilityService.startSpan(name, kind, undefined, attributes)
+  }
+)
+
+ipcMain.handle(
+  'observability:endSpan',
+  (
+    _event,
+    spanId: string,
+    status?: { code: 'unset' | 'ok' | 'error'; message?: string },
+    attributes?: Record<string, string | number | boolean | string[] | number[] | boolean[]>
+  ): void => {
+    observabilityService.endSpan(spanId, status, attributes)
+  }
+)
+
+ipcMain.handle(
+  'observability:recordException',
+  (_event, spanId: string, error: { name: string; message: string; stack?: string }): void => {
+    const err = new Error(error.message)
+    err.name = error.name
+    if (error.stack) err.stack = error.stack
+    observabilityService.recordException(spanId, err)
+  }
+)
+
+ipcMain.handle(
+  'observability:addEvent',
+  (
+    _event,
+    spanId: string,
+    name: string,
+    attributes?: Record<string, string | number | boolean | string[] | number[] | boolean[]>
+  ): void => {
+    observabilityService.addSpanEvent(spanId, name, attributes)
+  }
+)
+
+ipcMain.handle('observability:getMetrics', () => {
+  return observabilityService.getMetrics()
+})
+
+ipcMain.handle('observability:getStats', () => {
+  return observabilityService.getStats()
+})
+
+ipcMain.handle('observability:getConfig', () => {
+  return observabilityService.getConfig()
+})
+
+ipcMain.handle(
+  'observability:updateConfig',
+  (
+    _event,
+    config: Partial<{
+      serviceName: string
+      serviceVersion: string
+      environment: string
+      sampleRate: number
+      enableAutoInstrumentation: boolean
+      maxSpansPerTrace: number
+      maxAttributeLength: number
+      enabledInstrumentations: string[]
+    }>
+  ): void => {
+    observabilityService.updateConfig(config)
+  }
+)
+
+ipcMain.handle(
+  'observability:recordMetric',
+  (
+    _event,
+    name: string,
+    value: number,
+    type: 'counter' | 'gauge' | 'histogram',
+    attributes?: Record<string, string>
+  ): void => {
+    switch (type) {
+      case 'counter':
+        observabilityService.incrementCounter(name, attributes, value)
+        break
+      case 'gauge':
+        observabilityService.setGauge(name, value, attributes)
+        break
+      case 'histogram':
+        observabilityService.recordHistogram(name, value, attributes)
+        break
+      default:
+        // Unknown metric type - ignore
+        break
+    }
+  }
+)
+
+ipcMain.handle('observability:getActiveSpans', () => {
+  return observabilityService.getActiveSpans()
+})
+
+ipcMain.handle('observability:getRecentSpans', (_event, limit?: number) => {
+  return observabilityService.getRecentSpans(limit)
+})
+
+// Tree-sitter - Code parsing handlers (deploy-4u2e)
+ipcMain.handle(
+  'treesitter:init',
+  async (
+    _event,
+    config?: {
+      maxFileSize?: number
+      excludePatterns?: string[]
+      includeExtensions?: string[]
+      maxDepth?: number
+      parallelParsing?: boolean
+      cacheResults?: boolean
+    }
+  ): Promise<void> => {
+    await treeSitterService.initialize(config)
+  }
+)
+
+ipcMain.handle('treesitter:parseFile', (_event, filePath: string) => {
+  return treeSitterService.parseFile(filePath)
+})
+
+ipcMain.handle('treesitter:indexCodebase', async (_event, rootPath: string) => {
+  const index = await treeSitterService.indexCodebase(rootPath)
+  return index.stats
+})
+
+ipcMain.handle(
+  'treesitter:searchSymbols',
+  (
+    _event,
+    query: string,
+    options?: {
+      kind?: string
+      rootPath?: string
+      limit?: number
+      caseSensitive?: boolean
+    }
+  ) => {
+    return treeSitterService.searchSymbols(query, options as Parameters<typeof treeSitterService.searchSymbols>[1])
+  }
+)
+
+ipcMain.handle('treesitter:findDefinition', (_event, symbolName: string, rootPath?: string) => {
+  return treeSitterService.findDefinition(symbolName, rootPath)
+})
+
+ipcMain.handle('treesitter:findReferences', (_event, symbolName: string, rootPath?: string) => {
+  return treeSitterService.findReferences(symbolName, rootPath)
+})
+
+ipcMain.handle('treesitter:getFileOutline', (_event, filePath: string) => {
+  return treeSitterService.getFileOutline(filePath)
+})
+
+ipcMain.handle('treesitter:getCodebaseStructure', (_event, rootPath: string) => {
+  return treeSitterService.getCodebaseStructure(rootPath)
+})
+
+ipcMain.handle('treesitter:clearCache', (_event, filePath?: string) => {
+  treeSitterService.clearCache(filePath)
+})
+
+ipcMain.handle('treesitter:clearIndex', (_event, rootPath: string) => {
+  treeSitterService.clearIndex(rootPath)
+})
+
+ipcMain.handle('treesitter:getStats', () => {
+  return treeSitterService.getStats()
+})
+
+ipcMain.handle('treesitter:getConfig', () => {
+  return treeSitterService.getConfig()
+})
+
+ipcMain.handle(
+  'treesitter:updateConfig',
+  (
+    _event,
+    config: Partial<{
+      maxFileSize: number
+      excludePatterns: string[]
+      includeExtensions: string[]
+      maxDepth: number
+      parallelParsing: boolean
+      cacheResults: boolean
+    }>
+  ): void => {
+    treeSitterService.updateConfig(config)
   }
 )
