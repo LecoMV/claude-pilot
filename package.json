@@ -40,6 +40,8 @@
     "@electron-toolkit/utils": "^3.0.0",
     "@monaco-editor/react": "^4.7.0",
     "@sentry/electron": "^7.6.0",
+    "@trpc/client": "^10.45.4",
+    "@trpc/server": "^10.45.4",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
@@ -48,6 +50,7 @@
     "clsx": "^2.1.1",
     "cytoscape": "^3.30.4",
     "electron-store": "^10.0.0",
+    "electron-trpc": "^0.6.2",
     "electron-updater": "^6.7.3",
     "lucide-react": "^0.469.0",
     "monaco-editor": "^0.55.1",
@@ -61,6 +64,7 @@
     "reactflow": "^11.11.4",
     "recharts": "^2.15.0",
     "tailwind-merge": "^2.6.0",
+    "zod": "^3.25.76",
     "zustand": "^5.0.3"
   },
   "devDependencies": {

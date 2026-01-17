@@ -6,6 +6,7 @@ const { autoUpdater } = electronUpdater
 import * as Sentry from '@sentry/electron/main'
 import { registerIpcHandlers, logStreamManager } from './ipc/handlers'
 import { terminalManager, registerTerminalHandlers } from './services/terminal'
+import { initializeTRPC, cleanupTRPC } from './trpc'
 import { credentialService } from './services/credentials'
 import { auditService } from './services/audit'
 import { setupGlobalErrorHandlers, configureErrorHandler, handleError } from './utils/error-handler'
@@ -243,6 +244,9 @@ app.whenReady().then(() => {
   if (mainWindow) {
     terminalManager.setMainWindow(mainWindow)
     logStreamManager.setMainWindow(mainWindow)
+
+    // Initialize tRPC for type-safe IPC (coexists with legacy handlers)
+    initializeTRPC(mainWindow)
   }
 
   app.on('activate', function () {
@@ -254,6 +258,7 @@ app.on('window-all-closed', () => {
   // Clean up terminal sessions and log streaming
   terminalManager.closeAll()
   logStreamManager.stop()
+  cleanupTRPC()
 
   if (process.platform !== 'darwin') {
     app.quit()

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { exposeElectronTRPC } from 'electron-trpc/main'
 import type { ElectronAPI, IPCChannels } from '../shared/types'
 
 /**
@@ -678,14 +679,17 @@ const claudeAPI = {
     getMetrics: () => electronAPI.invoke('embedding:metrics'),
     startAutoEmbed: () => electronAPI.invoke('embedding:startAutoEmbed'),
     stopAutoEmbed: () => electronAPI.invoke('embedding:stopAutoEmbed'),
-    search: (query: string, options?: {
-      limit?: number
-      threshold?: number
-      sourceType?: string
-      sessionId?: string
-      projectPath?: string
-      includeContent?: boolean
-    }) => electronAPI.invoke('embedding:search', query, options),
+    search: (
+      query: string,
+      options?: {
+        limit?: number
+        threshold?: number
+        sourceType?: string
+        sessionId?: string
+        projectPath?: string
+        includeContent?: boolean
+      }
+    ) => electronAPI.invoke('embedding:search', query, options),
     embedAndStore: (
       content: string,
       contentType: 'code' | 'conversation' | 'tool_result' | 'learning' | 'documentation',
@@ -730,6 +734,9 @@ if (process.contextIsolated) {
 
     // Domain-specific API (new, recommended)
     contextBridge.exposeInMainWorld('claude', claudeAPI)
+
+    // tRPC API (new type-safe IPC - coexists with legacy handlers)
+    exposeElectronTRPC()
   } catch (error) {
     console.error('Failed to expose electron API:', error)
   }
