@@ -1,0 +1,10 @@
+# Default owners for everything
+* @alexmayhew
+
+# Security-critical files require security review
+src/preload/**          @alexmayhew
+src/main/services/credentials.ts @alexmayhew
+src/shared/validation.ts @alexmayhew
+
+# CI/CD changes require review
+.github/**              @alexmayhew

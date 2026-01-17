@@ -12,7 +12,7 @@ export default defineConfig({
     exclude: ['node_modules', 'dist', 'out', 'e2e'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html', 'lcov'],
+      reporter: ['text', 'text-summary', 'json', 'html', 'lcov'],
       reportsDirectory: './coverage',
       include: ['src/**/*.{ts,tsx}'],
       exclude: [
@@ -24,10 +24,10 @@ export default defineConfig({
       ],
       thresholds: {
         global: {
-          branches: 70,
-          functions: 70,
-          lines: 70,
-          statements: 70,
+          branches: 75,
+          functions: 75,
+          lines: 80,
+          statements: 80,
         },
       },
     },
@@ -37,6 +37,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, './src/renderer'),
+      '@components': resolve(__dirname, './src/renderer/components'),
+      '@stores': resolve(__dirname, './src/renderer/stores'),
+      '@hooks': resolve(__dirname, './src/renderer/hooks'),
+      '@lib': resolve(__dirname, './src/renderer/lib'),
+      '@types': resolve(__dirname, './src/renderer/types'),
       '@shared': resolve(__dirname, './src/shared'),
     },
   },

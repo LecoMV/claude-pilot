@@ -1,0 +1,166 @@
+# CodeRabbit Configuration
+# Documentation: https://docs.coderabbit.ai/guides/configure-coderabbit
+
+language: 'en-US'
+tone_instructions: |
+  Be direct, technical, and thorough. Focus on:
+  - Security vulnerabilities and best practices
+  - Performance implications
+  - Code maintainability and readability
+  - Electron-specific concerns (IPC security, process isolation)
+  - TypeScript type safety
+
+early_access: true
+
+reviews:
+  profile: 'assertive'
+  request_changes_workflow: true
+  high_level_summary: true
+  high_level_summary_placeholder: '@coderabbitai summary'
+  poem: false
+  review_comment_lgtm: false
+  collapse_walkthrough: false
+
+  path_filters:
+    - '!**/node_modules/**'
+    - '!**/dist/**'
+    - '!**/out/**'
+    - '!**/coverage/**'
+    - '!**/playwright-report/**'
+    - '!**/*.lock'
+    - '!**/package-lock.json'
+    - '!**/*.min.js'
+    - '!**/*.min.css'
+
+  path_instructions:
+    - path: 'src/main/**'
+      instructions: |
+        ## Main Process Code Review
+
+        CRITICAL SECURITY FOCUS:
+        - Verify all IPC handlers validate input using schemas from shared/validation.ts
+        - Check for shell injection in any exec/spawn calls
+        - Ensure credentials use safeStorage encryption
+        - Verify audit logging for sensitive operations (OCSF format)
+        - Check error handling uses custom error types from shared/errors.ts
+
+        Performance:
+        - Database connection pooling usage
+        - Resource cleanup in services
+        - Memory leak prevention
+
+        Patterns:
+        - Service initialization/cleanup lifecycle
+        - Async/await error handling
+        - TypeScript strict mode compliance
+
+    - path: 'src/renderer/**'
+      instructions: |
+        ## Renderer Process Code Review
+
+        React Best Practices:
+        - Hooks usage (useMemo, useCallback for expensive operations)
+        - Component composition and single responsibility
+        - Zustand store patterns (avoid storing derived state)
+        - Proper cleanup in useEffect
+
+        Accessibility:
+        - ARIA labels on interactive elements
+        - Keyboard navigation support
+        - Color contrast compliance
+
+        Performance:
+        - Unnecessary re-renders (React.memo usage)
+        - Large list virtualization
+        - Image/asset optimization
+
+        Security:
+        - No direct IPC calls (use window.electron/window.claude)
+        - Sanitize user-displayed content
+
+    - path: 'src/preload/**'
+      instructions: |
+        ## CRITICAL SECURITY REVIEW - Preload Scripts
+
+        This is the security boundary between main and renderer processes.
+
+        MANDATORY CHECKS:
+        1. Every IPC channel MUST be in ALLOWED_CHANNELS whitelist
+        2. Every event channel MUST be in ALLOWED_EVENT_CHANNELS whitelist
+        3. contextBridge.exposeInMainWorld MUST NOT expose dangerous APIs
+        4. No fs, child_process, or Node.js core modules exposed
+        5. validateChannel() MUST be called before every invoke/on/send
+
+        Any new channel addition requires:
+        - Corresponding handler in src/main/ipc/handlers.ts
+        - Type definition in src/shared/types.ts IPCChannels
+        - Security justification in PR description
+
+    - path: 'src/shared/**'
+      instructions: |
+        ## Shared Code Review
+
+        Type Safety:
+        - No `any` types without explicit justification
+        - Exhaustive type unions with switch/case
+        - Proper use of branded types for IDs
+
+        Validation:
+        - Schema completeness for all IPC channels
+        - Sanitization functions for user input
+        - Error messages that don't leak sensitive info
+
+        Error Handling:
+        - Custom error class usage
+        - Error context preservation
+        - Stack trace handling
+
+    - path: '**/*.test.{ts,tsx}'
+      instructions: |
+        ## Test Code Review
+
+        Coverage:
+        - Edge cases and error paths
+        - Async operation handling
+        - Mock correctness and cleanup
+
+        Quality:
+        - Descriptive test names
+        - Arrange-Act-Assert pattern
+        - No test interdependence
+        - Proper beforeEach/afterEach usage
+
+    - path: '.github/workflows/**'
+      instructions: |
+        ## CI/CD Workflow Review
+
+        Security:
+        - Secrets not exposed in logs
+        - Minimal permissions (principle of least privilege)
+        - Action versions pinned to SHA or tag
+
+        Reliability:
+        - Proper error handling
+        - Timeout configuration
+        - Artifact retention policies
+
+        Performance:
+        - Caching strategy
+        - Parallel job execution
+        - Conditional job execution
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+      - master
+      - develop
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: 'auto'

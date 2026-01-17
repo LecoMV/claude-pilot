@@ -1,0 +1,78 @@
+version: 2
+updates:
+  # NPM dependencies
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+      timezone: 'UTC'
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: 'deps'
+      include: 'scope'
+    labels:
+      - 'dependencies'
+      - 'automated'
+    groups:
+      # Group development dependencies
+      development:
+        patterns:
+          - '@types/*'
+          - 'eslint*'
+          - 'prettier*'
+          - 'vitest*'
+          - '@vitest/*'
+          - '@playwright/*'
+          - 'typescript'
+          - '@testing-library/*'
+          - 'husky'
+          - 'lint-staged'
+          - '@commitlint/*'
+        update-types:
+          - 'minor'
+          - 'patch'
+      # Group Electron-related packages
+      electron:
+        patterns:
+          - 'electron'
+          - 'electron-*'
+          - '@electron-toolkit/*'
+      # Group React ecosystem
+      react:
+        patterns:
+          - 'react'
+          - 'react-dom'
+          - '@types/react*'
+          - 'zustand'
+      # Group UI libraries
+      ui:
+        patterns:
+          - 'tailwindcss'
+          - 'postcss'
+          - 'autoprefixer'
+          - 'lucide-react'
+          - 'recharts'
+          - 'cytoscape*'
+          - '@xyflow/*'
+    ignore:
+      # Major version updates require manual review
+      - dependency-name: 'electron'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react-dom'
+        update-types: ['version-update:semver-major']
+
+  # GitHub Actions dependencies
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    commit-message:
+      prefix: 'ci'
+    labels:
+      - 'ci'
+      - 'automated'
