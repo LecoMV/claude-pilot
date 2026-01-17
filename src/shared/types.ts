@@ -413,6 +413,28 @@ export interface ClaudeCodeProfile {
   updatedAt: number
 }
 
+// Watchdog types
+export interface WatchdogServiceHealth {
+  id: string
+  name: string
+  status: 'healthy' | 'unhealthy' | 'recovering' | 'failed'
+  lastCheck: number
+  lastHealthy: number
+  restartCount: number
+  lastRestart?: number
+  error?: string
+}
+
+export interface WatchdogRecoveryEvent {
+  id: string
+  serviceId: string
+  serviceName: string
+  timestamp: number
+  action: 'restart' | 'alert' | 'recovery_failed'
+  success: boolean
+  message: string
+}
+
 // Audit types (OCSF-compliant)
 export interface AuditEvent {
   id?: number
@@ -561,6 +583,62 @@ export interface AppSettings {
   // Security
   autoLock: boolean
   clearOnExit: boolean
+}
+
+// ============================================================================
+// BEADS WORK TRACKING - Issue/Task management types
+// ============================================================================
+
+export type BeadStatus = 'open' | 'in_progress' | 'closed'
+export type BeadType = 'task' | 'bug' | 'feature' | 'epic'
+export type BeadPriority = 0 | 1 | 2 | 3 | 4 // P0 (critical) to P4 (backlog)
+
+export interface Bead {
+  id: string
+  title: string
+  status: BeadStatus
+  priority: BeadPriority
+  type: BeadType
+  created: string // ISO date
+  updated: string // ISO date
+  description?: string
+  assignee?: string
+  blockedBy?: string[]
+  blocks?: string[]
+  tags?: string[]
+}
+
+export interface BeadStats {
+  total: number
+  open: number
+  inProgress: number
+  closed: number
+  blocked: number
+  ready: number
+  avgLeadTime?: number // hours
+}
+
+export interface BeadCreateParams {
+  title: string
+  type: BeadType
+  priority: BeadPriority
+  description?: string
+  assignee?: string
+}
+
+export interface BeadUpdateParams {
+  status?: BeadStatus
+  priority?: BeadPriority
+  assignee?: string
+  description?: string
+}
+
+export interface BeadListFilter {
+  status?: BeadStatus | 'all'
+  priority?: BeadPriority | 'all'
+  type?: BeadType | 'all'
+  search?: string
+  limit?: number
 }
 
 // IPC Channel definitions
@@ -724,6 +802,27 @@ export type IPCChannels = {
   'audit:stats': () => Promise<AuditStats>
   'audit:export': (format: 'json' | 'csv', params?: { startTime?: number; endTime?: number }) => Promise<string>
 
+  // Watchdog (auto-recovery)
+  'watchdog:start': () => Promise<boolean>
+  'watchdog:stop': () => Promise<boolean>
+  'watchdog:isEnabled': () => Promise<boolean>
+  'watchdog:getHealth': () => Promise<WatchdogServiceHealth[]>
+  'watchdog:getServiceHealth': (serviceId: string) => Promise<WatchdogServiceHealth | null>
+  'watchdog:getRecoveryHistory': (limit?: number) => Promise<WatchdogRecoveryEvent[]>
+  'watchdog:forceCheck': (serviceId: string) => Promise<WatchdogServiceHealth | null>
+  'watchdog:forceRestart': (serviceId: string) => Promise<boolean>
+
+  // Beads (work tracking)
+  'beads:list': (filter?: BeadListFilter) => Promise<Bead[]>
+  'beads:get': (id: string) => Promise<Bead | null>
+  'beads:stats': () => Promise<BeadStats>
+  'beads:create': (params: BeadCreateParams) => Promise<Bead | null>
+  'beads:update': (id: string, params: BeadUpdateParams) => Promise<boolean>
+  'beads:close': (id: string, reason?: string) => Promise<boolean>
+  'beads:ready': () => Promise<Bead[]>
+  'beads:blocked': () => Promise<Bead[]>
+  'beads:hasBeads': (projectPath: string) => Promise<boolean>
+
   // System helpers
   'system:getHomePath': () => Promise<string>
 
@@ -779,6 +878,16 @@ export interface ClaudeAPI {
     query: (params?: Parameters<IPCChannels['audit:query']>[0]) => ReturnType<IPCChannels['audit:query']>
     getStats: () => ReturnType<IPCChannels['audit:stats']>
     export: (format: 'json' | 'csv', params?: { startTime?: number; endTime?: number }) => Promise<string>
+  }
+  beads: {
+    list: (filter?: BeadListFilter) => ReturnType<IPCChannels['beads:list']>
+    get: (id: string) => ReturnType<IPCChannels['beads:get']>
+    stats: () => ReturnType<IPCChannels['beads:stats']>
+    create: (params: BeadCreateParams) => ReturnType<IPCChannels['beads:create']>
+    update: (id: string, params: BeadUpdateParams) => ReturnType<IPCChannels['beads:update']>
+    close: (id: string, reason?: string) => ReturnType<IPCChannels['beads:close']>
+    ready: () => ReturnType<IPCChannels['beads:ready']>
+    blocked: () => ReturnType<IPCChannels['beads:blocked']>
   }
 }
 

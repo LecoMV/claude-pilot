@@ -4,6 +4,7 @@ import { memgraphService } from '../services/memgraph'
 import { postgresService } from '../services/postgresql'
 import { credentialService } from '../services/credentials'
 import { auditService } from '../services/audit'
+import { watchdogService } from '../services/watchdog'
 import { transcriptService, type ParseOptions, type TranscriptStats } from '../services/transcript'
 import { existsSync, readdirSync, readFileSync, writeFileSync, watch, FSWatcher, mkdirSync, unlinkSync, statSync } from 'fs'
 import { join } from 'path'
@@ -37,6 +38,14 @@ import type {
   SessionStats,
   SessionMessage,
   SessionProcessInfo,
+  Bead,
+  BeadStats,
+  BeadCreateParams,
+  BeadUpdateParams,
+  BeadListFilter,
+  BeadStatus,
+  BeadType,
+  BeadPriority,
 } from '../../shared/types'
 
 const HOME = homedir()
@@ -771,6 +780,49 @@ export function registerIpcHandlers(): void {
       return auditService.exportCSV(params)
     }
     return auditService.exportJSON(params)
+  })
+
+  // ==================== Watchdog Handlers ====================
+  ipcMain.handle('watchdog:start', async (): Promise<boolean> => {
+    try {
+      watchdogService.start()
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  ipcMain.handle('watchdog:stop', async (): Promise<boolean> => {
+    try {
+      watchdogService.stop()
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  ipcMain.handle('watchdog:isEnabled', async (): Promise<boolean> => {
+    return watchdogService.isEnabled()
+  })
+
+  ipcMain.handle('watchdog:getHealth', async () => {
+    return watchdogService.getHealth()
+  })
+
+  ipcMain.handle('watchdog:getServiceHealth', async (_event, serviceId: string) => {
+    return watchdogService.getServiceHealth(serviceId)
+  })
+
+  ipcMain.handle('watchdog:getRecoveryHistory', async (_event, limit?: number) => {
+    return watchdogService.getRecoveryHistory(limit)
+  })
+
+  ipcMain.handle('watchdog:forceCheck', async (_event, serviceId: string) => {
+    return watchdogService.forceCheck(serviceId)
+  })
+
+  ipcMain.handle('watchdog:forceRestart', async (_event, serviceId: string) => {
+    return watchdogService.forceRestart(serviceId)
   })
 
   // System helpers
@@ -4000,5 +4052,339 @@ ipcMain.handle('transcript:watch', async (_event, filePath: string, enable: bool
   } else {
     transcriptService.unwatchTranscript(filePath)
     return true
+  }
+})
+
+// ============================================================================
+// BEADS WORK TRACKING HANDLERS
+// ============================================================================
+
+/**
+ * Parse bd list output into Bead objects
+ * Format: deploy-xxxx [P0] [type] status - title
+ */
+function parseBeadListOutput(output: string): Bead[] {
+  const beads: Bead[] = []
+  const lines = output.split('\n').filter(line => line.trim())
+
+  for (const line of lines) {
+    // Match: deploy-xxxx [P0] [type] status - title
+    const match = line.match(/^(\S+)\s+\[P(\d)\]\s+\[(\w+)\]\s+(\w+)\s+-\s+(.+)$/)
+    if (match) {
+      const [, id, priority, type, status, title] = match
+      beads.push({
+        id,
+        title: title.trim(),
+        status: status as BeadStatus,
+        priority: parseInt(priority) as BeadPriority,
+        type: type as BeadType,
+        created: new Date().toISOString().split('T')[0],
+        updated: new Date().toISOString().split('T')[0],
+      })
+    }
+  }
+
+  return beads
+}
+
+/**
+ * Parse bd show output for a single bead
+ */
+function parseBeadShowOutput(output: string): Bead | null {
+  const lines = output.split('\n').filter(line => line.trim())
+  if (lines.length === 0) return null
+
+  // First line: id: title
+  const titleMatch = lines[0].match(/^(\S+):\s+(.+)$/)
+  if (!titleMatch) return null
+
+  const [, id, title] = titleMatch
+
+  // Parse remaining lines
+  let status: BeadStatus = 'open'
+  let priority: BeadPriority = 2
+  let type: BeadType = 'task'
+  let created = new Date().toISOString().split('T')[0]
+  let updated = new Date().toISOString().split('T')[0]
+  let description: string | undefined
+  let assignee: string | undefined
+  const blockedBy: string[] = []
+  const blocks: string[] = []
+
+  for (const line of lines.slice(1)) {
+    if (line.startsWith('Status:')) {
+      status = line.replace('Status:', '').trim() as BeadStatus
+    } else if (line.startsWith('Priority:')) {
+      const p = line.replace('Priority:', '').trim()
+      priority = parseInt(p.replace('P', '')) as BeadPriority
+    } else if (line.startsWith('Type:')) {
+      type = line.replace('Type:', '').trim() as BeadType
+    } else if (line.startsWith('Created:')) {
+      created = line.replace('Created:', '').trim().split(' ')[0]
+    } else if (line.startsWith('Updated:')) {
+      updated = line.replace('Updated:', '').trim().split(' ')[0]
+    } else if (line.startsWith('Assignee:')) {
+      assignee = line.replace('Assignee:', '').trim()
+    } else if (line.startsWith('Description:')) {
+      description = line.replace('Description:', '').trim()
+    } else if (line.startsWith('Blocked by:')) {
+      const deps = line.replace('Blocked by:', '').trim()
+      blockedBy.push(...deps.split(',').map(d => d.trim()).filter(Boolean))
+    } else if (line.startsWith('Blocks:')) {
+      const deps = line.replace('Blocks:', '').trim()
+      blocks.push(...deps.split(',').map(d => d.trim()).filter(Boolean))
+    }
+  }
+
+  return {
+    id,
+    title,
+    status,
+    priority,
+    type,
+    created,
+    updated,
+    description,
+    assignee,
+    blockedBy: blockedBy.length > 0 ? blockedBy : undefined,
+    blocks: blocks.length > 0 ? blocks : undefined,
+  }
+}
+
+/**
+ * Parse bd stats output
+ */
+function parseBeadStatsOutput(output: string): BeadStats {
+  const stats: BeadStats = {
+    total: 0,
+    open: 0,
+    inProgress: 0,
+    closed: 0,
+    blocked: 0,
+    ready: 0,
+  }
+
+  const lines = output.split('\n')
+  for (const line of lines) {
+    const match = line.match(/^([^:]+):\s*(\d+(?:\.\d+)?)\s*(\w*)/)
+    if (match) {
+      const [, key, value] = match
+      const cleanKey = key.toLowerCase().trim()
+      const numValue = parseFloat(value)
+
+      if (cleanKey.includes('total')) stats.total = numValue
+      else if (cleanKey.includes('open')) stats.open = numValue
+      else if (cleanKey.includes('in progress')) stats.inProgress = numValue
+      else if (cleanKey.includes('closed')) stats.closed = numValue
+      else if (cleanKey.includes('blocked')) stats.blocked = numValue
+      else if (cleanKey.includes('ready')) stats.ready = numValue
+      else if (cleanKey.includes('avg lead')) stats.avgLeadTime = numValue
+    }
+  }
+
+  return stats
+}
+
+/**
+ * Execute bd command safely
+ */
+async function executeBdCommand(args: string[], cwd?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const bdProcess = spawn('bd', args, {
+      cwd: cwd || HOME,
+      env: process.env,
+      shell: false,
+    })
+
+    let stdout = ''
+    let stderr = ''
+
+    bdProcess.stdout.on('data', (data) => {
+      stdout += data.toString()
+    })
+
+    bdProcess.stderr.on('data', (data) => {
+      stderr += data.toString()
+    })
+
+    bdProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout)
+      } else {
+        reject(new Error(stderr || `bd command failed with code ${code}`))
+      }
+    })
+
+    bdProcess.on('error', (err) => {
+      reject(err)
+    })
+  })
+}
+
+// Beads IPC Handlers
+ipcMain.handle('beads:list', async (_event, filter?: BeadListFilter) => {
+  try {
+    const args = ['list']
+
+    // Add status filter
+    if (filter?.status && filter.status !== 'all') {
+      args.push(`--status=${filter.status}`)
+    }
+
+    const output = await executeBdCommand(args)
+    let beads = parseBeadListOutput(output)
+
+    // Apply additional filters client-side
+    if (filter?.priority && filter.priority !== 'all') {
+      beads = beads.filter(b => b.priority === filter.priority)
+    }
+    if (filter?.type && filter.type !== 'all') {
+      beads = beads.filter(b => b.type === filter.type)
+    }
+    if (filter?.search) {
+      const search = filter.search.toLowerCase()
+      beads = beads.filter(b =>
+        b.title.toLowerCase().includes(search) ||
+        b.id.toLowerCase().includes(search)
+      )
+    }
+    if (filter?.limit) {
+      beads = beads.slice(0, filter.limit)
+    }
+
+    return beads
+  } catch (error) {
+    console.error('Failed to list beads:', error)
+    return []
+  }
+})
+
+ipcMain.handle('beads:get', async (_event, id: string) => {
+  try {
+    // Sanitize id
+    const safeId = id.replace(/[^a-zA-Z0-9._-]/g, '')
+    const output = await executeBdCommand(['show', safeId])
+    return parseBeadShowOutput(output)
+  } catch (error) {
+    console.error('Failed to get bead:', error)
+    return null
+  }
+})
+
+ipcMain.handle('beads:stats', async () => {
+  try {
+    const output = await executeBdCommand(['stats'])
+    return parseBeadStatsOutput(output)
+  } catch (error) {
+    console.error('Failed to get beads stats:', error)
+    return {
+      total: 0,
+      open: 0,
+      inProgress: 0,
+      closed: 0,
+      blocked: 0,
+      ready: 0,
+    }
+  }
+})
+
+ipcMain.handle('beads:create', async (_event, params: BeadCreateParams) => {
+  try {
+    const args = ['create']
+
+    // Sanitize and add parameters
+    args.push(`--title="${params.title.replace(/"/g, '\\"')}"`)
+    args.push(`--type=${params.type}`)
+    args.push(`--priority=${params.priority}`)
+
+    if (params.description) {
+      args.push(`--description="${params.description.replace(/"/g, '\\"')}"`)
+    }
+    if (params.assignee) {
+      args.push(`--assignee=${params.assignee.replace(/[^a-zA-Z0-9._-]/g, '')}`)
+    }
+
+    const output = await executeBdCommand(args)
+
+    // Parse created bead id from output
+    const idMatch = output.match(/Created:\s*(\S+)/)
+    if (idMatch) {
+      return parseBeadShowOutput(await executeBdCommand(['show', idMatch[1]]))
+    }
+
+    return null
+  } catch (error) {
+    console.error('Failed to create bead:', error)
+    return null
+  }
+})
+
+ipcMain.handle('beads:update', async (_event, id: string, params: BeadUpdateParams) => {
+  try {
+    const safeId = id.replace(/[^a-zA-Z0-9._-]/g, '')
+    const args = ['update', safeId]
+
+    if (params.status) {
+      args.push(`--status=${params.status}`)
+    }
+    if (params.priority !== undefined) {
+      args.push(`--priority=${params.priority}`)
+    }
+    if (params.assignee) {
+      args.push(`--assignee=${params.assignee.replace(/[^a-zA-Z0-9._-]/g, '')}`)
+    }
+
+    await executeBdCommand(args)
+    return true
+  } catch (error) {
+    console.error('Failed to update bead:', error)
+    return false
+  }
+})
+
+ipcMain.handle('beads:close', async (_event, id: string, reason?: string) => {
+  try {
+    const safeId = id.replace(/[^a-zA-Z0-9._-]/g, '')
+    const args = ['close', safeId]
+
+    if (reason) {
+      args.push(`--reason="${reason.replace(/"/g, '\\"')}"`)
+    }
+
+    await executeBdCommand(args)
+    return true
+  } catch (error) {
+    console.error('Failed to close bead:', error)
+    return false
+  }
+})
+
+ipcMain.handle('beads:ready', async () => {
+  try {
+    const output = await executeBdCommand(['ready'])
+    return parseBeadListOutput(output)
+  } catch (error) {
+    console.error('Failed to get ready beads:', error)
+    return []
+  }
+})
+
+ipcMain.handle('beads:blocked', async () => {
+  try {
+    const output = await executeBdCommand(['blocked'])
+    return parseBeadListOutput(output)
+  } catch (error) {
+    console.error('Failed to get blocked beads:', error)
+    return []
+  }
+})
+
+ipcMain.handle('beads:hasBeads', async (_event, projectPath: string) => {
+  try {
+    // Check if .beads directory exists in project
+    const beadsPath = join(projectPath, '.beads')
+    return existsSync(beadsPath)
+  } catch {
+    return false
   }
 })

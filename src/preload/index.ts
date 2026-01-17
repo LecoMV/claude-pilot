@@ -124,6 +124,16 @@ const ALLOWED_CHANNELS = new Set<string>([
   'audit:stats',
   'audit:export',
 
+  // Watchdog (auto-recovery)
+  'watchdog:start',
+  'watchdog:stop',
+  'watchdog:isEnabled',
+  'watchdog:getHealth',
+  'watchdog:getServiceHealth',
+  'watchdog:getRecoveryHistory',
+  'watchdog:forceCheck',
+  'watchdog:forceRestart',
+
   // Shell operations
   'shell:openPath',
   'shell:openExternal',
@@ -133,6 +143,17 @@ const ALLOWED_CHANNELS = new Set<string>([
 
   // Terminal external
   'terminal:openAt',
+
+  // Beads (work tracking)
+  'beads:list',
+  'beads:get',
+  'beads:stats',
+  'beads:create',
+  'beads:update',
+  'beads:close',
+  'beads:ready',
+  'beads:blocked',
+  'beads:hasBeads',
 ])
 
 /**
@@ -256,6 +277,22 @@ const claudeAPI = {
     getStats: () => electronAPI.invoke('audit:stats'),
     export: (format: 'json' | 'csv', params?: { startTime?: number; endTime?: number }) =>
       electronAPI.invoke('audit:export', format, params),
+  },
+
+  // Beads (work tracking)
+  beads: {
+    list: (filter?: Parameters<IPCChannels['beads:list']>[0]) =>
+      electronAPI.invoke('beads:list', filter),
+    get: (id: string) => electronAPI.invoke('beads:get', id),
+    stats: () => electronAPI.invoke('beads:stats'),
+    create: (params: Parameters<IPCChannels['beads:create']>[0]) =>
+      electronAPI.invoke('beads:create', params),
+    update: (id: string, params: Parameters<IPCChannels['beads:update']>[1]) =>
+      electronAPI.invoke('beads:update', id, params),
+    close: (id: string, reason?: string) =>
+      electronAPI.invoke('beads:close', id, reason),
+    ready: () => electronAPI.invoke('beads:ready'),
+    blocked: () => electronAPI.invoke('beads:blocked'),
   },
 }
 
