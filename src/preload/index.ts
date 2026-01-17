@@ -253,6 +253,9 @@ const ALLOWED_CHANNELS = new Set<string>([
   'plans:stepFail',
   'plans:stats',
 
+  // Error reporting (renderer → main)
+  'error:ui',
+
   // Branches (conversation branching)
   'branches:list',
   'branches:get',
@@ -304,6 +307,9 @@ const ALLOWED_EVENT_CHANNELS = new Set<string>([
 
   // Error events
   'error:occurred',
+
+  // Ollama events
+  'ollama:pullProgress',
 ])
 
 /**
