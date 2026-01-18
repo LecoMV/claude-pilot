@@ -15,7 +15,10 @@
  */
 
 import { router, auditedProcedure } from '../../trpc/trpc'
-import { autoUpdater } from 'electron-updater'
+// electron-updater is CommonJS - use default import for ESM compatibility
+// See: https://electron-vite.org/guide/troubleshooting
+import electronUpdater from 'electron-updater'
+const { autoUpdater } = electronUpdater
 import { BrowserWindow } from 'electron'
 
 // ============================================================================

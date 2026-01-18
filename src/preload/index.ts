@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { exposeElectronTRPC } from 'electron-trpc/main'
+// electron-trpc v1.0.0-alpha.0+ separates preload exports from main process
+// See: https://github.com/jsonnull/electron-trpc/pull/204
+import { exposeElectronTRPC } from 'electron-trpc/preload'
 import type { ElectronAPI, IPCChannels } from '../shared/types'
 
 /**
