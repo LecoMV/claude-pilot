@@ -13,6 +13,10 @@ import {
   Globe,
   Brain,
   Zap,
+  Terminal,
+  CheckCircle2,
+  XCircle,
+  Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/react'
@@ -31,7 +35,7 @@ export function GlobalSettings() {
     setClaudeMdContent,
   } = useProfileStore()
 
-  const [activeTab, setActiveTab] = useState<'model' | 'claudemd' | 'rules'>('model')
+  const [activeTab, setActiveTab] = useState<'model' | 'claude' | 'claudemd' | 'rules'>('model')
   const [saving, setSaving] = useState(false)
   const [localSettings, setLocalSettings] = useState({
     model: '',
@@ -167,6 +171,12 @@ export function GlobalSettings() {
           label="Model Settings"
         />
         <TabButton
+          active={activeTab === 'claude'}
+          onClick={() => setActiveTab('claude')}
+          icon={Terminal}
+          label="Claude Code"
+        />
+        <TabButton
           active={activeTab === 'claudemd'}
           onClick={() => setActiveTab('claudemd')}
           icon={FileText}
@@ -189,6 +199,8 @@ export function GlobalSettings() {
           saving={saving}
         />
       )}
+
+      {activeTab === 'claude' && <ClaudeCodePanel />}
 
       {activeTab === 'claudemd' && (
         <ClaudeMdPanel
@@ -721,6 +733,315 @@ function ModelSettingsPanel({ settings, onChange, onSave, saving }: ModelSetting
             <p>
               These settings are the defaults for new Claude Code sessions. Work Profiles can
               override these settings with profile-specific configurations.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Claude Code Settings Panel
+ * Configure binary path and projects directory
+ */
+function ClaudeCodePanel() {
+  const [binaryPath, setBinaryPath] = useState('')
+  const [projectsPath, setProjectsPath] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [testingBinary, setTestingBinary] = useState(false)
+  const [testingProjects, setTestingProjects] = useState(false)
+  const [binaryTestResult, setBinaryTestResult] = useState<{
+    valid: boolean
+    version?: string
+    error?: string
+  } | null>(null)
+  const [projectsTestResult, setProjectsTestResult] = useState<{
+    valid: boolean
+    projectCount?: number
+    error?: string
+  } | null>(null)
+
+  // Get Claude Code status
+  const statusQuery = trpc.claude.status.useQuery(undefined, { refetchInterval: 30000 })
+
+  // Get current settings
+  const settingsQuery = trpc.settings.get.useQuery()
+
+  // Mutations
+  const setClaudeMutation = trpc.settings.setClaude.useMutation({
+    onSuccess: () => {
+      statusQuery.refetch()
+    },
+    onSettled: () => {
+      setSaving(false)
+    },
+  })
+
+  const testBinaryQuery = trpc.claude.testBinary.useQuery(binaryPath, {
+    enabled: false, // Manual trigger
+  })
+
+  const testProjectsQuery = trpc.claude.testProjectsPath.useQuery(projectsPath, {
+    enabled: false, // Manual trigger
+  })
+
+  // Initialize form from settings
+  useEffect(() => {
+    if (settingsQuery.data?.claude) {
+      setBinaryPath(settingsQuery.data.claude.binaryPath || '')
+      setProjectsPath(settingsQuery.data.claude.projectsPath || '')
+    }
+  }, [settingsQuery.data])
+
+  const handleTestBinary = async () => {
+    if (!binaryPath) return
+    setTestingBinary(true)
+    setBinaryTestResult(null)
+    try {
+      const result = await testBinaryQuery.refetch()
+      setBinaryTestResult(result.data || null)
+    } finally {
+      setTestingBinary(false)
+    }
+  }
+
+  const handleTestProjects = async () => {
+    if (!projectsPath) return
+    setTestingProjects(true)
+    setProjectsTestResult(null)
+    try {
+      const result = await testProjectsQuery.refetch()
+      setProjectsTestResult(result.data || null)
+    } finally {
+      setTestingProjects(false)
+    }
+  }
+
+  const handleSave = () => {
+    setSaving(true)
+    setClaudeMutation.mutate({
+      binaryPath: binaryPath || undefined,
+      projectsPath: projectsPath || undefined,
+    })
+  }
+
+  const handleClear = () => {
+    setBinaryPath('')
+    setProjectsPath('')
+    setBinaryTestResult(null)
+    setProjectsTestResult(null)
+    setSaving(true)
+    setClaudeMutation.mutate({
+      binaryPath: undefined,
+      projectsPath: undefined,
+    })
+  }
+
+  const status = statusQuery.data
+
+  return (
+    <div className="space-y-6">
+      {/* Current Status */}
+      <section className="card">
+        <div className="card-header">
+          <h3 className="font-medium text-text-primary flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-accent-purple" />
+            Claude Code Status
+          </h3>
+          <p className="text-xs text-text-muted mt-1">Current detection status</p>
+        </div>
+        <div className="card-body space-y-3">
+          {statusQuery.isLoading ? (
+            <div className="flex items-center gap-2 text-text-muted">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Detecting Claude Code...
+            </div>
+          ) : status ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-text-secondary">Installed</span>
+                <span className="flex items-center gap-2">
+                  {status.installed ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-accent-green" />
+                      <span className="text-accent-green">Yes</span>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="w-4 h-4 text-accent-red" />
+                      <span className="text-accent-red">No</span>
+                    </>
+                  )}
+                </span>
+              </div>
+              {status.version && (
+                <div className="flex items-center justify-between">
+                  <span className="text-text-secondary">Version</span>
+                  <span className="text-text-primary font-mono text-sm">{status.version}</span>
+                </div>
+              )}
+              {status.binaryPath && (
+                <div className="flex items-center justify-between">
+                  <span className="text-text-secondary">Binary Path</span>
+                  <span className="text-text-muted font-mono text-xs truncate max-w-[250px]">
+                    {status.binaryPath}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-text-secondary">Projects Path</span>
+                <span className="text-text-muted font-mono text-xs truncate max-w-[250px]">
+                  {status.projectsPath}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-secondary">Projects Found</span>
+                <span className="text-text-primary">{status.projectCount}</span>
+              </div>
+              {status.error && (
+                <div className="mt-2 p-2 bg-accent-red/10 border border-accent-red/20 rounded text-accent-red text-sm">
+                  {status.error}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-text-muted">Unable to detect Claude Code status</div>
+          )}
+        </div>
+      </section>
+
+      {/* Path Overrides */}
+      <section className="card">
+        <div className="card-header">
+          <h3 className="font-medium text-text-primary flex items-center gap-2">
+            <FolderOpen className="w-4 h-4 text-accent-blue" />
+            Path Overrides
+          </h3>
+          <p className="text-xs text-text-muted mt-1">
+            Override auto-detected paths (leave empty for auto-detection)
+          </p>
+        </div>
+        <div className="card-body space-y-4">
+          {/* Binary Path */}
+          <div>
+            <label className="block text-sm text-text-secondary mb-2">
+              Claude Code Binary Path
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={binaryPath}
+                onChange={(e) => {
+                  setBinaryPath(e.target.value)
+                  setBinaryTestResult(null)
+                }}
+                placeholder="/usr/local/bin/claude (auto-detect)"
+                className="input flex-1 font-mono text-sm"
+              />
+              <button
+                onClick={handleTestBinary}
+                disabled={!binaryPath || testingBinary}
+                className="btn btn-secondary"
+              >
+                {testingBinary ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Test'}
+              </button>
+            </div>
+            {binaryTestResult && (
+              <div
+                className={cn(
+                  'mt-2 p-2 rounded text-sm',
+                  binaryTestResult.valid
+                    ? 'bg-accent-green/10 border border-accent-green/20 text-accent-green'
+                    : 'bg-accent-red/10 border border-accent-red/20 text-accent-red'
+                )}
+              >
+                {binaryTestResult.valid ? (
+                  <span className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Valid - Version: {binaryTestResult.version}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <XCircle className="w-4 h-4" />
+                    {binaryTestResult.error}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Projects Path */}
+          <div>
+            <label className="block text-sm text-text-secondary mb-2">
+              Projects Directory Path
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={projectsPath}
+                onChange={(e) => {
+                  setProjectsPath(e.target.value)
+                  setProjectsTestResult(null)
+                }}
+                placeholder="~/.claude/projects (default)"
+                className="input flex-1 font-mono text-sm"
+              />
+              <button
+                onClick={handleTestProjects}
+                disabled={!projectsPath || testingProjects}
+                className="btn btn-secondary"
+              >
+                {testingProjects ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Test'}
+              </button>
+            </div>
+            {projectsTestResult && (
+              <div
+                className={cn(
+                  'mt-2 p-2 rounded text-sm',
+                  projectsTestResult.valid
+                    ? 'bg-accent-green/10 border border-accent-green/20 text-accent-green'
+                    : 'bg-accent-red/10 border border-accent-red/20 text-accent-red'
+                )}
+              >
+                {projectsTestResult.valid ? (
+                  <span className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Valid - {projectsTestResult.projectCount} projects found
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <XCircle className="w-4 h-4" />
+                    {projectsTestResult.error}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Save / Clear buttons */}
+      <div className="flex justify-between">
+        <button onClick={handleClear} className="btn btn-secondary" disabled={saving}>
+          Clear Overrides
+        </button>
+        <button onClick={handleSave} className="btn btn-primary" disabled={saving}>
+          {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          Save Settings
+        </button>
+      </div>
+
+      {/* Info card */}
+      <div className="card p-4">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-accent-blue flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-text-secondary">
+            <p className="font-medium text-text-primary mb-1">About Claude Code Paths</p>
+            <p>
+              By default, Claude Pilot auto-detects the Claude Code binary from your PATH and uses
+              ~/.claude/projects for session data. If your installation uses non-standard paths, you
+              can override them here.
             </p>
           </div>
         </div>

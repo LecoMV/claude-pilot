@@ -17,7 +17,7 @@ import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import type { AppSettings, BudgetSettings } from '../../../shared/types'
+import type { AppSettings, BudgetSettings, ClaudePathSettings } from '../../../shared/types'
 
 // ============================================================================
 // Constants
@@ -55,6 +55,11 @@ const BudgetSettingsSchema = z.object({
   alertsEnabled: z.boolean(),
 })
 
+const ClaudePathSettingsSchema = z.object({
+  binaryPath: z.string().optional(),
+  projectsPath: z.string().optional(),
+})
+
 const AppSettingsSchema = z.object({
   theme: z.enum(['dark', 'light', 'auto']),
   accentColor: z.enum(['purple', 'blue', 'green', 'teal']),
@@ -71,6 +76,7 @@ const AppSettingsSchema = z.object({
   autoLock: z.boolean(),
   clearOnExit: z.boolean(),
   budget: BudgetSettingsSchema.optional(),
+  claude: ClaudePathSettingsSchema.optional(),
 })
 
 // ============================================================================
@@ -131,6 +137,15 @@ export const settingsRouter = router({
   setBudget: auditedProcedure.input(BudgetSettingsSchema).mutation(({ input }): boolean => {
     const settings = getAppSettings()
     settings.budget = input as BudgetSettings
+    return saveAppSettings(settings)
+  }),
+
+  /**
+   * Set Claude Code path settings
+   */
+  setClaude: auditedProcedure.input(ClaudePathSettingsSchema).mutation(({ input }): boolean => {
+    const settings = getAppSettings()
+    settings.claude = input as ClaudePathSettings
     return saveAppSettings(settings)
   }),
 })

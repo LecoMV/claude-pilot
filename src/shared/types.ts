@@ -663,6 +663,25 @@ export interface AppSettings {
 
   // Budget tracking
   budget?: BudgetSettings
+
+  // Claude Code paths (optional overrides)
+  claude?: ClaudePathSettings
+}
+
+export interface ClaudePathSettings {
+  // Override for Claude Code binary path (default: auto-detect from PATH)
+  binaryPath?: string
+  // Override for Claude projects directory (default: ~/.claude/projects)
+  projectsPath?: string
+}
+
+export interface ClaudeCodeStatus {
+  installed: boolean
+  version?: string
+  binaryPath?: string
+  projectsPath: string
+  projectCount: number
+  error?: string
 }
 
 export interface BudgetSettings {
