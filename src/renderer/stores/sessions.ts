@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { trpc } from '@/lib/trpc/client'
 import type { ExternalSession, SessionMessage } from '../../shared/types'
 
 interface SessionsState {
@@ -43,7 +44,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   fetchSessions: async () => {
     set({ isLoading: true, error: null })
     try {
-      const sessions = await window.electron.invoke('sessions:discover')
+      const sessions = await trpc.session.discover.query()
       set({ sessions, isLoading: false })
     } catch {
       set({ error: 'Failed to fetch sessions', isLoading: false })
@@ -52,7 +53,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
 
   fetchActiveSessions: async () => {
     try {
-      const activeSessions = await window.electron.invoke('sessions:getActive')
+      const activeSessions = await trpc.session.getActive.query()
       set({ activeSessions })
     } catch (error) {
       console.error('Failed to fetch active sessions:', error)
@@ -77,7 +78,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
 
   fetchSessionMessages: async (sessionId: string, limit = 100) => {
     try {
-      const messages = await window.electron.invoke('sessions:getMessages', sessionId, limit)
+      const messages = await trpc.session.getMessages.query({ sessionId, limit })
       set({ selectedMessages: messages })
     } catch (error) {
       console.error('Failed to fetch session messages:', error)
@@ -87,7 +88,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   toggleWatching: async () => {
     const { isWatching } = get()
     try {
-      await window.electron.invoke('sessions:watch', !isWatching)
+      await trpc.session.watch.mutate({ enable: !isWatching })
       set({ isWatching: !isWatching })
     } catch (error) {
       console.error('Failed to toggle session watching:', error)
@@ -111,9 +112,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
 
     // Update active sessions
     const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
-    const activeSessions = get().sessions.filter(
-      (s) => s.lastActivity > fiveMinutesAgo
-    )
+    const activeSessions = get().sessions.filter((s) => s.lastActivity > fiveMinutesAgo)
     set({ activeSessions })
   },
 }))
@@ -147,7 +146,9 @@ export const selectFilteredSessions = (state: SessionsState) => {
       case 'startTime':
         return b.startTime - a.startTime
       case 'tokens':
-        return (b.stats.inputTokens + b.stats.outputTokens) - (a.stats.inputTokens + a.stats.outputTokens)
+        return (
+          b.stats.inputTokens + b.stats.outputTokens - (a.stats.inputTokens + a.stats.outputTokens)
+        )
       case 'messages':
         return b.stats.messageCount - a.stats.messageCount
       case 'lastActivity':

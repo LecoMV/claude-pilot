@@ -1,7 +1,18 @@
+/**
+ * Terminal Hook - Hybrid tRPC/IPC Implementation
+ *
+ * HYBRID APPROACH (from research):
+ * - Control operations (create, resize, close): tRPC (type-safe)
+ * - Data streaming (write, output): Legacy IPC (low-latency)
+ *
+ * @see docs/Research/Electron-tRPC Production Patterns Research.md
+ */
+
 import { useCallback, useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { trpc } from '@/lib/trpc/client'
 import { useTerminalStore } from '@/stores/terminal'
 
 interface UseTerminalOptions {
@@ -14,6 +25,7 @@ export function useTerminal({ tabId, containerRef }: UseTerminalOptions) {
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
+  const sessionIdRef = useRef<string | null>(null)
 
   const tab = tabs.find((t) => t.id === tabId)
 
@@ -75,9 +87,10 @@ export function useTerminal({ tabId, containerRef }: UseTerminalOptions) {
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
 
-    // Create PTY session
+    // Create PTY session via tRPC (control operation)
     try {
-      const sessionId = await window.electron.invoke('terminal:create')
+      const sessionId = await trpc.terminal.create.mutate({})
+      sessionIdRef.current = sessionId
 
       // Update tab with terminal and session
       updateTab(tabId, {
@@ -86,29 +99,35 @@ export function useTerminal({ tabId, containerRef }: UseTerminalOptions) {
         isConnected: true,
       })
 
-      // Handle terminal input -> PTY
+      // Handle terminal input -> PTY (data streaming via legacy IPC)
       terminal.onData((data) => {
         window.electron.send('terminal:write', sessionId, data)
       })
 
-      // Handle resize
+      // Handle resize via tRPC (control operation)
       terminal.onResize(({ cols, rows }) => {
-        window.electron.send('terminal:resize', sessionId, cols, rows)
+        trpc.terminal.resize.mutate({ sessionId, cols, rows }).catch(() => {
+          // Ignore resize errors (session might be closed)
+        })
       })
 
-      // Handle PTY output -> terminal
+      // Handle PTY output -> terminal (data streaming via legacy IPC)
       unsubscribeRef.current = window.electron.on(`terminal:data:${sessionId}`, (data) => {
         terminal.write(data as string)
       })
 
-      // Handle PTY exit
+      // Handle PTY exit (event via legacy IPC)
       window.electron.on(`terminal:exit:${sessionId}`, () => {
         terminal.writeln('\r\n\x1b[90m[Process exited]\x1b[0m')
         updateTab(tabId, { isConnected: false })
       })
 
-      // Initial resize
-      window.electron.send('terminal:resize', sessionId, terminal.cols, terminal.rows)
+      // Initial resize via tRPC
+      await trpc.terminal.resize.mutate({
+        sessionId,
+        cols: terminal.cols,
+        rows: terminal.rows,
+      })
     } catch (error) {
       terminal.writeln(`\x1b[31mFailed to create terminal session: ${error}\x1b[0m`)
     }

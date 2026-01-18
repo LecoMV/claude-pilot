@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { trpc } from '@/lib/trpc/client'
 import type { ExternalSession, BudgetSettings } from '../../shared/types'
 import { calculateSessionCost, MODEL_CAPABILITIES } from '../../shared/types'
 
@@ -186,7 +187,7 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
   loadBudgetSettings: async () => {
     set({ isLoading: true })
     try {
-      const settings = await window.electron.invoke('settings:get')
+      const settings = await trpc.settings.get.query()
       if (settings?.budget) {
         set({
           budgetSettings: { ...defaultBudgetSettings, ...settings.budget },
@@ -204,7 +205,7 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
   saveBudgetSettings: async () => {
     const { budgetSettings } = get()
     try {
-      const success = await window.electron.invoke('settings:setBudget', budgetSettings)
+      const success = await trpc.settings.setBudget.mutate(budgetSettings)
       return success
     } catch (error) {
       console.error('Failed to save budget settings:', error)

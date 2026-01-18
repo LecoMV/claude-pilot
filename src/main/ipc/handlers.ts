@@ -185,6 +185,65 @@ function getValidatedArgs<T>(channel: string, argValues: unknown[], argNames: st
   return validateInput<T>(channel, args)
 }
 
+// ============================================================================
+// DEPRECATION TRACKING
+// These handlers have tRPC equivalents and should be migrated.
+// See docs/LEGACY_IPC_MIGRATION_STATUS.md for full details.
+// ============================================================================
+
+const DEPRECATED_HANDLERS = new Set([
+  // Handlers with tRPC equivalents - log usage for migration tracking
+  'system:status',
+  'system:resources',
+  'system:getHomePath',
+  'claude:version',
+  'claude:projects',
+  'mcp:list',
+  'mcp:toggle',
+  'mcp:getConfig',
+  'mcp:saveConfig',
+  'mcp:reload',
+  'memory:learnings',
+  'profiles:list',
+  'profiles:getActive',
+  'profiles:activate',
+  'profiles:delete',
+  'sessions:discover',
+  'sessions:getActive',
+  'sessions:getMessages',
+  'terminal:openAt',
+  'settings:get',
+  'settings:save',
+  'settings:setBudget',
+])
+
+// Track deprecation warnings (log once per channel per session)
+const deprecationWarned = new Set<string>()
+
+function logDeprecation(channel: string): void {
+  if (DEPRECATED_HANDLERS.has(channel) && !deprecationWarned.has(channel)) {
+    deprecationWarned.add(channel)
+    console.warn(
+      `[DEPRECATED] Legacy IPC handler "${channel}" called. ` +
+        `Migrate to tRPC: trpc.${channel.replace(':', '.')}.query/mutate()`
+    )
+  }
+}
+
+/**
+ * Wrapper for deprecated IPC handlers that logs usage.
+ * Usage: deprecatedHandle('channel', async (event, ...args) => { ... })
+ */
+function _deprecatedHandle<T>(
+  channel: string,
+  handler: (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => T | Promise<T>
+): void {
+  ipcMain.handle(channel, (event, ...args) => {
+    logDeprecation(channel)
+    return handler(event, ...args)
+  })
+}
+
 // Log stream manager for real-time log streaming
 class LogStreamManager {
   private mainWindow: BrowserWindow | null = null

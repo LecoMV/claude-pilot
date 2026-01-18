@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { trpc } from '@/lib/trpc/client'
 
 export interface AppSettings {
   // Appearance
@@ -73,7 +74,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loadSettings: async () => {
     set({ loading: true })
     try {
-      const loaded = await window.electron.invoke('settings:get')
+      const loaded = await trpc.settings.get.query()
       set({
         settings: { ...defaultSettings, ...loaded },
         loading: false,
@@ -89,7 +90,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const { settings } = get()
     set({ saving: true })
     try {
-      const success = await window.electron.invoke('settings:save', settings)
+      const success = await trpc.settings.save.mutate(settings)
       set({ saving: false })
       return success
     } catch (error) {

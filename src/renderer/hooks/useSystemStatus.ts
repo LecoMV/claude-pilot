@@ -1,74 +1,66 @@
-import { useCallback, useEffect, useRef } from 'react'
+/**
+ * System Status Hook - tRPC React Query Integration
+ *
+ * Provides type-safe system status queries with automatic:
+ * - Caching and deduplication
+ * - Background refetching
+ * - Visibility-based polling (pause when tab hidden)
+ * - Loading/error states
+ *
+ * @example
+ * const { data: status, isLoading, error, refetch } = useSystemStatus()
+ */
+
+import { useEffect } from 'react'
+import { trpc } from '@/lib/trpc/react'
 import { useSystemStore } from '@/stores/system'
 
 export function useSystemStatus() {
-  const { status, loading, error, pollInterval, lastUpdate, setStatus, setLoading, setError } =
-    useSystemStore()
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const { pollInterval } = useSystemStore()
 
-  const fetchStatus = useCallback(async () => {
-    try {
-      const result = await window.electron.invoke('system:status')
-      setStatus(result)
-      setLoading(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch system status')
-      setLoading(false)
-    }
-  }, [setStatus, setLoading, setError])
+  // tRPC query with React Query's built-in features
+  const query = trpc.system.status.useQuery(undefined, {
+    // Poll at configured interval (defaults to 10s)
+    refetchInterval: pollInterval,
+    // Pause polling when tab is hidden
+    refetchIntervalInBackground: false,
+    // Refetch when window regains focus
+    refetchOnWindowFocus: true,
+    // Data stays fresh for 5 seconds
+    staleTime: 5000,
+    // Retry once on failure
+    retry: 1,
+  })
 
-  const startPolling = useCallback(() => {
-    // Clear existing interval
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-    }
+  // Sync with store for components that still use it
+  const { setStatus, setLoading, setError } = useSystemStore()
 
-    // Initial fetch
-    fetchStatus()
-
-    // Start polling
-    intervalRef.current = setInterval(fetchStatus, pollInterval)
-  }, [fetchStatus, pollInterval])
-
-  const stopPolling = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
-  }, [])
-
-  // Auto-start polling on mount
   useEffect(() => {
-    startPolling()
-    return () => stopPolling()
-  }, [startPolling, stopPolling])
-
-  // Restart polling when interval changes
-  useEffect(() => {
-    if (intervalRef.current) {
-      startPolling()
+    if (query.data) {
+      setStatus(query.data)
     }
-  }, [pollInterval, startPolling])
+  }, [query.data, setStatus])
 
-  // Handle visibility change - pause when hidden, resume when visible
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        stopPolling()
-      } else {
-        startPolling()
-      }
-    }
+    setLoading(query.isLoading)
+  }, [query.isLoading, setLoading])
 
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [startPolling, stopPolling])
+  useEffect(() => {
+    if (query.error) {
+      setError(query.error.message)
+    } else {
+      setError(null)
+    }
+  }, [query.error, setError])
 
   return {
-    status,
-    loading,
-    error,
-    lastUpdate,
-    refresh: fetchStatus,
+    status: query.data ?? null,
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    lastUpdate: query.dataUpdatedAt,
+    refresh: query.refetch,
+    // Additional React Query helpers
+    isRefetching: query.isRefetching,
+    isFetching: query.isFetching,
   }
 }

@@ -3,7 +3,7 @@
  * Monitors critical services and automatically restarts them on failure
  */
 
-import { execSync } from 'child_process'
+import { spawnAsync } from '../utils/spawn-async'
 import { EventEmitter } from 'events'
 import { auditService, ActivityType, EventCategory, Severity, StatusCode } from './audit'
 
@@ -166,55 +166,71 @@ class WatchdogService extends EventEmitter {
   }
 
   /**
+   * Sanitize service/container names to prevent shell injection
+   * Allows alphanumeric, underscore, dot, hyphen, @ (systemd template unit syntax)
+   */
+  private sanitizeName(name: string): string {
+    const sanitized = name.replace(/[^a-zA-Z0-9._@-]/g, '')
+    if (sanitized.length === 0 || sanitized.length > 256) {
+      throw new Error(`Invalid service name: ${name}`)
+    }
+    return sanitized
+  }
+
+  /**
    * Check a single service's health
    */
-  private checkService(service: ServiceDefinition): Promise<boolean> | boolean {
+  private checkService(service: ServiceDefinition): Promise<boolean> {
     switch (service.type) {
       case 'systemd':
-        if (!service.unitName) return false
+        if (!service.unitName) return Promise.resolve(false)
         return this.checkSystemdService(service.unitName)
 
       case 'podman':
-        if (!service.containerName) return false
+        if (!service.containerName) return Promise.resolve(false)
         return this.checkPodmanContainer(service.containerName)
 
       case 'http':
-        if (!service.healthUrl) return false
+        if (!service.healthUrl) return Promise.resolve(false)
         return this.checkHttpHealth(service.healthUrl, service.healthTimeout)
 
       case 'process':
         return this.checkProcess(service.id)
 
       default:
-        return false
+        return Promise.resolve(false)
     }
   }
 
   /**
-   * Check systemd service status
+   * Check systemd service status (async, non-blocking)
+   * systemctl returns: 0=active, 3=inactive, 4=not found
    */
-  private checkSystemdService(unitName: string): boolean {
+  private async checkSystemdService(unitName: string): Promise<boolean> {
     try {
-      const result = execSync(`systemctl is-active ${unitName} 2>/dev/null`, {
-        encoding: 'utf-8',
+      const sanitized = this.sanitizeName(unitName)
+      const result = await spawnAsync('systemctl', ['is-active', sanitized], {
         timeout: 5000,
-      }).trim()
-      return result === 'active'
+        allowNonZeroExit: true, // systemctl returns 3 for inactive
+      })
+      return result.trim() === 'active'
     } catch {
       return false
     }
   }
 
   /**
-   * Check podman container status
+   * Check podman container status (async, non-blocking)
    */
-  private checkPodmanContainer(containerName: string): boolean {
+  private async checkPodmanContainer(containerName: string): Promise<boolean> {
     try {
-      const result = execSync(
-        `podman inspect --format '{{.State.Status}}' ${containerName} 2>/dev/null`,
-        { encoding: 'utf-8', timeout: 5000 }
-      ).trim()
-      return result === 'running'
+      const sanitized = this.sanitizeName(containerName)
+      const result = await spawnAsync(
+        'podman',
+        ['inspect', '--format', '{{.State.Status}}', sanitized],
+        { timeout: 5000, allowNonZeroExit: true }
+      )
+      return result.trim() === 'running'
     } catch {
       return false
     }
@@ -241,11 +257,16 @@ class WatchdogService extends EventEmitter {
   }
 
   /**
-   * Check if a process is running by name
+   * Check if a process is running by name (async, non-blocking)
+   * pgrep returns: 0=found, 1=not found
    */
-  private checkProcess(processName: string): boolean {
+  private async checkProcess(processName: string): Promise<boolean> {
     try {
-      execSync(`pgrep -f ${processName}`, { timeout: 5000 })
+      const sanitized = this.sanitizeName(processName)
+      await spawnAsync('pgrep', ['-f', sanitized], {
+        timeout: 5000,
+        allowNonZeroExit: true,
+      })
       return true
     } catch {
       return false
@@ -358,18 +379,24 @@ class WatchdogService extends EventEmitter {
   }
 
   /**
-   * Restart a service
+   * Restart a service (async, non-blocking)
    */
-  private restartService(service: ServiceDefinition): boolean {
+  private async restartService(service: ServiceDefinition): Promise<boolean> {
     try {
       switch (service.type) {
-        case 'systemd':
-          execSync(`systemctl restart ${service.unitName}`, { timeout: 30000 })
+        case 'systemd': {
+          if (!service.unitName) return false
+          const unitName = this.sanitizeName(service.unitName)
+          await spawnAsync('systemctl', ['restart', unitName], { timeout: 30000 })
           return true
+        }
 
-        case 'podman':
-          execSync(`podman restart ${service.containerName}`, { timeout: 30000 })
+        case 'podman': {
+          if (!service.containerName) return false
+          const containerName = this.sanitizeName(service.containerName)
+          await spawnAsync('podman', ['restart', containerName], { timeout: 30000 })
           return true
+        }
 
         default:
           return false

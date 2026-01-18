@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { loader } from '@monaco-editor/react'
 import * as Sentry from '@sentry/electron/renderer'
+import { TRPCProvider } from './lib/trpc/react'
 import App from './App'
 import './styles/globals.css'
 
@@ -38,6 +39,8 @@ if (!rootElement) throw new Error('Root element not found')
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <App />
+    <TRPCProvider>
+      <App />
+    </TRPCProvider>
   </React.StrictMode>
 )
