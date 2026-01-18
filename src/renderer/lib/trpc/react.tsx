@@ -4,14 +4,15 @@
  * Provides React hooks for type-safe IPC calls with automatic caching,
  * background refetching, and optimistic updates.
  *
+ * Uses custom ipcLink for tRPC v11 compatibility.
+ *
  * @module trpc/react
  */
 
 import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createTRPCReact } from '@trpc/react-query'
-import { ipcLink } from 'electron-trpc/renderer'
-import superjson from 'superjson'
+import { ipcLink } from './ipcLink'
 import type { AppRouter } from '../../../main/trpc/router'
 
 // Create the tRPC React client
@@ -35,10 +36,9 @@ const createQueryClient = () =>
   })
 
 // tRPC client configuration
+// Note: transformer is handled inside ipcLink for v11 compatibility
 const createTRPCClient = () =>
   trpc.createClient({
-    // Must match server transformer
-    transformer: superjson,
     links: [ipcLink()],
   })
 

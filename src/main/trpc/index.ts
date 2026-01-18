@@ -1,12 +1,12 @@
 /**
  * tRPC Main Process Integration
  *
- * Sets up electron-trpc to handle IPC calls from the renderer.
- * This coexists with the legacy ipcMain handlers during migration.
+ * Sets up custom IPC handler for tRPC v11 + Electron.
+ * This replaces electron-trpc/main which is incompatible with tRPC v11.
  */
 
-import { createIPCHandler } from 'electron-trpc/main'
 import type { BrowserWindow } from 'electron'
+import { createIPCHandler } from './ipcHandler'
 import { appRouter } from './router'
 import { createContext } from './context'
 
@@ -35,8 +35,10 @@ export function initializeTRPC(window: BrowserWindow): void {
  * Call this before app quit
  */
 export function cleanupTRPC(): void {
-  // electron-trpc doesn't have explicit cleanup, but we track state
-  ipcHandler = null
+  if (ipcHandler) {
+    ipcHandler.dispose()
+    ipcHandler = null
+  }
   console.info('[tRPC] IPC handler cleaned up')
 }
 

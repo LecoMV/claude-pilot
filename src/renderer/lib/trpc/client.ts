@@ -3,17 +3,17 @@
  *
  * Provides type-safe IPC calls to the main process.
  * Types are automatically inferred from the main process router.
+ *
+ * Uses custom ipcLink for tRPC v11 compatibility.
  */
 
 import { createTRPCProxyClient } from '@trpc/client'
-import { ipcLink } from 'electron-trpc/renderer'
-import superjson from 'superjson'
+import { ipcLink } from './ipcLink'
 import type { AppRouter } from '../../../main/trpc/router'
 
 // Create the tRPC client with electron IPC transport
+// Note: transformer is handled inside ipcLink for v11 compatibility
 export const trpc = createTRPCProxyClient<AppRouter>({
-  // Must match server transformer
-  transformer: superjson,
   links: [ipcLink()],
 })
 
