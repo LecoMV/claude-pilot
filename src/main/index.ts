@@ -11,6 +11,9 @@ import { credentialService } from './services/credentials'
 import { auditService } from './services/audit'
 import { workerPool } from './services/workers'
 import { setupGlobalErrorHandlers, configureErrorHandler, handleError } from './utils/error-handler'
+import { postgresService } from './services/postgresql'
+import { memgraphService } from './services/memgraph'
+import QdrantService from './services/memory/qdrant.service'
 
 // Initialize Sentry for crash reporting (deploy-b4go)
 // DSN should be set via environment variable SENTRY_DSN
@@ -175,6 +178,39 @@ app.commandLine.appendSwitch('disable-gpu-sandbox')
 
 let mainWindow: BrowserWindow | null = null
 
+/**
+ * Initialize database connections on app startup (non-blocking)
+ * Connects to PostgreSQL, Memgraph, and Qdrant in parallel
+ */
+async function initializeDatabaseConnections(): Promise<void> {
+  console.info('[Main] Initializing database connections...')
+
+  const results = await Promise.allSettled([
+    postgresService.connect().then((ok) => ({ service: 'PostgreSQL', ok })),
+    memgraphService.connect().then((ok) => ({ service: 'Memgraph', ok })),
+    QdrantService.getInstance()
+      .healthCheck()
+      .then((ok) => ({ service: 'Qdrant', ok })),
+  ])
+
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      const { service, ok } = result.value
+      if (ok) {
+        console.info(`[Main] ${service}: connected`)
+      } else {
+        console.warn(`[Main] ${service}: connection failed`)
+      }
+    } else {
+      console.error('[Main] Database connection error:', result.reason)
+    }
+  }
+
+  // Start Qdrant health monitoring
+  QdrantService.getInstance().startHealthMonitoring(60000) // Every 60s
+  console.info('[Main] Database connections initialized')
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -261,6 +297,9 @@ app.whenReady().then(() => {
 
     // Initialize tRPC for type-safe IPC (coexists with legacy handlers)
     initializeTRPC(mainWindow)
+
+    // Initialize database connections in background (non-blocking)
+    initializeDatabaseConnections()
   }
 
   app.on('activate', function () {
@@ -273,6 +312,11 @@ app.on('window-all-closed', () => {
   terminalManager.closeAll()
   logStreamManager.stop()
   cleanupTRPC()
+
+  // Clean up database connections
+  QdrantService.getInstance().shutdown()
+  postgresService.disconnect().catch(() => {})
+  memgraphService.disconnect().catch(() => {})
 
   if (process.platform !== 'darwin') {
     app.quit()
