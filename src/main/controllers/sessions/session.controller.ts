@@ -16,7 +16,8 @@
 
 import { z } from 'zod'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
-import { existsSync, readFileSync, statSync, watch, FSWatcher } from 'fs'
+import { existsSync, statSync, watch, FSWatcher } from 'fs'
+import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { glob } from 'glob'
@@ -31,6 +32,52 @@ import type {
 
 const HOME = homedir()
 const CLAUDE_DIR = join(HOME, '.claude')
+
+// ============================================================================
+// Session Cache
+// ============================================================================
+
+interface CachedSession {
+  session: ExternalSession
+  mtime: number
+}
+
+class SessionCache {
+  private cache = new Map<string, CachedSession>()
+  private lastFullScan = 0
+  private readonly CACHE_TTL = 10000 // 10 seconds between full scans
+
+  shouldRefresh(): boolean {
+    return Date.now() - this.lastFullScan > this.CACHE_TTL
+  }
+
+  markScanned(): void {
+    this.lastFullScan = Date.now()
+  }
+
+  get(filePath: string, currentMtime: number): ExternalSession | null {
+    const cached = this.cache.get(filePath)
+    if (cached && cached.mtime === currentMtime) {
+      return cached.session
+    }
+    return null
+  }
+
+  set(filePath: string, session: ExternalSession, mtime: number): void {
+    this.cache.set(filePath, { session, mtime })
+  }
+
+  invalidate(filePath: string): void {
+    this.cache.delete(filePath)
+  }
+
+  clear(): void {
+    this.cache.clear()
+    this.lastFullScan = 0
+  }
+}
+
+const sessionCache = new SessionCache()
 
 // ============================================================================
 // Schemas
@@ -92,9 +139,11 @@ class SessionWatchManager {
     return true
   }
 
-  private handleSessionUpdate(filePath: string): void {
+  private async handleSessionUpdate(filePath: string): Promise<void> {
     try {
-      const session = parseSessionFile(filePath)
+      // Invalidate cache for this file
+      sessionCache.invalidate(filePath)
+      const session = await parseSessionFile(filePath)
       if (session && this.mainWindow) {
         this.mainWindow.webContents.send('session:updated', session)
       }
@@ -123,13 +172,20 @@ interface ClaudeProcessInfo {
 }
 
 /**
- * Parse a single JSONL session file
+ * Parse a single JSONL session file (async with cache support)
  */
-function parseSessionFile(filePath: string): ExternalSession | null {
+async function parseSessionFile(filePath: string): Promise<ExternalSession | null> {
   try {
     if (!existsSync(filePath)) return null
 
-    const content = readFileSync(filePath, 'utf-8')
+    // Check cache first
+    const stat = statSync(filePath)
+    const cached = sessionCache.get(filePath, stat.mtimeMs)
+    if (cached) {
+      return cached
+    }
+
+    const content = await readFile(filePath, 'utf-8')
     const lines = content
       .trim()
       .split('\n')
@@ -207,7 +263,6 @@ function parseSessionFile(filePath: string): ExternalSession | null {
     const sessionId = fileName.replace('.jsonl', '')
 
     // Check if session is active (file modified in last 5 minutes)
-    const stat = statSync(filePath)
     const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
     const isActive = stat.mtimeMs > fiveMinutesAgo
 
@@ -241,6 +296,9 @@ function parseSessionFile(filePath: string): ExternalSession | null {
       isSubagent: (firstEntry.isSidechain as boolean) || false,
     }
 
+    // Cache the session
+    sessionCache.set(filePath, session, stat.mtimeMs)
+
     return session
   } catch (error) {
     console.error('Failed to parse session file:', error)
@@ -249,13 +307,12 @@ function parseSessionFile(filePath: string): ExternalSession | null {
 }
 
 /**
- * Discover all external sessions
+ * Discover all external sessions (with caching and parallel processing)
  */
 async function discoverExternalSessions(): Promise<ExternalSession[]> {
-  const sessions: ExternalSession[] = []
   const projectsDir = join(CLAUDE_DIR, 'projects')
 
-  if (!existsSync(projectsDir)) return sessions
+  if (!existsSync(projectsDir)) return []
 
   try {
     const files = await glob('**/*.jsonl', {
@@ -267,12 +324,22 @@ async function discoverExternalSessions(): Promise<ExternalSession[]> {
     // Limit to 100 files
     const limitedFiles = files.slice(0, 100)
 
-    for (const filePath of limitedFiles) {
-      const session = parseSessionFile(filePath)
-      if (session) {
-        sessions.push(session)
+    // Parse files in parallel (with concurrency limit to avoid overwhelming I/O)
+    const BATCH_SIZE = 10
+    const sessions: ExternalSession[] = []
+
+    for (let i = 0; i < limitedFiles.length; i += BATCH_SIZE) {
+      const batch = limitedFiles.slice(i, i + BATCH_SIZE)
+      const results = await Promise.all(batch.map((filePath) => parseSessionFile(filePath)))
+      for (const session of results) {
+        if (session) {
+          sessions.push(session)
+        }
       }
     }
+
+    // Mark cache as scanned
+    sessionCache.markScanned()
 
     // Sort by last activity (most recent first)
     sessions.sort((a, b) => b.lastActivity - a.lastActivity)
@@ -280,7 +347,7 @@ async function discoverExternalSessions(): Promise<ExternalSession[]> {
     return sessions
   } catch (error) {
     console.error('Failed to discover sessions:', error)
-    return sessions
+    return []
   }
 }
 
@@ -300,7 +367,7 @@ async function getSessionMessages(sessionId: string, limit = 100): Promise<Sessi
     const filePath = files[0]
     if (!filePath || !existsSync(filePath)) return messages
 
-    const content = readFileSync(filePath, 'utf-8')
+    const content = await readFile(filePath, 'utf-8')
     const lines = content
       .trim()
       .split('\n')
@@ -495,17 +562,21 @@ function matchSessionToProcess(
 
 /**
  * Get active sessions with process info
+ * Only returns sessions that have a matching running Claude process
  */
 async function getActiveSessions(): Promise<ExternalSession[]> {
   const sessions = await discoverExternalSessions()
-  const activeSessions = sessions.filter((s) => s.isActive)
-
   const processes = detectActiveClaudeProcesses()
 
-  for (const session of activeSessions) {
+  // Only return sessions that have a matching running process
+  const activeSessions: ExternalSession[] = []
+
+  for (const session of sessions) {
     const processInfo = matchSessionToProcess(session, processes)
     if (processInfo) {
       session.processInfo = processInfo
+      session.isActive = true // Confirmed active via process detection
+      activeSessions.push(session)
     }
   }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Gauge,
   History,
@@ -73,14 +73,27 @@ export function ContextDashboard() {
     if (sessionsQuery.data) setSessions(sessionsQuery.data)
   }, [sessionsQuery.data, setSessions])
 
-  // Derive data
-  const activeSessions = activeSessionsQuery.data ?? []
-  const loading =
-    tokenUsageQuery.isLoading ||
-    compactionSettingsQuery.isLoading ||
-    sessionsQuery.isLoading ||
-    activeSessionsQuery.isLoading
+  // Derive data - memoized to prevent flashing on refetch
+  const activeSessions = useMemo(() => activeSessionsQuery.data ?? [], [activeSessionsQuery.data])
+
+  const loading = useMemo(
+    () =>
+      tokenUsageQuery.isLoading ||
+      compactionSettingsQuery.isLoading ||
+      sessionsQuery.isLoading ||
+      activeSessionsQuery.isLoading,
+    [
+      tokenUsageQuery.isLoading,
+      compactionSettingsQuery.isLoading,
+      sessionsQuery.isLoading,
+      activeSessionsQuery.isLoading,
+    ]
+  )
+
   const sessionsLoading = sessionsQuery.isLoading
+
+  // Memoize token usage to prevent UI flashing during refetch
+  const memoizedTokenUsage = useMemo(() => tokenUsage, [tokenUsage])
 
   const handleRefresh = () => {
     tokenUsageQuery.refetch()
@@ -156,7 +169,7 @@ export function ContextDashboard() {
 
       {activeTab === 'usage' && (
         <UsagePanel
-          tokenUsage={tokenUsage}
+          tokenUsage={memoizedTokenUsage}
           compactionSettings={compactionSettings}
           onCompact={handleCompact}
           onToggleAutoCompact={handleToggleAutoCompact}

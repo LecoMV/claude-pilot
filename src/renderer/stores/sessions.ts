@@ -121,6 +121,11 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
 export const selectFilteredSessions = (state: SessionsState) => {
   let filtered = state.sessions
 
+  // Filter out synthetic/internal sessions
+  filtered = filtered.filter(
+    (s) => !s.projectName.includes('<synthetic>') && !s.projectName.includes('synthetic')
+  )
+
   // Apply search filter
   if (state.searchQuery) {
     const query = state.searchQuery.toLowerCase()

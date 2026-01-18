@@ -17,7 +17,8 @@
 
 import { z } from 'zod'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync } from 'fs'
+import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import type { MCPServer, MCPServerConfig } from '../../../shared/types'
@@ -72,14 +73,14 @@ interface MCPConfigFile {
 /**
  * Read MCP servers from config files (mcp.json and settings.json)
  */
-function getMCPServers(): MCPServer[] {
+async function getMCPServers(): Promise<MCPServer[]> {
   const servers: MCPServer[] = []
   const configPaths = [MCP_JSON_PATH, SETTINGS_JSON_PATH]
 
   for (const configPath of configPaths) {
     if (existsSync(configPath)) {
       try {
-        const content = readFileSync(configPath, 'utf-8')
+        const content = await readFile(configPath, 'utf-8')
         const config = JSON.parse(content) as MCPConfigFile
         const mcpServers = config.mcpServers || {}
 
@@ -114,8 +115,8 @@ function getMCPServers(): MCPServer[] {
 /**
  * Get a single server by name
  */
-function getServerByName(name: string): MCPServer | null {
-  const servers = getMCPServers()
+async function getServerByName(name: string): Promise<MCPServer | null> {
+  const servers = await getMCPServers()
   return servers.find((s) => s.name === name) || null
 }
 
@@ -123,7 +124,7 @@ function getServerByName(name: string): MCPServer | null {
  * Toggle server enabled/disabled status
  * Writes to mcp.json if it exists, otherwise settings.json
  */
-function toggleServer(name: string, enabled: boolean): boolean {
+async function toggleServer(name: string, enabled: boolean): Promise<boolean> {
   // Try mcp.json first, then settings.json
   const configPath = existsSync(MCP_JSON_PATH) ? MCP_JSON_PATH : SETTINGS_JSON_PATH
 
@@ -131,7 +132,7 @@ function toggleServer(name: string, enabled: boolean): boolean {
     let config: MCPConfigFile = {}
 
     if (existsSync(configPath)) {
-      const content = readFileSync(configPath, 'utf-8')
+      const content = await readFile(configPath, 'utf-8')
       config = JSON.parse(content) as MCPConfigFile
     }
 
@@ -151,7 +152,7 @@ function toggleServer(name: string, enabled: boolean): boolean {
       disabled: !enabled,
     }
 
-    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+    await writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8')
     console.info('[MCP] Toggled server', name, 'to', enabled ? 'enabled' : 'disabled')
     return true
   } catch (error) {
@@ -163,10 +164,10 @@ function toggleServer(name: string, enabled: boolean): boolean {
 /**
  * Read settings.json content
  */
-function getConfigContent(): string {
+async function getConfigContent(): Promise<string> {
   if (existsSync(SETTINGS_JSON_PATH)) {
     try {
-      return readFileSync(SETTINGS_JSON_PATH, 'utf-8')
+      return await readFile(SETTINGS_JSON_PATH, 'utf-8')
     } catch (error) {
       console.error('[MCP] Failed to read settings.json:', error)
     }
@@ -177,12 +178,12 @@ function getConfigContent(): string {
 /**
  * Validate and save settings.json content
  */
-function saveConfigContent(content: string): boolean {
+async function saveConfigContent(content: string): Promise<boolean> {
   try {
     // Validate JSON
     JSON.parse(content)
 
-    writeFileSync(SETTINGS_JSON_PATH, content, 'utf-8')
+    await writeFile(SETTINGS_JSON_PATH, content, 'utf-8')
     console.info('[MCP] Saved settings.json')
     return true
   } catch (error) {
@@ -199,23 +200,25 @@ export const mcpRouter = router({
   /**
    * List all MCP servers from config
    */
-  list: publicProcedure.query((): MCPServer[] => {
+  list: publicProcedure.query((): Promise<MCPServer[]> => {
     return getMCPServers()
   }),
 
   /**
    * Toggle a server's enabled/disabled status
    */
-  toggle: auditedProcedure.input(ToggleServerSchema).mutation(({ input }): boolean => {
+  toggle: auditedProcedure.input(ToggleServerSchema).mutation(({ input }): Promise<boolean> => {
     return toggleServer(input.name, input.enabled)
   }),
 
   /**
    * Get a single server by name
    */
-  getServer: publicProcedure.input(ServerNameSchema).query(({ input }): MCPServer | null => {
-    return getServerByName(input.name)
-  }),
+  getServer: publicProcedure
+    .input(ServerNameSchema)
+    .query(({ input }): Promise<MCPServer | null> => {
+      return getServerByName(input.name)
+    }),
 
   /**
    * Signal config refresh (Claude Code will pick up changes)
@@ -231,14 +234,14 @@ export const mcpRouter = router({
   /**
    * Get the raw settings.json content
    */
-  getConfig: publicProcedure.query((): string => {
+  getConfig: publicProcedure.query((): Promise<string> => {
     return getConfigContent()
   }),
 
   /**
    * Validate and save settings.json content
    */
-  saveConfig: auditedProcedure.input(SaveConfigSchema).mutation(({ input }): boolean => {
+  saveConfig: auditedProcedure.input(SaveConfigSchema).mutation(({ input }): Promise<boolean> => {
     return saveConfigContent(input.content)
   }),
 })

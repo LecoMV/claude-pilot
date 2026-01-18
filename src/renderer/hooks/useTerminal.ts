@@ -26,11 +26,15 @@ export function useTerminal({ tabId, containerRef }: UseTerminalOptions) {
   const fitAddonRef = useRef<FitAddon | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const sessionIdRef = useRef<string | null>(null)
+  const initializingRef = useRef(false) // Prevent double-init in StrictMode
+  const mountedRef = useRef(true)
 
   const tab = tabs.find((t) => t.id === tabId)
 
   const initTerminal = useCallback(async () => {
-    if (!containerRef.current || terminalRef.current) return
+    // Prevent double initialization in StrictMode
+    if (!containerRef.current || terminalRef.current || initializingRef.current) return
+    initializingRef.current = true
 
     // Create terminal instance
     const terminal = new Terminal({
@@ -90,6 +94,14 @@ export function useTerminal({ tabId, containerRef }: UseTerminalOptions) {
     // Create PTY session via tRPC (control operation)
     try {
       const sessionId = await trpc.terminal.create.mutate({})
+
+      // Check if component unmounted during async operation
+      if (!mountedRef.current) {
+        // Clean up the session we just created
+        trpc.terminal.close.mutate({ sessionId }).catch(() => {})
+        return
+      }
+
       sessionIdRef.current = sessionId
 
       // Update tab with terminal and session
@@ -145,14 +157,26 @@ export function useTerminal({ tabId, containerRef }: UseTerminalOptions) {
 
   // Initialize terminal on mount
   useEffect(() => {
+    mountedRef.current = true
     initTerminal()
 
     return () => {
+      // Mark as unmounted to prevent async operations
+      mountedRef.current = false
+
       // Cleanup on unmount
       unsubscribeRef.current?.()
+
+      // Close the PTY session on backend
+      if (sessionIdRef.current) {
+        trpc.terminal.close.mutate({ sessionId: sessionIdRef.current }).catch(() => {})
+        sessionIdRef.current = null
+      }
+
       terminalRef.current?.dispose()
       terminalRef.current = null
       fitAddonRef.current = null
+      initializingRef.current = false
     }
   }, [initTerminal])
 

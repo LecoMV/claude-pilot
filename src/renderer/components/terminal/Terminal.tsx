@@ -8,10 +8,12 @@ import '@xterm/xterm/css/xterm.css'
 export function Terminal() {
   const { tabs, activeTabId, fullscreen, addTab, removeTab, setActiveTab, setFullscreen } =
     useTerminalStore()
+  const initializedRef = useRef(false)
 
-  // Initialize with first tab if empty
+  // Initialize with first tab if empty (prevent double-add in StrictMode)
   useEffect(() => {
-    if (tabs.length === 0) {
+    if (tabs.length === 0 && !initializedRef.current) {
+      initializedRef.current = true
       addTab()
     }
   }, [tabs.length, addTab])
@@ -42,7 +44,9 @@ export function Terminal() {
               <Circle
                 className={cn(
                   'w-2 h-2',
-                  tab.isConnected ? 'fill-accent-green text-accent-green' : 'fill-text-muted text-text-muted'
+                  tab.isConnected
+                    ? 'fill-accent-green text-accent-green'
+                    : 'fill-text-muted text-text-muted'
                 )}
               />
               {tabs.length > 1 && (
@@ -79,11 +83,7 @@ export function Terminal() {
       {/* Terminal panels */}
       <div className="flex-1 relative bg-background overflow-hidden">
         {tabs.map((tab) => (
-          <TerminalPanel
-            key={tab.id}
-            tabId={tab.id}
-            visible={tab.id === activeTabId}
-          />
+          <TerminalPanel key={tab.id} tabId={tab.id} visible={tab.id === activeTabId} />
         ))}
       </div>
     </div>
@@ -112,17 +112,8 @@ function TerminalPanel({ tabId, visible }: TerminalPanelProps) {
   }, [visible, fit, focus])
 
   return (
-    <div
-      className={cn(
-        'absolute inset-0 p-1',
-        visible ? 'block' : 'hidden'
-      )}
-    >
-      <div
-        ref={containerRef}
-        className="w-full h-full"
-        onClick={() => focus()}
-      />
+    <div className={cn('absolute inset-0 p-1', visible ? 'block' : 'hidden')}>
+      <div ref={containerRef} className="w-full h-full" onClick={() => focus()} />
     </div>
   )
 }

@@ -21,6 +21,7 @@ import {
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/react'
 import { useProfileStore } from '@/stores/profile'
+import { useErrorStore } from '@/stores/errors'
 import type { ClaudeCodeProfile } from '@shared/types'
 
 export function ProfileManager() {
@@ -105,6 +106,7 @@ function CustomProfilesPanel({
   onProfilesChange,
   onActiveChange,
 }: CustomProfilesPanelProps) {
+  const { addError } = useErrorStore()
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [formData, setFormData] = useState<{
@@ -247,24 +249,42 @@ function CustomProfilesPanel({
     )
   }
 
-  const [_launchError, setLaunchError] = useState<string | null>(null)
   const launching = launchMutation.isPending ? launchMutation.variables?.id : null
 
   const handleLaunch = (id: string) => {
-    setLaunchError(null)
+    const profile = profiles.find((p) => p.id === id)
     launchMutation.mutate(
       { id },
       {
         onSuccess: (result) => {
-          if (!result.success) {
-            setLaunchError(result.error || 'Failed to launch profile')
-            setTimeout(() => setLaunchError(null), 5000)
+          if (result.success) {
+            // Show success toast
+            addError({
+              code: 'PROFILE_LAUNCHED',
+              message: `Launched Claude Code with profile: ${profile?.name || id}`,
+              severity: 'info',
+              category: 'ui',
+              timestamp: Date.now(),
+            })
+          } else {
+            addError({
+              code: 'LAUNCH_FAILED',
+              message: result.error || 'Failed to launch profile',
+              severity: 'error',
+              category: 'process',
+              timestamp: Date.now(),
+            })
           }
         },
         onError: (error) => {
           console.error('Failed to launch profile:', error)
-          setLaunchError('Failed to launch profile')
-          setTimeout(() => setLaunchError(null), 5000)
+          addError({
+            code: 'LAUNCH_ERROR',
+            message: 'Failed to launch profile',
+            severity: 'error',
+            category: 'process',
+            timestamp: Date.now(),
+          })
         },
       }
     )

@@ -24,6 +24,7 @@ import {
   unlinkSync,
   statSync,
 } from 'fs'
+import { readFile, writeFile, readdir } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { spawn } from 'child_process'
@@ -150,23 +151,23 @@ function saveProfileSettings(newSettings: ProfileSettings): boolean {
   }
 }
 
-function getClaudeMd(): string {
+async function getClaudeMd(): Promise<string> {
   const claudeMdPath = join(CLAUDE_DIR, 'CLAUDE.md')
   try {
     if (!existsSync(claudeMdPath)) {
       return ''
     }
-    return readFileSync(claudeMdPath, 'utf-8')
+    return await readFile(claudeMdPath, 'utf-8')
   } catch (error) {
     console.error('Failed to read CLAUDE.md:', error)
     return ''
   }
 }
 
-function saveClaudeMd(content: string): boolean {
+async function saveClaudeMd(content: string): Promise<boolean> {
   const claudeMdPath = join(CLAUDE_DIR, 'CLAUDE.md')
   try {
-    writeFileSync(claudeMdPath, content)
+    await writeFile(claudeMdPath, content)
     return true
   } catch (error) {
     console.error('Failed to save CLAUDE.md:', error)
@@ -174,7 +175,7 @@ function saveClaudeMd(content: string): boolean {
   }
 }
 
-function getRules(): ClaudeRule[] {
+async function getRules(): Promise<ClaudeRule[]> {
   const rulesDir = join(CLAUDE_DIR, 'rules')
   const settingsPath = join(CLAUDE_DIR, 'settings.json')
   const rules: ClaudeRule[] = []
@@ -183,7 +184,7 @@ function getRules(): ClaudeRule[] {
   let disabledRules: string[] = []
   try {
     if (existsSync(settingsPath)) {
-      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+      const settings = JSON.parse(await readFile(settingsPath, 'utf-8'))
       disabledRules = settings.disabledRules || []
     }
   } catch {
@@ -195,7 +196,7 @@ function getRules(): ClaudeRule[] {
       return rules
     }
 
-    const entries = readdirSync(rulesDir, { withFileTypes: true })
+    const entries = await readdir(rulesDir, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue
 
@@ -204,7 +205,7 @@ function getRules(): ClaudeRule[] {
       const isEnabled = !disabledRules.includes(ruleName)
 
       try {
-        const content = readFileSync(rulePath, 'utf-8')
+        const content = await readFile(rulePath, 'utf-8')
         rules.push({
           name: ruleName,
           path: rulePath,
@@ -580,18 +581,18 @@ export const profilesRouter = router({
   }),
 
   // CLAUDE.md management
-  claudemd: publicProcedure.query((): string => {
+  claudemd: publicProcedure.query((): Promise<string> => {
     return getClaudeMd()
   }),
 
   saveClaudemd: auditedProcedure
     .input(z.object({ content: z.string() }))
-    .mutation(({ input }): boolean => {
+    .mutation(({ input }): Promise<boolean> => {
       return saveClaudeMd(input.content)
     }),
 
   // Rules management
-  rules: publicProcedure.query((): ClaudeRule[] => {
+  rules: publicProcedure.query((): Promise<ClaudeRule[]> => {
     return getRules()
   }),
 
@@ -599,9 +600,9 @@ export const profilesRouter = router({
     return toggleRule(input.name, input.enabled)
   }),
 
-  saveRule: auditedProcedure.input(SaveRuleSchema).mutation(({ input }): boolean => {
+  saveRule: auditedProcedure.input(SaveRuleSchema).mutation(async ({ input }): Promise<boolean> => {
     try {
-      writeFileSync(input.path, input.content, 'utf-8')
+      await writeFile(input.path, input.content, 'utf-8')
       return true
     } catch (error) {
       console.error('Failed to save rule:', error)
