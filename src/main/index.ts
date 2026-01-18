@@ -4,7 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import electronUpdater from 'electron-updater'
 const { autoUpdater } = electronUpdater
 import * as Sentry from '@sentry/electron/main'
-import { registerIpcHandlers, logStreamManager } from './ipc/handlers'
+import { logStreamManager } from './services/log-stream'
 import { terminalManager, registerTerminalHandlers } from './services/terminal'
 import { initializeTRPC, cleanupTRPC } from './trpc'
 import { credentialService } from './services/credentials'
@@ -284,8 +284,8 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // Register IPC handlers
-  registerIpcHandlers()
+  // Register terminal IPC handlers (streaming data via legacy IPC for performance)
+  // Note: All request/response handlers are now in tRPC controllers
   registerTerminalHandlers()
 
   createWindow()
