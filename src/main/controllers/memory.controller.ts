@@ -1,21 +1,19 @@
 /**
  * Memory Controller - Unified Memory System Access
  *
- * Migrated from handlers.ts to tRPC pattern.
- * Provides type-safe access to:
- * - PostgreSQL learnings (pgvector)
- * - Memgraph knowledge graph
- * - Qdrant vector search
+ * REFACTORED: Eliminated all execSync calls for enterprise-grade async operations.
+ * Uses native database services instead of shell commands.
  *
- * @see src/main/ipc/handlers.ts for legacy implementation
- * @see ~/.claude/integrations/memory/hybrid_memory.py for Python version
+ * @see src/main/services/postgresql.ts
+ * @see src/main/services/memgraph.ts
+ * @see src/main/services/memory/qdrant.service.ts
  */
 
 import { z } from 'zod'
 import { router, auditedProcedure, publicProcedure } from '../trpc/trpc'
-import { execSync } from 'child_process'
 import { memgraphService } from '../services/memgraph'
 import { postgresService } from '../services/postgresql'
+import QdrantService from '../services/memory/qdrant.service'
 import type { Learning } from '../../shared/types'
 
 // ============================================================================
@@ -28,7 +26,6 @@ const LearningsQuerySchema = z.object({
   category: z.string().optional(),
 })
 
-// Memory stats type (defined inline, not as schema since we don't validate output)
 type MemoryStats = {
   postgresql: { count: number }
   memgraph: { nodes: number; edges: number }
@@ -69,117 +66,138 @@ const UnifiedSearchSchema = z.object({
 })
 
 // ============================================================================
-// HELPER FUNCTIONS
+// ASYNC HELPER FUNCTIONS (No execSync!)
 // ============================================================================
 
-function queryLearnings(query?: string, limit = 50, category?: string): Learning[] {
+/**
+ * Query learnings using native pg driver (NOT shell command)
+ */
+async function queryLearningsAsync(
+  query?: string,
+  limit = 50,
+  category?: string
+): Promise<Learning[]> {
   try {
-    // Use direct psql query since pg module connection is async
-    let sqlQuery = 'SELECT id, topic, content, category, created_at FROM learnings'
+    // Ensure connection
+    const connected = await postgresService.connect()
+    if (!connected) {
+      console.warn('[Memory] PostgreSQL not connected')
+      return []
+    }
+
+    // Build parameterized query
     const conditions: string[] = []
+    const params: unknown[] = []
+    let paramIndex = 1
 
     if (query && query.trim()) {
-      const sanitizedQuery = query.replace(/'/g, "''")
-      conditions.push(`(topic ILIKE '%${sanitizedQuery}%' OR content ILIKE '%${sanitizedQuery}%')`)
+      conditions.push(`(topic ILIKE $${paramIndex} OR content ILIKE $${paramIndex})`)
+      params.push(`%${query}%`)
+      paramIndex++
     }
 
     if (category && category.trim()) {
-      const sanitizedCat = category.replace(/'/g, "''")
-      conditions.push(`category = '${sanitizedCat}'`)
+      conditions.push(`category = $${paramIndex}`)
+      params.push(category)
+      paramIndex++
     }
 
+    let sql = 'SELECT id, topic, content, category, created_at FROM learnings'
     if (conditions.length > 0) {
-      sqlQuery += ' WHERE ' + conditions.join(' AND ')
+      sql += ' WHERE ' + conditions.join(' AND ')
     }
+    sql += ` ORDER BY created_at DESC LIMIT $${paramIndex}`
+    params.push(limit)
 
-    sqlQuery += ` ORDER BY created_at DESC LIMIT ${limit}`
+    const rows = await postgresService.query<{
+      id: number
+      topic: string
+      content: string
+      category: string
+      created_at: string
+    }>(sql, params)
 
-    const result = execSync(
-      `sudo -u postgres psql -h localhost -p 5433 -d claude_memory -t -A -F'|||' -c "${sqlQuery}"`,
-      {
-        encoding: 'utf-8',
-        timeout: 5000,
-      }
-    )
-
-    const lines = result
-      .trim()
-      .split('\n')
-      .filter((l) => l.trim())
-    return lines.map((line) => {
-      const [id, topic, content, cat, created_at] = line.split('|||')
-      return {
-        id: parseInt(id) || 0,
-        topic: topic || '',
-        content: content || '',
-        category: cat || 'general',
-        createdAt: created_at || new Date().toISOString(),
-        source: topic || undefined,
-      }
-    })
+    return rows.map((row) => ({
+      id: row.id,
+      topic: row.topic || '',
+      content: row.content || '',
+      category: row.category || 'general',
+      createdAt: row.created_at || new Date().toISOString(),
+      source: row.topic || undefined,
+    }))
   } catch (error) {
-    console.error('Failed to query learnings:', error)
+    console.error('[Memory] Failed to query learnings:', error)
     return []
   }
 }
 
-async function getMemoryStats(): Promise<MemoryStats> {
-  const stats = {
+/**
+ * Get memory stats using native clients (NOT shell commands)
+ */
+async function getMemoryStatsAsync(): Promise<MemoryStats> {
+  const stats: MemoryStats = {
     postgresql: { count: 0 },
     memgraph: { nodes: 0, edges: 0 },
     qdrant: { vectors: 0 },
   }
 
-  // PostgreSQL count
-  try {
-    await postgresService.connect()
-    const count = await postgresService.queryScalar<number>('SELECT COUNT(*) FROM learnings')
-    stats.postgresql.count = count ?? 0
-  } catch {
-    // Ignore
-  }
+  // All checks in parallel
+  const [pgCount, mgStats, qdrantStats] = await Promise.allSettled([
+    // PostgreSQL - native pg driver
+    (async () => {
+      await postgresService.connect()
+      return postgresService.queryScalar<number>('SELECT COUNT(*) FROM learnings')
+    })(),
 
-  // Memgraph counts
-  try {
-    await memgraphService.connect()
-    const memgraphStats = await memgraphService.getStats()
-    stats.memgraph.nodes = memgraphStats.nodes
-    stats.memgraph.edges = memgraphStats.edges
-  } catch (error) {
-    console.error('Failed to get Memgraph stats:', error)
-  }
+    // Memgraph - native neo4j driver
+    (async () => {
+      await memgraphService.connect()
+      return memgraphService.getStats()
+    })(),
 
-  // Qdrant count
-  try {
-    const collectionsResult = execSync('curl -s http://localhost:6333/collections', {
-      encoding: 'utf-8',
-      timeout: 3000,
-    })
-    const collections = JSON.parse(collectionsResult)
-    let totalVectors = 0
-
-    for (const col of collections.result?.collections || []) {
-      try {
-        const colResult = execSync(`curl -s http://localhost:6333/collections/${col.name}`, {
-          encoding: 'utf-8',
-          timeout: 2000,
-        })
-        const colData = JSON.parse(colResult)
-        totalVectors += colData.result?.points_count || 0
-      } catch {
-        // Skip failed collection
+    // Qdrant - native client
+    (async () => {
+      const qdrant = QdrantService.getInstance()
+      const collections = await qdrant.listCollections()
+      let total = 0
+      for (const name of collections) {
+        try {
+          const colStats = await qdrant.getCollectionStats(
+            name as 'claude_memories' | 'mem0_memories'
+          )
+          total += colStats.pointsCount
+        } catch {
+          // Skip failed collection
+        }
       }
-    }
-    stats.qdrant.vectors = totalVectors
-  } catch {
-    // Ignore
+      return total
+    })(),
+  ])
+
+  if (pgCount.status === 'fulfilled' && pgCount.value !== null) {
+    stats.postgresql.count = pgCount.value
+  }
+
+  if (mgStats.status === 'fulfilled') {
+    stats.memgraph.nodes = mgStats.value.nodes
+    stats.memgraph.edges = mgStats.value.edges
+  }
+
+  if (qdrantStats.status === 'fulfilled') {
+    stats.qdrant.vectors = qdrantStats.value
   }
 
   return stats
 }
 
+/**
+ * Generate embedding using native fetch (NOT curl)
+ */
 async function generateEmbedding(text: string): Promise<number[] | null> {
   try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+
     const response = await fetch('http://localhost:11434/api/embeddings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -187,14 +205,17 @@ async function generateEmbedding(text: string): Promise<number[] | null> {
         model: 'nomic-embed-text:latest',
         prompt: text,
       }),
+      signal: controller.signal,
     })
 
+    clearTimeout(timeout)
+
     if (response.ok) {
-      const data = await response.json()
+      const data = (await response.json()) as { embedding?: number[] }
       return data.embedding || null
     }
   } catch (error) {
-    console.error('Failed to generate embedding with Ollama:', error)
+    console.error('[Memory] Failed to generate embedding:', error)
   }
   return null
 }
@@ -208,6 +229,9 @@ async function searchQdrantMemories(
     const embedding = await generateEmbedding(query)
 
     if (embedding && embedding.length > 0) {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 5000)
+
       const searchResponse = await fetch(
         `http://localhost:6333/collections/${collection}/points/search`,
         {
@@ -220,19 +244,22 @@ async function searchQdrantMemories(
             with_vector: false,
             score_threshold: 0.3,
           }),
+          signal: controller.signal,
         }
       )
 
+      clearTimeout(timeout)
+
       if (searchResponse.ok) {
-        const data = await searchResponse.json()
+        const data = (await searchResponse.json()) as {
+          result?: Array<{ id: string; score: number; payload: Record<string, unknown> }>
+        }
         if (data.result) {
-          return data.result.map(
-            (p: { id: string; score: number; payload: Record<string, unknown> }) => ({
-              id: p.id,
-              score: p.score,
-              payload: p.payload,
-            })
-          )
+          return data.result.map((p) => ({
+            id: String(p.id),
+            score: p.score,
+            payload: p.payload,
+          }))
         }
       }
     }
@@ -253,25 +280,27 @@ async function searchQdrantMemories(
     )
 
     if (scrollResponse.ok) {
-      const data = await scrollResponse.json()
+      const data = (await scrollResponse.json()) as {
+        result?: { points?: Array<{ id: string; payload: Record<string, unknown> }> }
+      }
       const queryLower = query.toLowerCase()
 
       if (data.result?.points) {
         return data.result.points
-          .filter((p: { payload: Record<string, unknown> }) => {
+          .filter((p) => {
             const dataStr = String(p.payload?.data || '').toLowerCase()
             return dataStr.includes(queryLower)
           })
           .slice(0, limit)
-          .map((p: { id: string; payload: Record<string, unknown> }, index: number) => ({
-            id: p.id,
+          .map((p, index) => ({
+            id: String(p.id),
             score: 0.5 - index * 0.01,
             payload: p.payload,
           }))
       }
     }
   } catch (error) {
-    console.error('Failed to search Qdrant:', error)
+    console.error('[Memory] Failed to search Qdrant:', error)
   }
 
   return []
@@ -329,7 +358,7 @@ async function searchMemgraphNodes(
       }
     })
   } catch (error) {
-    console.error('Failed to search Memgraph:', error)
+    console.error('[Memory] Failed to search Memgraph:', error)
     return []
   }
 }
@@ -338,7 +367,7 @@ async function searchMemgraphNodes(
 const DANGEROUS_PATTERNS = [
   /drop\s+/i,
   /truncate\s+/i,
-  /delete\s+from\s+\w+\s*$/i, // DELETE without WHERE
+  /delete\s+from\s+\w+\s*$/i,
   /alter\s+/i,
   /create\s+role/i,
   /grant\s+/i,
@@ -392,7 +421,6 @@ async function executeRawQuery(
       }
 
       case 'qdrant': {
-        // Qdrant uses REST API, not query language
         return {
           success: false,
           data: null,
@@ -419,8 +447,47 @@ async function executeRawQuery(
   }
 }
 
+/**
+ * Health check using native clients (NOT shell commands)
+ */
+async function checkHealthAsync(): Promise<{
+  postgresql: boolean
+  memgraph: boolean
+  qdrant: boolean
+  ollama: boolean
+}> {
+  const [pg, mg, qd, ol] = await Promise.allSettled([
+    // PostgreSQL - native driver
+    postgresService.isConnected(),
+
+    // Memgraph - native driver
+    memgraphService.isConnected(),
+
+    // Qdrant - native client
+    QdrantService.getInstance().healthCheck(),
+
+    // Ollama - native fetch
+    (async () => {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 2000)
+      const response = await fetch('http://localhost:11434/api/tags', {
+        signal: controller.signal,
+      })
+      clearTimeout(timeout)
+      return response.ok
+    })(),
+  ])
+
+  return {
+    postgresql: pg.status === 'fulfilled' && pg.value,
+    memgraph: mg.status === 'fulfilled' && mg.value,
+    qdrant: qd.status === 'fulfilled' && qd.value,
+    ollama: ol.status === 'fulfilled' && ol.value,
+  }
+}
+
 // ============================================================================
-// MEMORY ROUTER
+// MEMORY ROUTER (All procedures now async)
 // ============================================================================
 
 export const memoryRouter = router({
@@ -428,15 +495,14 @@ export const memoryRouter = router({
    * Query learnings from PostgreSQL
    */
   learnings: publicProcedure.input(LearningsQuerySchema).query(({ input }) => {
-    return queryLearnings(input.query, input.limit, input.category)
+    return queryLearningsAsync(input.query, input.limit, input.category)
   }),
 
   /**
    * Get memory statistics across all sources
    */
-  stats: auditedProcedure.query(async () => {
-    const stats = await getMemoryStats()
-    return stats
+  stats: auditedProcedure.query(() => {
+    return getMemoryStatsAsync()
   }),
 
   /**
@@ -485,7 +551,7 @@ export const memoryRouter = router({
 
       return await memgraphService.getSampleGraph(input.limit)
     } catch (error) {
-      console.error('Failed to query Memgraph:', error)
+      console.error('[Memory] Failed to query Memgraph:', error)
       return { nodes: [], edges: [] }
     }
   }),
@@ -514,22 +580,25 @@ export const memoryRouter = router({
       )
 
       if (response.ok) {
-        const data = await response.json()
+        const data = (await response.json()) as {
+          result?: {
+            points?: Array<{ id: string; payload: Record<string, unknown> }>
+            next_page_offset?: string
+          }
+        }
         return {
-          points: (data.result?.points || []).map(
-            (p: { id: string; payload: Record<string, unknown> }) => ({
-              id: p.id,
-              payload: p.payload,
-              created_at: p.payload?.created_at as string | undefined,
-            })
-          ),
+          points: (data.result?.points || []).map((p) => ({
+            id: String(p.id),
+            payload: p.payload,
+            created_at: p.payload?.created_at as string | undefined,
+          })),
           nextOffset: data.result?.next_page_offset || null,
         }
       }
 
       return { points: [], nextOffset: null }
     } catch (error) {
-      console.error('Failed to browse Qdrant:', error)
+      console.error('[Memory] Failed to browse Qdrant:', error)
       return { points: [], nextOffset: null }
     }
   }),
@@ -574,33 +643,50 @@ export const memoryRouter = router({
       metadata: Record<string, unknown>
     }> = []
 
-    // Search PostgreSQL learnings
-    try {
-      const pgStart = Date.now()
-      const learnings = queryLearnings(input.query, input.limit)
-      stats.postgresql = Date.now() - pgStart
+    // Search all sources in parallel
+    const [pgResults, mgResults, qdResults] = await Promise.allSettled([
+      // PostgreSQL learnings
+      (async () => {
+        const pgStart = Date.now()
+        const learnings = await queryLearningsAsync(input.query, input.limit)
+        stats.postgresql = Date.now() - pgStart
+        return learnings
+      })(),
 
-      for (const learning of learnings) {
+      // Memgraph nodes
+      (async () => {
+        const mgStart = Date.now()
+        const nodes = await searchMemgraphNodes(input.query, undefined, input.limit)
+        stats.memgraph = Date.now() - mgStart
+        return nodes
+      })(),
+
+      // Qdrant vectors
+      (async () => {
+        const qdStart = Date.now()
+        const points = await searchQdrantMemories(input.query, 'claude_memories', input.limit)
+        stats.qdrant = Date.now() - qdStart
+        return points
+      })(),
+    ])
+
+    // Process PostgreSQL results
+    if (pgResults.status === 'fulfilled') {
+      for (const learning of pgResults.value) {
         results.push({
           id: `pg-${learning.id}`,
           source: 'postgresql',
           title: learning.topic,
           content: learning.content,
-          score: 0.8, // Keyword match gets high score
+          score: 0.8,
           metadata: { category: learning.category, createdAt: learning.createdAt },
         })
       }
-    } catch (error) {
-      console.error('PostgreSQL search failed:', error)
     }
 
-    // Search Memgraph
-    try {
-      const mgStart = Date.now()
-      const mgResults = await searchMemgraphNodes(input.query, undefined, input.limit)
-      stats.memgraph = Date.now() - mgStart
-
-      for (const node of mgResults) {
+    // Process Memgraph results
+    if (mgResults.status === 'fulfilled') {
+      for (const node of mgResults.value) {
         results.push({
           id: `mg-${node.id}`,
           source: 'memgraph',
@@ -610,17 +696,11 @@ export const memoryRouter = router({
           metadata: { type: node.type, ...node.properties },
         })
       }
-    } catch (error) {
-      console.error('Memgraph search failed:', error)
     }
 
-    // Search Qdrant
-    try {
-      const qdStart = Date.now()
-      const qdResults = await searchQdrantMemories(input.query, 'claude_memories', input.limit)
-      stats.qdrant = Date.now() - qdStart
-
-      for (const point of qdResults) {
+    // Process Qdrant results
+    if (qdResults.status === 'fulfilled') {
+      for (const point of qdResults.value) {
         results.push({
           id: `qd-${point.id}`,
           source: 'qdrant',
@@ -630,8 +710,6 @@ export const memoryRouter = router({
           metadata: point.payload,
         })
       }
-    } catch (error) {
-      console.error('Qdrant search failed:', error)
     }
 
     stats.totalTime = Date.now() - startTime
@@ -660,67 +738,19 @@ export const memoryRouter = router({
    */
   qdrantCollections: publicProcedure.query(async () => {
     try {
-      const response = await fetch('http://localhost:6333/collections')
-      if (response.ok) {
-        const data = await response.json()
-        return data.result?.collections || []
-      }
+      const qdrant = QdrantService.getInstance()
+      return await qdrant.listCollections()
     } catch (error) {
-      console.error('Failed to get Qdrant collections:', error)
+      console.error('[Memory] Failed to get Qdrant collections:', error)
+      return []
     }
-    return []
   }),
 
   /**
-   * Health check for memory sources
+   * Health check for memory sources (async, no execSync!)
    */
   health: publicProcedure.query(() => {
-    const status = {
-      postgresql: false,
-      memgraph: false,
-      qdrant: false,
-      ollama: false,
-    }
-
-    try {
-      execSync('pg_isready -h localhost -p 5433', { encoding: 'utf-8', timeout: 1000 })
-      status.postgresql = true
-    } catch {
-      // Offline
-    }
-
-    try {
-      execSync('nc -z localhost 7687', { encoding: 'utf-8', timeout: 1000 })
-      status.memgraph = true
-    } catch {
-      // Offline
-    }
-
-    try {
-      const result = execSync('curl -s http://localhost:6333/collections', {
-        encoding: 'utf-8',
-        timeout: 2000,
-      })
-      if (result.includes('result')) {
-        status.qdrant = true
-      }
-    } catch {
-      // Offline
-    }
-
-    try {
-      const result = execSync('curl -s http://localhost:11434/api/tags', {
-        encoding: 'utf-8',
-        timeout: 2000,
-      })
-      if (result.includes('models')) {
-        status.ollama = true
-      }
-    } catch {
-      // Offline
-    }
-
-    return status
+    return checkHealthAsync()
   }),
 })
 
