@@ -32,7 +32,7 @@ import {
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/react'
 import { useMemoryStore, type MemorySource } from '@/stores/memory'
-import { GraphViewer } from './GraphViewer'
+import { HybridGraphViewer } from './HybridGraphViewer'
 import type { Learning } from '@shared/types'
 
 // Available categories for filtering (reserved for future use)
@@ -1344,7 +1344,7 @@ function ResultsPanel({
               ))}
             </div>
           ) : showGraph ? (
-            <GraphViewer />
+            <HybridGraphViewer />
           ) : (
             <EmptyState
               icon={Layers}
