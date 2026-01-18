@@ -1,10 +1,12 @@
 # Claude Pilot - Project Memory
 
 ## Project Overview
+
 Professional session control for Claude Code - manage profiles, monitor resources, and orchestrate workflows.
 **Aesthetic**: VSCode-inspired dark theme with Grafana-style monitoring dashboards.
 
 ## Tech Stack
+
 - **Framework**: Electron 34 + electron-vite
 - **Frontend**: React 19 + TypeScript + Tailwind CSS
 - **Terminal**: xterm.js + node-pty (integrated CLI)
@@ -16,6 +18,7 @@ Professional session control for Claude Code - manage profiles, monitor resource
 ## Architecture
 
 ### Directory Structure
+
 ```
 src/
 ├── main/                    # Electron main process
@@ -53,6 +56,7 @@ src/
 ```
 
 ### Core Modules
+
 1. **Dashboard** - System health, resource usage, active sessions
 2. **Projects** - Browse/manage Claude projects with CLAUDE.md
 3. **MCP Manager** - Configure, enable/disable, monitor MCP servers
@@ -62,6 +66,7 @@ src/
 7. **Terminal** - Integrated Claude Code CLI
 
 ### Data Sources
+
 - `~/.claude/` - Claude Code configuration
 - `~/.claude/projects/` - Session transcripts (transcript.jsonl)
 - `~/.claude/settings.json` - User settings
@@ -71,6 +76,7 @@ src/
 - Qdrant (port 6333) - Mem0 vector memories
 
 ## Common Commands
+
 ```bash
 npm run dev              # Start development
 npm run build            # Production build
@@ -85,6 +91,7 @@ npm run test:coverage    # Coverage report
 ```
 
 ## Work Tracking
+
 Use Beads (`bd` commands) for all task management.
 
 ```bash
@@ -98,26 +105,29 @@ bd stats              # Project health
 ## Design Guidelines
 
 ### Color Palette (Dark Theme)
-| Name | Hex | Use |
-|------|-----|-----|
-| Background | `#1e1e2e` | Main background |
-| Surface | `#2a2a3d` | Cards, panels |
-| Border | `#3d3d5c` | Borders, dividers |
-| Text Primary | `#cdd6f4` | Main text |
-| Text Muted | `#6c7086` | Secondary text |
-| Accent Blue | `#89b4fa` | Links, active states |
-| Accent Green | `#a6e3a1` | Success, online |
-| Accent Yellow | `#f9e2af` | Warnings |
-| Accent Red | `#f38ba8` | Errors, offline |
-| Accent Purple | `#cba6f7` | Claude branding |
+
+| Name          | Hex       | Use                  |
+| ------------- | --------- | -------------------- |
+| Background    | `#1e1e2e` | Main background      |
+| Surface       | `#2a2a3d` | Cards, panels        |
+| Border        | `#3d3d5c` | Borders, dividers    |
+| Text Primary  | `#cdd6f4` | Main text            |
+| Text Muted    | `#6c7086` | Secondary text       |
+| Accent Blue   | `#89b4fa` | Links, active states |
+| Accent Green  | `#a6e3a1` | Success, online      |
+| Accent Yellow | `#f9e2af` | Warnings             |
+| Accent Red    | `#f38ba8` | Errors, offline      |
+| Accent Purple | `#cba6f7` | Claude branding      |
 
 ### Typography
+
 - **Font**: Inter (variable) for all text
 - **Monospace**: JetBrains Mono for code/terminal
 - **Base size**: 14px
 - **Scale**: 12px, 14px, 16px, 18px, 24px, 32px
 
 ### Component Patterns
+
 - Card-based layout with subtle shadows
 - Rounded corners (8px default)
 - Smooth transitions (150ms ease)
@@ -125,7 +135,9 @@ bd stats              # Project health
 - Loading skeletons for async content
 
 ## IPC Communication
+
 Main ↔ Renderer communication via typed IPC:
+
 - `claude:*` - Claude Code operations
 - `mcp:*` - MCP server management
 - `memory:*` - Memory system queries
@@ -133,6 +145,7 @@ Main ↔ Renderer communication via typed IPC:
 - `terminal:*` - PTY operations
 
 ## Security Guidelines
+
 - No shell injection in terminal commands
 - Sanitize file paths before operations
 - Validate IPC message payloads
@@ -140,16 +153,148 @@ Main ↔ Renderer communication via typed IPC:
 - Use contextBridge for preload
 
 ## Performance Targets
-| Metric | Target |
-|--------|--------|
-| Cold start | < 2s |
-| Hot reload | < 500ms |
+
+| Metric       | Target  |
+| ------------ | ------- |
+| Cold start   | < 2s    |
+| Hot reload   | < 500ms |
 | Memory usage | < 300MB |
-| IPC latency | < 50ms |
+| IPC latency  | < 50ms  |
 
 ## Important Notes
+
 - Main process handles all filesystem/subprocess operations
 - Renderer is sandboxed (nodeIntegration: false)
 - Use IPC for all cross-process communication
 - Tail transcript.jsonl for real-time session updates
 - MCP config reload without app restart
+
+---
+
+## Enterprise Architecture (Gemini Research)
+
+> **Reference**: See `docs/Research/GEMINI_RESEARCH_ANALYSIS.md` for comprehensive details
+
+### Hybrid IPC Architecture
+
+**Control Plane (tRPC):**
+
+- State synchronization, configuration, commands
+- Type-safe with Zod validation
+- Small payloads (<1KB)
+
+**Data Plane (MessagePorts):**
+
+- File transfers >1MB
+- Binary payloads (embeddings, images)
+- Zero-copy via Transferable objects
+
+```typescript
+// Pattern: tRPC for control, MessagePort for data
+const { port } = await trpc.streaming.initFileTransfer.mutate({ fileId })
+port.onmessage = (e) => processChunk(e.data) // Zero-copy transfer
+```
+
+### Security Architecture
+
+**Authentication (RFC 8252):**
+
+- System browser for OAuth (never WebViews)
+- PKCE mandatory for all flows
+- Loopback redirect (127.0.0.1:ephemeral-port)
+- Tokens in `safeStorage` (never localStorage)
+
+**Zero-Knowledge Vector Search:**
+
+- AWS Nitro Enclaves for encrypted index
+- WebAuthn PRF for hardware-backed key derivation
+- HKDF (RFC 5869) for key expansion
+- Envelope encryption for multi-device
+
+**Required Headers:**
+
+```typescript
+// Enable SharedArrayBuffer (required for worker optimization)
+session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+  callback({
+    responseHeaders: {
+      ...details.responseHeaders,
+      'Cross-Origin-Opener-Policy': ['same-origin'],
+      'Cross-Origin-Embedder-Policy': ['credentialless'],
+    },
+  })
+})
+```
+
+### Worker Thread Patterns
+
+**Use Piscina for worker pools:**
+
+```typescript
+import Piscina from 'piscina'
+
+const interactivePool = new Piscina({
+  filename: './workers/interactive.js',
+  maxThreads: 2, // High priority
+})
+
+const backgroundPool = new Piscina({
+  filename: './workers/batch.js',
+  maxThreads: os.availableParallelism() - 3,
+})
+```
+
+**Direct MessagePort for Renderer→Worker bypass:**
+
+- Avoids Main process serialization overhead
+- Critical for 60fps under heavy compute
+
+### Teleport Integration
+
+**Sidecar Pattern (tshd daemon):**
+
+- Bundle tsh binary with installer
+- gRPC over Unix socket / Named pipe
+- Never embed Go SDK directly
+
+**Local Proxy for K8s/DB:**
+
+```bash
+tsh proxy kube <cluster> --port=8443
+tsh proxy db --tunnel --port=5433 <database>
+```
+
+### Configuration Hierarchy (5-Tier)
+
+```
+1. Installation Defaults (read-only)
+2. System Policies (/etc/claude-pilot/)
+3. User Preferences (~/.config/claude-pilot/)
+4. Project Config (.claude/pilot.json)
+5. Session Overrides (CLI flags, env vars)
+```
+
+Higher tiers override lower. System policies can "lock" values.
+
+### Key Beads
+
+| Bead          | Description                          |
+| ------------- | ------------------------------------ |
+| `deploy-qu36` | EPIC: Gemini Research Implementation |
+| `deploy-skn3` | OAuth/OIDC (RFC 8252)                |
+| `deploy-482i` | electron-trpc Production             |
+| `deploy-scb9` | Worker Thread Optimization           |
+| `deploy-q6dz` | Zero-Knowledge Encryption            |
+| `deploy-reky` | Teleport Integration                 |
+| `deploy-ji2e` | Configuration Hierarchy              |
+
+### Research Documentation
+
+- `docs/Research/GEMINI_RESEARCH_ANALYSIS.md` - Full synthesis
+- `docs/Research/IMPLEMENTATION_TASK_MAPPING.md` - Task breakdown
+- `docs/Research/ENTERPRISE_ROADMAP.md` - 10-week roadmap
+- `docs/Research/Electron OAuth 2.0_OIDC Best Practices.md`
+- `docs/Research/Electron-tRPC Production Patterns Research.md`
+- `docs/Research/Electron Worker Thread Optimization Strategies.md`
+- `docs/Research/Encrypted Vector Search for Claude Pilot.md`
+- `docs/Research/Integrating Teleport into Desktop Apps.md`
