@@ -44,6 +44,9 @@ import {
   terminalRouter,
 } from '../controllers/utilities'
 
+// Chat controller
+import { chatRouter } from '../controllers/chat'
+
 // ============================================================================
 // MAIN APP ROUTER
 // ============================================================================
@@ -75,6 +78,7 @@ export const appRouter = router({
 
   // Sprint 3: Sessions (18 handlers)
   session: sessionRouter,
+  sessions: sessionRouter, // Alias for frontend compatibility (sessions.getActive etc.)
   transcript: transcriptRouter,
   beads: beadsRouter,
 
@@ -99,6 +103,9 @@ export const appRouter = router({
   stream: streamRouter,
   update: updateRouter,
   terminal: terminalRouter,
+
+  // Chat controller
+  chat: chatRouter,
 })
 
 // Export type for frontend - this is the magic!

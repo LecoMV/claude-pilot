@@ -324,6 +324,33 @@ function MemorySettings({ settings, onChange }: SettingsProps) {
           />
         </SettingRow>
       </SettingGroup>
+
+      <SettingGroup title="Qdrant (Vector Memory)">
+        <SettingRow label="Host" description="Qdrant server host">
+          <input
+            type="text"
+            className="input w-48"
+            value={settings.qdrantHost}
+            onChange={(e) => onChange('qdrantHost', e.target.value)}
+          />
+        </SettingRow>
+        <SettingRow label="Port" description="Qdrant server port">
+          <input
+            type="number"
+            className="input w-24"
+            value={settings.qdrantPort}
+            onChange={(e) => onChange('qdrantPort', parseInt(e.target.value) || 6333)}
+          />
+        </SettingRow>
+        <SettingRow label="Collection" description="Default collection name">
+          <input
+            type="text"
+            className="input w-48"
+            value={settings.qdrantCollection}
+            onChange={(e) => onChange('qdrantCollection', e.target.value)}
+          />
+        </SettingRow>
+      </SettingGroup>
     </div>
   )
 }

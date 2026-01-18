@@ -78,7 +78,7 @@ export function CostTracker({ onNavigate }: CostTrackerProps) {
     <div className="space-y-4">
       {/* Main cost cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Current Month Cost */}
+        {/* Current Month Cost - links to budget settings */}
         <CostCard
           icon={Wallet}
           label="This Month"
@@ -87,22 +87,26 @@ export function CostTracker({ onNavigate }: CostTrackerProps) {
           color={budgetColor}
           percentage={budgetPercentage}
           showProgress
+          onClick={() => onNavigate?.('settings')}
         />
 
-        {/* Today's Cost */}
+        {/* Today's Cost - links to sessions */}
         <CostCard
           icon={DollarSign}
           label="Today"
           value={formatCost(todayCost)}
-          subtext={`${sessions.filter(
-            (s) =>
-              new Date(s.startTime).toISOString().split('T')[0] ===
-              new Date().toISOString().split('T')[0]
-          ).length} sessions`}
+          subtext={`${
+            sessions.filter(
+              (s) =>
+                new Date(s.startTime).toISOString().split('T')[0] ===
+                new Date().toISOString().split('T')[0]
+            ).length
+          } sessions`}
           color="blue"
+          onClick={() => onNavigate?.('sessions')}
         />
 
-        {/* Active Sessions Cost */}
+        {/* Active Sessions Cost - links to context dashboard */}
         <CostCard
           icon={Activity}
           label="Active Sessions"
@@ -110,9 +114,10 @@ export function CostTracker({ onNavigate }: CostTrackerProps) {
           subtext={`${activeSessions.length} session${activeSessions.length !== 1 ? 's' : ''} running`}
           color="purple"
           pulse={activeSessions.length > 0}
+          onClick={() => onNavigate?.('context')}
         />
 
-        {/* Estimated Monthly */}
+        {/* Estimated Monthly - no navigation */}
         <CostCard
           icon={TrendingUp}
           label="Projected Monthly"
@@ -122,37 +127,39 @@ export function CostTracker({ onNavigate }: CostTrackerProps) {
         />
       </div>
 
-      {/* Budget warning banner */}
-      {budgetSettings.alertsEnabled && (budgetWarning || budgetExceeded) && (
-        <div
-          className={cn(
-            'flex items-center gap-3 p-4 rounded-lg border',
-            budgetExceeded
-              ? 'bg-accent-red/10 border-accent-red/30 text-accent-red'
-              : 'bg-accent-yellow/10 border-accent-yellow/30 text-accent-yellow'
-          )}
-        >
-          <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-          <div className="flex-1">
-            <p className="font-medium">
-              {budgetExceeded
-                ? 'Budget exceeded!'
-                : `Approaching budget limit (${budgetPercentage.toFixed(0)}%)`}
-            </p>
-            <p className="text-sm opacity-80">
-              {budgetExceeded
-                ? `You've spent ${formatCost(currentMonthCost)} of your ${formatCost(budgetSettings.monthlyLimit)} monthly budget.`
-                : `You've used ${budgetPercentage.toFixed(0)}% of your monthly budget.`}
-            </p>
-          </div>
-          <button
-            onClick={() => onNavigate?.('settings')}
-            className="text-sm underline underline-offset-2 hover:opacity-80"
+      {/* Budget warning banner - only show for API billing users */}
+      {budgetSettings.alertsEnabled &&
+        budgetSettings.billingType === 'api' &&
+        (budgetWarning || budgetExceeded) && (
+          <div
+            className={cn(
+              'flex items-center gap-3 p-4 rounded-lg border',
+              budgetExceeded
+                ? 'bg-accent-red/10 border-accent-red/30 text-accent-red'
+                : 'bg-accent-yellow/10 border-accent-yellow/30 text-accent-yellow'
+            )}
           >
-            Adjust budget
-          </button>
-        </div>
-      )}
+            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium">
+                {budgetExceeded
+                  ? 'Budget exceeded!'
+                  : `Approaching budget limit (${budgetPercentage.toFixed(0)}%)`}
+              </p>
+              <p className="text-sm opacity-80">
+                {budgetExceeded
+                  ? `You've spent ${formatCost(currentMonthCost)} of your ${formatCost(budgetSettings.monthlyLimit)} monthly budget.`
+                  : `You've used ${budgetPercentage.toFixed(0)}% of your monthly budget.`}
+              </p>
+            </div>
+            <button
+              onClick={() => onNavigate?.('settings')}
+              className="text-sm underline underline-offset-2 hover:opacity-80"
+            >
+              Adjust budget
+            </button>
+          </div>
+        )}
 
       {/* Cost by model breakdown */}
       {costByModel.length > 0 && (
@@ -170,17 +177,14 @@ export function CostTracker({ onNavigate }: CostTrackerProps) {
           <div className="space-y-3">
             {costByModel.slice(0, 4).map((model) => {
               const caps = MODEL_CAPABILITIES[model.modelId]
-              const percentage =
-                currentMonthCost > 0 ? (model.cost / currentMonthCost) * 100 : 0
+              const percentage = currentMonthCost > 0 ? (model.cost / currentMonthCost) * 100 : 0
 
               return (
                 <div key={model.modelId} className="space-y-1">
                   <div className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
                       <Zap className="w-3.5 h-3.5 text-accent-purple" />
-                      <span className="text-text-primary font-medium">
-                        {model.modelName}
-                      </span>
+                      <span className="text-text-primary font-medium">{model.modelName}</span>
                       {caps?.recommended && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-hover text-text-muted">
                           {caps.recommended}
@@ -188,9 +192,7 @@ export function CostTracker({ onNavigate }: CostTrackerProps) {
                       )}
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-text-muted text-xs">
-                        {model.sessionCount} sessions
-                      </span>
+                      <span className="text-text-muted text-xs">{model.sessionCount} sessions</span>
                       <span className="text-text-primary font-medium">
                         {formatCost(model.cost)}
                       </span>
@@ -269,6 +271,7 @@ interface CostCardProps {
   percentage?: number
   showProgress?: boolean
   pulse?: boolean
+  onClick?: () => void
 }
 
 function CostCard({
@@ -280,6 +283,7 @@ function CostCard({
   percentage,
   showProgress,
   pulse,
+  onClick,
 }: CostCardProps) {
   const colorClasses = {
     green: {
@@ -317,7 +321,13 @@ function CostCard({
   const colors = colorClasses[color]
 
   return (
-    <div className="card p-4">
+    <div
+      className={cn(
+        'card p-4',
+        onClick && 'cursor-pointer hover:border-border-hover transition-colors'
+      )}
+      onClick={onClick}
+    >
       <div className="flex items-center gap-3 mb-3">
         <div className={cn('inline-flex p-2 rounded-lg', colors.bg, colors.text)}>
           <Icon className={cn('w-5 h-5', pulse && 'animate-pulse')} />

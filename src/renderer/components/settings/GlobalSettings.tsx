@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import {
   FileText,
   BookOpen,
@@ -17,6 +17,10 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  Cpu,
+  Play,
+  Square,
+  HardDrive,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/react'
@@ -35,7 +39,9 @@ export function GlobalSettings() {
     setClaudeMdContent,
   } = useProfileStore()
 
-  const [activeTab, setActiveTab] = useState<'model' | 'claude' | 'claudemd' | 'rules'>('model')
+  const [activeTab, setActiveTab] = useState<
+    'model' | 'claude' | 'systemllm' | 'claudemd' | 'rules'
+  >('model')
   const [saving, setSaving] = useState(false)
   const [localSettings, setLocalSettings] = useState({
     model: '',
@@ -177,6 +183,12 @@ export function GlobalSettings() {
           label="Claude Code"
         />
         <TabButton
+          active={activeTab === 'systemllm'}
+          onClick={() => setActiveTab('systemllm')}
+          icon={Cpu}
+          label="System LLMs"
+        />
+        <TabButton
           active={activeTab === 'claudemd'}
           onClick={() => setActiveTab('claudemd')}
           icon={FileText}
@@ -201,6 +213,8 @@ export function GlobalSettings() {
       )}
 
       {activeTab === 'claude' && <ClaudeCodePanel />}
+
+      {activeTab === 'systemllm' && <SystemLLMSettingsPanel />}
 
       {activeTab === 'claudemd' && (
         <ClaudeMdPanel
@@ -857,6 +871,10 @@ function ClaudeCodePanel() {
               <Loader2 className="w-4 h-4 animate-spin" />
               Detecting Claude Code...
             </div>
+          ) : statusQuery.error ? (
+            <div className="p-2 bg-accent-red/10 border border-accent-red/20 rounded text-accent-red text-sm">
+              Error: {statusQuery.error.message}
+            </div>
           ) : status ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -1042,6 +1060,400 @@ function ClaudeCodePanel() {
               By default, Claude Pilot auto-detects the Claude Code binary from your PATH and uses
               ~/.claude/projects for session data. If your installation uses non-standard paths, you
               can override them here.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * System LLM Settings Panel
+ * Configure embedding models and view system LLM status
+ */
+function SystemLLMSettingsPanel() {
+  const [selectedModel, setSelectedModel] = useState<string>('')
+  const [updating, setUpdating] = useState(false)
+
+  // tRPC queries
+  const ollamaStatusQuery = trpc.ollama.status.useQuery(undefined, { refetchInterval: 10000 })
+  const ollamaModelsQuery = trpc.ollama.list.useQuery(undefined, { refetchInterval: 30000 })
+  const runningModelsQuery = trpc.ollama.running.useQuery(undefined, { refetchInterval: 5000 })
+  const embeddingStatusQuery = trpc.embedding.status.useQuery(undefined, { refetchInterval: 10000 })
+
+  // tRPC mutations
+  const warmupMutation = trpc.embedding.warmupModel.useMutation({
+    onSuccess: () => {
+      embeddingStatusQuery.refetch()
+      runningModelsQuery.refetch()
+    },
+  })
+  const unloadMutation = trpc.embedding.unloadModel.useMutation({
+    onSuccess: () => {
+      embeddingStatusQuery.refetch()
+      runningModelsQuery.refetch()
+    },
+  })
+  const updateConfigMutation = trpc.embedding.updateOllamaConfig.useMutation({
+    onSuccess: () => {
+      setUpdating(false)
+      embeddingStatusQuery.refetch()
+    },
+    onError: () => {
+      setUpdating(false)
+    },
+  })
+  const runModelMutation = trpc.ollama.run.useMutation({
+    onSuccess: () => {
+      runningModelsQuery.refetch()
+    },
+  })
+  const stopModelMutation = trpc.ollama.stop.useMutation({
+    onSuccess: () => {
+      runningModelsQuery.refetch()
+    },
+  })
+
+  // Filter to embedding-capable models
+  const embeddingModels = useMemo(() => {
+    if (!ollamaModelsQuery.data) return []
+    return ollamaModelsQuery.data.filter(
+      (m) =>
+        m.name.includes('embed') ||
+        m.name.includes('nomic') ||
+        m.name.includes('bge') ||
+        m.name.includes('minilm') ||
+        m.name.includes('mxbai')
+    )
+  }, [ollamaModelsQuery.data])
+
+  // All other models (non-embedding)
+  const otherModels = useMemo(() => {
+    if (!ollamaModelsQuery.data) return []
+    return ollamaModelsQuery.data.filter(
+      (m) =>
+        !m.name.includes('embed') &&
+        !m.name.includes('nomic') &&
+        !m.name.includes('bge') &&
+        !m.name.includes('minilm') &&
+        !m.name.includes('mxbai')
+    )
+  }, [ollamaModelsQuery.data])
+
+  // Current embedding model from status
+  const currentModel = embeddingStatusQuery.data?.ollamaModel || 'mxbai-embed-large'
+
+  // Initialize selected model
+  useEffect(() => {
+    if (currentModel && !selectedModel) {
+      setSelectedModel(currentModel)
+    }
+  }, [currentModel, selectedModel])
+
+  // Check if model is running
+  const isModelRunning = (modelName: string) => {
+    return runningModelsQuery.data?.some((m) => m.name === modelName || m.model === modelName)
+  }
+
+  const formatSize = (bytes: number) => {
+    if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
+    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
+    return `${bytes} B`
+  }
+
+  const handleUpdateModel = () => {
+    if (selectedModel === currentModel) return
+    setUpdating(true)
+    // Map model name to dimensions
+    const dimensionMap: Record<string, number> = {
+      'mxbai-embed-large': 1024,
+      'nomic-embed-text': 768,
+      'all-minilm': 384,
+      'bge-large': 1024,
+      'bge-base': 768,
+      'bge-small': 384,
+    }
+    const dimensions =
+      Object.entries(dimensionMap).find(([key]) => selectedModel.includes(key))?.[1] || 1024
+
+    updateConfigMutation.mutate({
+      model: selectedModel,
+      dimensions,
+    })
+  }
+
+  const ollamaOnline = ollamaStatusQuery.data?.online
+
+  return (
+    <div className="space-y-6">
+      {/* Ollama Status */}
+      <section className="card">
+        <div className="card-header">
+          <h3 className="font-medium text-text-primary flex items-center gap-2">
+            <HardDrive className="w-4 h-4 text-accent-purple" />
+            Ollama Status
+          </h3>
+          <p className="text-xs text-text-muted mt-1">Local LLM inference server</p>
+        </div>
+        <div className="card-body">
+          <div className="flex items-center justify-between">
+            <span className="text-text-secondary">Status</span>
+            <span className="flex items-center gap-2">
+              {ollamaStatusQuery.isLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin text-text-muted" />
+              ) : ollamaOnline ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-accent-green" />
+                  <span className="text-accent-green">Online</span>
+                  {ollamaStatusQuery.data?.version && (
+                    <span className="text-text-muted text-xs ml-2">
+                      v{ollamaStatusQuery.data.version}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <XCircle className="w-4 h-4 text-accent-red" />
+                  <span className="text-accent-red">Offline</span>
+                </>
+              )}
+            </span>
+          </div>
+          {!ollamaOnline && (
+            <p className="text-xs text-accent-yellow mt-2">
+              Start Ollama with: <code className="bg-surface-hover px-1 rounded">ollama serve</code>
+            </p>
+          )}
+        </div>
+      </section>
+
+      {/* Embedding Model Selection */}
+      <section className="card">
+        <div className="card-header">
+          <h3 className="font-medium text-text-primary flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-accent-blue" />
+            Embedding Model
+          </h3>
+          <p className="text-xs text-text-muted mt-1">
+            Model used for vector embeddings in memory search
+          </p>
+        </div>
+        <div className="card-body space-y-4">
+          {/* Current model info */}
+          <div className="p-3 bg-surface-hover rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-text-secondary">Current Model</p>
+                <p className="font-medium text-text-primary">{currentModel}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {embeddingStatusQuery.data?.ollamaStatus === 'connected' ? (
+                  <span className="flex items-center gap-1.5 text-xs text-accent-green">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Connected
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-xs text-accent-yellow">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    {embeddingStatusQuery.data?.ollamaStatus || 'Unknown'}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Model selector */}
+          <div>
+            <label className="block text-sm text-text-secondary mb-2">Change Embedding Model</label>
+            <div className="flex gap-2">
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="input flex-1"
+                disabled={!ollamaOnline || embeddingModels.length === 0}
+              >
+                {embeddingModels.length === 0 ? (
+                  <option value="">No embedding models installed</option>
+                ) : (
+                  embeddingModels.map((model) => (
+                    <option key={model.name} value={model.name}>
+                      {model.name} ({formatSize(model.size)})
+                    </option>
+                  ))
+                )}
+              </select>
+              <button
+                onClick={handleUpdateModel}
+                disabled={!ollamaOnline || updating || selectedModel === currentModel}
+                className="btn btn-primary"
+              >
+                {updating ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                Update
+              </button>
+            </div>
+            {selectedModel !== currentModel && (
+              <p className="text-xs text-accent-yellow mt-2">
+                Changing embedding models may require re-embedding existing content if dimensions
+                differ.
+              </p>
+            )}
+          </div>
+
+          {/* Warmup / Unload controls */}
+          <div className="border-t border-border pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-text-primary">Model Controls</p>
+                <p className="text-xs text-text-muted">
+                  Warmup loads the model into GPU memory for faster embeddings
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => warmupMutation.mutate()}
+                  disabled={!ollamaOnline || warmupMutation.isPending}
+                  className="btn btn-secondary btn-sm"
+                >
+                  {warmupMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Play className="w-4 h-4" />
+                  )}
+                  Warmup
+                </button>
+                <button
+                  onClick={() => unloadMutation.mutate()}
+                  disabled={!ollamaOnline || unloadMutation.isPending}
+                  className="btn btn-secondary btn-sm"
+                >
+                  {unloadMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Square className="w-4 h-4" />
+                  )}
+                  Unload
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Running Models */}
+      {runningModelsQuery.data && runningModelsQuery.data.length > 0 && (
+        <section className="card">
+          <div className="card-header">
+            <h3 className="font-medium text-text-primary flex items-center gap-2">
+              <Zap className="w-4 h-4 text-accent-yellow" />
+              Running Models
+            </h3>
+            <p className="text-xs text-text-muted mt-1">Models currently loaded in memory</p>
+          </div>
+          <div className="card-body">
+            <div className="space-y-2">
+              {runningModelsQuery.data.map((model) => (
+                <div
+                  key={model.name}
+                  className="flex items-center justify-between p-2 bg-surface-hover rounded-lg"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-green"></span>
+                    </span>
+                    <span className="font-medium text-text-primary">{model.name}</span>
+                    <span className="text-xs text-text-muted">({formatSize(model.size)})</span>
+                  </div>
+                  <button
+                    onClick={() => stopModelMutation.mutate({ model: model.name })}
+                    disabled={stopModelMutation.isPending}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    {stopModelMutation.isPending ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Square className="w-3 h-3" />
+                    )}
+                    Stop
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Other Installed Models */}
+      {otherModels.length > 0 && (
+        <section className="card">
+          <div className="card-header">
+            <h3 className="font-medium text-text-primary flex items-center gap-2">
+              <Brain className="w-4 h-4 text-accent-purple" />
+              Other Installed Models
+            </h3>
+            <p className="text-xs text-text-muted mt-1">
+              Non-embedding models available on this system
+            </p>
+          </div>
+          <div className="card-body">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {otherModels.slice(0, 6).map((model) => (
+                <div
+                  key={model.name}
+                  className="flex items-center justify-between p-2 bg-surface-hover rounded-lg"
+                >
+                  <div>
+                    <p className="font-medium text-text-primary text-sm">{model.name}</p>
+                    <p className="text-xs text-text-muted">{formatSize(model.size)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isModelRunning(model.name) ? (
+                      <>
+                        <span className="w-2 h-2 rounded-full bg-accent-green" />
+                        <button
+                          onClick={() => stopModelMutation.mutate({ model: model.name })}
+                          className="btn btn-secondary btn-sm p-1"
+                        >
+                          <Square className="w-3 h-3" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => runModelMutation.mutate({ model: model.name })}
+                        className="btn btn-secondary btn-sm p-1"
+                      >
+                        <Play className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {otherModels.length > 6 && (
+              <p className="text-xs text-text-muted mt-2 text-center">
+                +{otherModels.length - 6} more models installed
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Info card */}
+      <div className="card p-4">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-accent-blue flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-text-secondary">
+            <p className="font-medium text-text-primary mb-1">About System LLMs</p>
+            <p>
+              System LLMs are used by Claude Pilot for embeddings and other internal operations.
+              Embedding models convert text into vectors for semantic search. The default model is
+              mxbai-embed-large (1024 dimensions). Change models carefully as different dimensions
+              require re-embedding all content.
             </p>
           </div>
         </div>

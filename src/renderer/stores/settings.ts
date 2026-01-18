@@ -17,6 +17,9 @@ export interface AppSettings {
   postgresPort: number
   memgraphHost: string
   memgraphPort: number
+  qdrantHost: string
+  qdrantPort: number
+  qdrantCollection: string
 
   // Notifications
   systemNotifications: boolean
@@ -40,6 +43,9 @@ const defaultSettings: AppSettings = {
   postgresPort: 5433,
   memgraphHost: 'localhost',
   memgraphPort: 7687,
+  qdrantHost: 'localhost',
+  qdrantPort: 6333,
+  qdrantCollection: 'claude_memories',
 
   systemNotifications: true,
   soundEnabled: false,

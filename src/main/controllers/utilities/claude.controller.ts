@@ -288,9 +288,13 @@ function getClaudeProjects(): ClaudeProject[] {
  * Get comprehensive Claude Code status
  */
 async function getClaudeStatus(): Promise<ClaudeCodeStatus> {
+  console.info('[Claude] getClaudeStatus called')
   const binaryPath = await resolveClaudeBinary()
+  console.info('[Claude] Binary path:', binaryPath)
   const version = await getClaudeVersion(binaryPath)
+  console.info('[Claude] Version:', version)
   const projectsDir = getProjectsDir()
+  console.info('[Claude] Projects dir:', projectsDir)
 
   let projectCount = 0
   if (existsSync(projectsDir)) {
@@ -317,6 +321,14 @@ async function getClaudeStatus(): Promise<ClaudeCodeStatus> {
 // ============================================================================
 
 export const claudeRouter = router({
+  /**
+   * Simple ping test to verify routing
+   */
+  ping: publicProcedure.query((): string => {
+    console.info('[Claude] Ping received!')
+    return 'pong'
+  }),
+
   /**
    * Get Claude Code version
    */
