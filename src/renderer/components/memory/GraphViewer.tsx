@@ -49,6 +49,7 @@ export function GraphViewer() {
   const [graphData, setGraphData] = useState<GraphData | null>(null)
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [query, setQuery] = useState('')
+  const [nodeLimit, setNodeLimit] = useState(500)
 
   // Load graph data from backend
   const loadGraph = useCallback(
@@ -56,7 +57,7 @@ export function GraphViewer() {
       setLoading(true)
       setError(null)
       try {
-        const result = await utils.memory.graph.fetch({ query: cypherQuery, limit: 100 })
+        const result = await utils.memory.graph.fetch({ query: cypherQuery, limit: nodeLimit })
         setGraphData(result)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load graph')
@@ -64,7 +65,7 @@ export function GraphViewer() {
         setLoading(false)
       }
     },
-    [utils]
+    [utils, nodeLimit]
   )
 
   // Initialize Cytoscape
@@ -253,6 +254,18 @@ export function GraphViewer() {
           onKeyDown={(e) => e.key === 'Enter' && handleRunQuery()}
           className="input flex-1 font-mono text-sm"
         />
+        <select
+          value={nodeLimit}
+          onChange={(e) => setNodeLimit(Number(e.target.value))}
+          className="input w-28 text-sm"
+          title="Max nodes to display"
+        >
+          <option value={100}>100 nodes</option>
+          <option value={500}>500 nodes</option>
+          <option value={1000}>1K nodes</option>
+          <option value={2000}>2K nodes</option>
+          <option value={5000}>5K nodes</option>
+        </select>
         <button onClick={handleRunQuery} disabled={loading} className="btn btn-primary">
           {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
           Run
@@ -278,7 +291,12 @@ export function GraphViewer() {
         <div className="text-xs text-text-muted">
           {graphData && (
             <span>
-              {graphData.nodes.length} nodes, {graphData.edges.length} edges
+              Showing {graphData.nodes.length} nodes, {graphData.edges.length} edges
+              {graphData.nodes.length >= nodeLimit && (
+                <span className="text-accent-yellow ml-2">
+                  (limit reached - increase to see more)
+                </span>
+              )}
             </span>
           )}
         </div>

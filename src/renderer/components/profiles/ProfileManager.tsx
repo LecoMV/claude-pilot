@@ -82,7 +82,7 @@ export function ProfileManager() {
         loading={profilesLoading}
         onRefresh={loadProfiles}
         onProfilesChange={loadProfiles}
-        onActiveChange={setActiveProfileId}
+        onActiveChange={() => activeQuery.refetch()}
       />
     </div>
   )

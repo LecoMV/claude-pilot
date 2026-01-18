@@ -62,7 +62,18 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set())
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [showToolResults, setShowToolResults] = useState(true)
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const toggleMessageExpanded = (id: string) => {
+    const newExpanded = new Set(expandedMessages)
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id)
+    } else {
+      newExpanded.add(id)
+    }
+    setExpandedMessages(newExpanded)
+  }
 
   // Load messages
   useEffect(() => {
@@ -255,7 +266,10 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
 
           const Icon = config.icon
           const isToolResult = message.type === 'tool-result'
-          const isExpanded = expandedTools.has(message.uuid)
+          const isToolExpanded = expandedTools.has(message.uuid)
+          const isMessageExpanded = expandedMessages.has(message.uuid)
+          const contentLength = (message.content?.length || 0) + (message.toolOutput?.length || 0)
+          const needsTruncation = contentLength > 500
 
           return (
             <div
@@ -305,14 +319,14 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
                           onClick={() => toggleToolExpanded(message.uuid)}
                           className="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary"
                         >
-                          {isExpanded ? (
+                          {isToolExpanded ? (
                             <ChevronUp className="w-3 h-3" />
                           ) : (
                             <ChevronDown className="w-3 h-3" />
                           )}
                           Input
                         </button>
-                        {isExpanded && (
+                        {isToolExpanded && (
                           <pre className="mt-1 p-2 bg-background rounded text-xs overflow-x-auto">
                             {JSON.stringify(message.toolInput, null, 2)}
                           </pre>
@@ -320,17 +334,52 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
                       </div>
                     )}
                     <div className="text-sm text-text-primary">
-                      <pre className="whitespace-pre-wrap font-mono text-xs overflow-x-auto max-h-48">
-                        {message.toolOutput?.slice(0, 1000)}
-                        {(message.toolOutput?.length || 0) > 1000 && '...'}
+                      <pre
+                        className={cn(
+                          'whitespace-pre-wrap font-mono text-xs overflow-x-auto',
+                          !isMessageExpanded && needsTruncation && 'max-h-48'
+                        )}
+                      >
+                        {isMessageExpanded || !needsTruncation
+                          ? message.toolOutput
+                          : message.toolOutput?.slice(0, 1000) +
+                            ((message.toolOutput?.length || 0) > 1000 ? '...' : '')}
                       </pre>
+                      {needsTruncation && (
+                        <button
+                          onClick={() => toggleMessageExpanded(message.uuid)}
+                          className="mt-2 text-xs text-accent-purple hover:underline"
+                        >
+                          {isMessageExpanded
+                            ? '▲ Show less'
+                            : `▼ Show full output (${(message.toolOutput?.length || 0).toLocaleString()} chars)`}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ) : (
                   <div className="prose prose-invert prose-sm max-w-none">
-                    <p className="text-sm text-text-primary whitespace-pre-wrap">
-                      {message.content}
+                    <p
+                      className={cn(
+                        'text-sm text-text-primary whitespace-pre-wrap',
+                        !isMessageExpanded && needsTruncation && 'max-h-96 overflow-hidden'
+                      )}
+                    >
+                      {isMessageExpanded || !needsTruncation
+                        ? message.content
+                        : message.content?.slice(0, 2000) +
+                          ((message.content?.length || 0) > 2000 ? '...' : '')}
                     </p>
+                    {needsTruncation && (
+                      <button
+                        onClick={() => toggleMessageExpanded(message.uuid)}
+                        className="mt-2 text-xs text-accent-purple hover:underline"
+                      >
+                        {isMessageExpanded
+                          ? '▲ Show less'
+                          : `▼ Show full message (${(message.content?.length || 0).toLocaleString()} chars)`}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
