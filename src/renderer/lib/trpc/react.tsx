@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createTRPCReact } from '@trpc/react-query'
 import { ipcLink } from 'electron-trpc/renderer'
+import superjson from 'superjson'
 import type { AppRouter } from '../../../main/trpc/router'
 
 // Create the tRPC React client
@@ -36,6 +37,8 @@ const createQueryClient = () =>
 // tRPC client configuration
 const createTRPCClient = () =>
   trpc.createClient({
+    // Must match server transformer
+    transformer: superjson,
     links: [ipcLink()],
   })
 

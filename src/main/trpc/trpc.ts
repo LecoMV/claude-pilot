@@ -6,9 +6,12 @@
  */
 
 import { initTRPC } from '@trpc/server'
+import superjson from 'superjson'
 import type { TRPCContext } from './context'
 
 const t = initTRPC.context<TRPCContext>().create({
+  // SuperJSON transformer for proper Date, Map, Set, etc. serialization
+  transformer: superjson,
   errorFormatter({ shape }) {
     return {
       ...shape,
