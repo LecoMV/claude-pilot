@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ListTodo,
   Play,
@@ -26,14 +26,8 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type {
-  Plan,
-  PlanStatus,
-  StepStatus,
-  StepType,
-  PlanExecutionStats,
-  PlanCreateParams,
-} from '@shared/types'
+import { trpc } from '@/lib/trpc/react'
+import type { Plan, PlanStatus, StepStatus, StepType, PlanCreateParams } from '@shared/types'
 
 // Status colors
 const statusColors: Record<PlanStatus, string> = {
@@ -77,33 +71,54 @@ interface PlanPanelProps {
 export function PlanPanel({ projectPath }: PlanPanelProps) {
   // State
   const [plans, setPlans] = useState<Plan[]>([])
-  const [stats, setStats] = useState<PlanExecutionStats | null>(null)
-  const [loading, setLoading] = useState(true)
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
 
-  // Load data
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [plansData, statsData] = await Promise.all([
-        window.electron.invoke('plans:list', projectPath),
-        window.electron.invoke('plans:stats'),
-      ])
-      setPlans(plansData)
-      setStats(statsData)
-    } catch (error) {
-      console.error('Failed to load plans:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [projectPath])
+  // tRPC queries
+  const listQuery = trpc.plans.list.useQuery({ projectPath }, { refetchInterval: 10000 })
+  const statsQuery = trpc.plans.stats.useQuery(undefined, { refetchInterval: 10000 })
 
+  // tRPC mutations
+  const executeMutation = trpc.plans.execute.useMutation({
+    onSuccess: () => listQuery.refetch(),
+  })
+  const pauseMutation = trpc.plans.pause.useMutation({
+    onSuccess: () => listQuery.refetch(),
+  })
+  const resumeMutation = trpc.plans.resume.useMutation({
+    onSuccess: () => listQuery.refetch(),
+  })
+  const cancelMutation = trpc.plans.cancel.useMutation({
+    onSuccess: () => listQuery.refetch(),
+  })
+  const deleteMutation = trpc.plans.delete.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+      statsQuery.refetch()
+    },
+  })
+  const stepCompleteMutation = trpc.plans.stepComplete.useMutation({
+    onSuccess: () => listQuery.refetch(),
+  })
+
+  // Sync query data to local state
   useEffect(() => {
-    loadData()
+    if (listQuery.data) {
+      setPlans(listQuery.data)
+    }
+  }, [listQuery.data])
 
-    // Listen for plan updates
+  const stats = statsQuery.data ?? null
+  const loading = listQuery.isLoading || statsQuery.isLoading
+
+  const loadData = () => {
+    listQuery.refetch()
+    statsQuery.refetch()
+  }
+
+  // Listen for plan updates (keep legacy IPC for streaming)
+  useEffect(() => {
     const unsubscribe = window.electron.on('plan:updated', (plan: Plan) => {
       setPlans((prev) => {
         const index = prev.findIndex((p) => p.id === plan.id)
@@ -118,44 +133,49 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
         setSelectedPlan(plan)
       }
     })
-
     return () => unsubscribe()
-  }, [loadData, selectedPlan?.id])
+  }, [selectedPlan?.id])
 
   // Plan actions
-  const handleExecute = useCallback(async (id: string) => {
-    await window.electron.invoke('plans:execute', id)
-  }, [])
+  const handleExecute = (id: string) => {
+    executeMutation.mutate({ id })
+  }
 
-  const handlePause = useCallback(async (id: string) => {
-    await window.electron.invoke('plans:pause', id)
-  }, [])
+  const handlePause = (id: string) => {
+    pauseMutation.mutate({ id })
+  }
 
-  const handleResume = useCallback(async (id: string) => {
-    await window.electron.invoke('plans:resume', id)
-  }, [])
+  const handleResume = (id: string) => {
+    resumeMutation.mutate({ id })
+  }
 
-  const handleCancel = useCallback(async (id: string) => {
-    await window.electron.invoke('plans:cancel', id)
-  }, [])
+  const handleCancel = (id: string) => {
+    cancelMutation.mutate({ id })
+  }
 
-  const handleDelete = useCallback(
-    async (id: string) => {
-      await window.electron.invoke('plans:delete', id)
-      loadData()
-      if (selectedPlan?.id === id) {
-        setSelectedPlan(null)
+  const handleDelete = (id: string) => {
+    deleteMutation.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          if (selectedPlan?.id === id) {
+            setSelectedPlan(null)
+          }
+        },
       }
-    },
-    [loadData, selectedPlan?.id]
-  )
+    )
+  }
 
-  const handleStepComplete = useCallback(async (planId: string, stepId: string) => {
-    await window.electron.invoke('plans:stepComplete', planId, stepId, 'Manually completed')
-  }, [])
+  const handleStepComplete = (planId: string, stepId: string) => {
+    stepCompleteMutation.mutate({
+      planId,
+      stepId,
+      output: 'Manually completed',
+    })
+  }
 
   // Toggle step expansion
-  const toggleStep = useCallback((stepId: string) => {
+  const toggleStep = (stepId: string) => {
     setExpandedSteps((prev) => {
       const next = new Set(prev)
       if (next.has(stepId)) {
@@ -165,7 +185,7 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
       }
       return next
     })
-  }, [])
+  }
 
   if (loading) {
     return (
@@ -515,30 +535,35 @@ function CreatePlanModal({ projectPath, onClose, onCreated }: CreatePlanModalPro
     setSteps(updated)
   }
 
-  const handleCreate = async () => {
+  const createMutation = trpc.plans.create.useMutation({
+    onSuccess: () => {
+      onCreated()
+      onClose()
+    },
+    onError: (error) => {
+      console.error('Failed to create plan:', error)
+    },
+    onSettled: () => {
+      setCreating(false)
+    },
+  })
+
+  const handleCreate = () => {
     if (!title || steps.some((s) => !s.name)) return
 
     setCreating(true)
-    try {
-      const params: PlanCreateParams = {
-        title,
-        description,
-        projectPath,
-        steps: steps.map((s) => ({
-          name: s.name,
-          description: s.description,
-          type: s.type,
-          command: s.command,
-        })),
-      }
-      await window.electron.invoke('plans:create', params)
-      onCreated()
-      onClose()
-    } catch (error) {
-      console.error('Failed to create plan:', error)
-    } finally {
-      setCreating(false)
+    const params: PlanCreateParams = {
+      title,
+      description,
+      projectPath,
+      steps: steps.map((s) => ({
+        name: s.name,
+        description: s.description,
+        type: s.type,
+        command: s.command,
+      })),
     }
+    createMutation.mutate(params)
   }
 
   return (

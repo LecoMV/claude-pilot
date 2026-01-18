@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   User,
   Save,
@@ -19,42 +19,34 @@ import {
   Terminal,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useProfileStore } from '@/stores/profile'
 import type { ClaudeCodeProfile } from '@shared/types'
 
 export function ProfileManager() {
-  const {
-    loading,
-    setLoading,
-  } = useProfileStore()
+  const { setLoading } = useProfileStore()
 
-  // Custom profiles state
-  const [customProfiles, setCustomProfiles] = useState<ClaudeCodeProfile[]>([])
-  const [activeProfileId, setActiveProfileId] = useState<string | null>(null)
-  const [profilesLoading, setProfilesLoading] = useState(false)
+  // tRPC queries
+  const listQuery = trpc.profiles.list.useQuery(undefined, {
+    refetchInterval: 30000,
+  })
+  const activeQuery = trpc.profiles.getActive.useQuery()
 
-  // Load custom profiles
-  const loadProfiles = useCallback(async () => {
-    try {
-      setProfilesLoading(true)
-      setLoading(true)
-      const [profiles, activeId] = await Promise.all([
-        window.electron.invoke('profiles:list'),
-        window.electron.invoke('profiles:getActive'),
-      ])
-      setCustomProfiles(profiles)
-      setActiveProfileId(activeId)
-    } catch (error) {
-      console.error('Failed to load profiles:', error)
-    } finally {
-      setProfilesLoading(false)
-      setLoading(false)
-    }
-  }, [setLoading])
-
+  // Sync loading state to store
   useEffect(() => {
-    loadProfiles()
-  }, [loadProfiles])
+    setLoading(listQuery.isLoading)
+  }, [listQuery.isLoading, setLoading])
+
+  // Derive data from queries
+  const customProfiles = listQuery.data ?? []
+  const activeProfileId = activeQuery.data ?? null
+  const loading = listQuery.isLoading
+  const profilesLoading = listQuery.isLoading
+
+  const loadProfiles = () => {
+    listQuery.refetch()
+    activeQuery.refetch()
+  }
 
   if (loading) {
     return (
@@ -132,8 +124,24 @@ function CustomProfilesPanel({
     thinkingBudget: 32000,
     claudeMd: '',
   })
-  const [saving, setSaving] = useState(false)
   const [expandedProfile, setExpandedProfile] = useState<string | null>(null)
+
+  // tRPC mutations
+  const createMutation = trpc.profiles.create.useMutation({
+    onSuccess: () => onProfilesChange(),
+  })
+  const updateMutation = trpc.profiles.update.useMutation({
+    onSuccess: () => onProfilesChange(),
+  })
+  const deleteMutation = trpc.profiles.delete.useMutation({
+    onSuccess: () => onProfilesChange(),
+  })
+  const activateMutation = trpc.profiles.activate.useMutation({
+    onSuccess: () => onProfilesChange(),
+  })
+  const launchMutation = trpc.profiles.launch.useMutation()
+
+  const saving = createMutation.isPending || updateMutation.isPending
 
   const profileIcons: Record<string, typeof Code> = {
     'claude-eng': Code,
@@ -153,11 +161,10 @@ function CustomProfilesPanel({
     })
   }
 
-  const handleCreate = async () => {
+  const handleCreate = () => {
     if (!formData.name.trim()) return
-    setSaving(true)
-    try {
-      await window.electron.invoke('profiles:create', {
+    createMutation.mutate(
+      {
         name: formData.name.trim(),
         description: formData.description.trim() || undefined,
         settings: {
@@ -167,85 +174,100 @@ function CustomProfilesPanel({
           thinkingBudget: formData.thinkingBudget,
         },
         claudeMd: formData.claudeMd || undefined,
-      })
-      setCreating(false)
-      resetForm()
-      onProfilesChange()
-    } catch (error) {
-      console.error('Failed to create profile:', error)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleUpdate = async (id: string) => {
-    setSaving(true)
-    try {
-      await window.electron.invoke('profiles:update', id, {
-        name: formData.name.trim(),
-        description: formData.description.trim() || undefined,
-        settings: {
-          model: formData.model,
-          maxTokens: formData.maxTokens,
-          thinkingEnabled: formData.thinkingEnabled,
-          thinkingBudget: formData.thinkingBudget,
+      },
+      {
+        onSuccess: () => {
+          setCreating(false)
+          resetForm()
         },
-        claudeMd: formData.claudeMd || undefined,
-      })
-      setEditing(null)
-      resetForm()
-      onProfilesChange()
-    } catch (error) {
-      console.error('Failed to update profile:', error)
-    } finally {
-      setSaving(false)
-    }
+        onError: (error) => {
+          console.error('Failed to create profile:', error)
+        },
+      }
+    )
   }
 
-  const handleDelete = async (id: string) => {
+  const handleUpdate = (id: string) => {
+    updateMutation.mutate(
+      {
+        id,
+        updates: {
+          name: formData.name.trim(),
+          description: formData.description.trim() || undefined,
+          settings: {
+            model: formData.model,
+            maxTokens: formData.maxTokens,
+            thinkingEnabled: formData.thinkingEnabled,
+            thinkingBudget: formData.thinkingBudget,
+          },
+          claudeMd: formData.claudeMd || undefined,
+        },
+      },
+      {
+        onSuccess: () => {
+          setEditing(null)
+          resetForm()
+        },
+        onError: (error) => {
+          console.error('Failed to update profile:', error)
+        },
+      }
+    )
+  }
+
+  const handleDelete = (id: string) => {
     // eslint-disable-next-line no-alert
     if (!confirm('Are you sure you want to delete this profile?')) return
-    try {
-      await window.electron.invoke('profiles:delete', id)
-      if (activeProfileId === id) {
-        onActiveChange(null)
+    deleteMutation.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          if (activeProfileId === id) {
+            onActiveChange(null)
+          }
+        },
+        onError: (error) => {
+          console.error('Failed to delete profile:', error)
+        },
       }
-      onProfilesChange()
-    } catch (error) {
-      console.error('Failed to delete profile:', error)
-    }
+    )
   }
 
-  const handleActivate = async (id: string) => {
-    try {
-      await window.electron.invoke('profiles:activate', id)
-      onActiveChange(id)
-    } catch (error) {
-      console.error('Failed to activate profile:', error)
-    }
+  const handleActivate = (id: string) => {
+    activateMutation.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          onActiveChange(id)
+        },
+        onError: (error) => {
+          console.error('Failed to activate profile:', error)
+        },
+      }
+    )
   }
 
-  const [launching, setLaunching] = useState<string | null>(null)
-  const [launchError, setLaunchError] = useState<string | null>(null)
+  const [_launchError, setLaunchError] = useState<string | null>(null)
+  const launching = launchMutation.isPending ? launchMutation.variables?.id : null
 
-  const handleLaunch = async (id: string) => {
-    setLaunching(id)
+  const handleLaunch = (id: string) => {
     setLaunchError(null)
-    try {
-      const result = await window.electron.invoke('profiles:launch', id)
-      if (!result.success) {
-        setLaunchError(result.error || 'Failed to launch profile')
+    launchMutation.mutate(
+      { id },
+      {
+        onSuccess: (result) => {
+          if (!result.success) {
+            setLaunchError(result.error || 'Failed to launch profile')
+            setTimeout(() => setLaunchError(null), 5000)
+          }
+        },
+        onError: (error) => {
+          console.error('Failed to launch profile:', error)
+          setLaunchError('Failed to launch profile')
+          setTimeout(() => setLaunchError(null), 5000)
+        },
       }
-    } catch (error) {
-      console.error('Failed to launch profile:', error)
-      setLaunchError('Failed to launch profile')
-    } finally {
-      setLaunching(null)
-      // Clear error after 5 seconds
-      if (launchError) {
-        setTimeout(() => setLaunchError(null), 5000)
-      }
-    }
+    )
   }
 
   const startEdit = (profile: ClaudeCodeProfile) => {
@@ -290,7 +312,8 @@ function CustomProfilesPanel({
         <div>
           <h3 className="text-lg font-medium text-text-primary">Work Profiles</h3>
           <p className="text-sm text-text-muted">
-            Create specialized profiles for different work contexts (engineering, security, research)
+            Create specialized profiles for different work contexts (engineering, security,
+            research)
           </p>
         </div>
         {!creating && (
@@ -349,7 +372,9 @@ function CustomProfilesPanel({
                 <input
                   type="number"
                   value={formData.maxTokens}
-                  onChange={(e) => setFormData({ ...formData, maxTokens: parseInt(e.target.value) || 64000 })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, maxTokens: parseInt(e.target.value) || 64000 })
+                  }
                   className="input w-full"
                   min={1000}
                   max={128000}
@@ -374,7 +399,12 @@ function CustomProfilesPanel({
                   <input
                     type="number"
                     value={formData.thinkingBudget}
-                    onChange={(e) => setFormData({ ...formData, thinkingBudget: parseInt(e.target.value) || 32000 })}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        thinkingBudget: parseInt(e.target.value) || 32000,
+                      })
+                    }
                     className="input w-32"
                     min={1000}
                     max={64000}
@@ -385,7 +415,9 @@ function CustomProfilesPanel({
             </div>
 
             <div>
-              <label className="block text-sm text-text-secondary mb-1">Profile-Specific Instructions (CLAUDE.md)</label>
+              <label className="block text-sm text-text-secondary mb-1">
+                Profile-Specific Instructions (CLAUDE.md)
+              </label>
               <textarea
                 value={formData.claudeMd}
                 onChange={(e) => setFormData({ ...formData, claudeMd: e.target.value })}
@@ -396,7 +428,10 @@ function CustomProfilesPanel({
 
             <div className="flex justify-end gap-2 pt-2 border-t border-border">
               <button
-                onClick={() => { setCreating(false); resetForm(); }}
+                onClick={() => {
+                  setCreating(false)
+                  resetForm()
+                }}
                 className="btn btn-secondary"
               >
                 <X className="w-4 h-4" />
@@ -407,7 +442,11 @@ function CustomProfilesPanel({
                 disabled={saving || !formData.name.trim()}
                 className="btn btn-primary"
               >
-                {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {saving ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
                 Create Profile
               </button>
             </div>
@@ -419,12 +458,14 @@ function CustomProfilesPanel({
       <div className="card">
         <div className="card-header flex items-center justify-between">
           <h4 className="font-medium text-text-primary">
-            {profiles.length > 0 ? `${profiles.length} Profile${profiles.length > 1 ? 's' : ''}` : 'No Profiles'}
+            {profiles.length > 0
+              ? `${profiles.length} Profile${profiles.length > 1 ? 's' : ''}`
+              : 'No Profiles'}
           </h4>
           {activeProfileId && (
             <span className="text-sm text-accent-green flex items-center gap-1">
               <Check className="w-4 h-4" />
-              Active: {profiles.find(p => p.id === activeProfileId)?.name}
+              Active: {profiles.find((p) => p.id === activeProfileId)?.name}
             </span>
           )}
         </div>
@@ -463,14 +504,18 @@ function CustomProfilesPanel({
                         onClick={() => setExpandedProfile(isExpanded ? null : profile.id)}
                         className="flex items-center gap-3 text-left flex-1"
                       >
-                        <div className={cn(
-                          'w-10 h-10 rounded-lg flex items-center justify-center',
-                          isActive ? 'bg-accent-green/20' : 'bg-surface-hover'
-                        )}>
-                          <IconComponent className={cn(
-                            'w-5 h-5',
-                            isActive ? 'text-accent-green' : 'text-text-muted'
-                          )} />
+                        <div
+                          className={cn(
+                            'w-10 h-10 rounded-lg flex items-center justify-center',
+                            isActive ? 'bg-accent-green/20' : 'bg-surface-hover'
+                          )}
+                        >
+                          <IconComponent
+                            className={cn(
+                              'w-5 h-5',
+                              isActive ? 'text-accent-green' : 'text-text-muted'
+                            )}
+                          />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
@@ -547,30 +592,42 @@ function CustomProfilesPanel({
                           <div className="mt-3 space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                               <div>
-                                <label className="block text-sm text-text-secondary mb-1">Profile Name</label>
+                                <label className="block text-sm text-text-secondary mb-1">
+                                  Profile Name
+                                </label>
                                 <input
                                   type="text"
                                   value={formData.name}
-                                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                  onChange={(e) =>
+                                    setFormData({ ...formData, name: e.target.value })
+                                  }
                                   className="input w-full"
                                 />
                               </div>
                               <div>
-                                <label className="block text-sm text-text-secondary mb-1">Description</label>
+                                <label className="block text-sm text-text-secondary mb-1">
+                                  Description
+                                </label>
                                 <input
                                   type="text"
                                   value={formData.description}
-                                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                  onChange={(e) =>
+                                    setFormData({ ...formData, description: e.target.value })
+                                  }
                                   className="input w-full"
                                 />
                               </div>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                               <div>
-                                <label className="block text-sm text-text-secondary mb-1">Model</label>
+                                <label className="block text-sm text-text-secondary mb-1">
+                                  Model
+                                </label>
                                 <select
                                   value={formData.model}
-                                  onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                                  onChange={(e) =>
+                                    setFormData({ ...formData, model: e.target.value })
+                                  }
                                   className="input w-full"
                                 >
                                   <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
@@ -579,26 +636,40 @@ function CustomProfilesPanel({
                                 </select>
                               </div>
                               <div>
-                                <label className="block text-sm text-text-secondary mb-1">Max Tokens</label>
+                                <label className="block text-sm text-text-secondary mb-1">
+                                  Max Tokens
+                                </label>
                                 <input
                                   type="number"
                                   value={formData.maxTokens}
-                                  onChange={(e) => setFormData({ ...formData, maxTokens: parseInt(e.target.value) || 64000 })}
+                                  onChange={(e) =>
+                                    setFormData({
+                                      ...formData,
+                                      maxTokens: parseInt(e.target.value) || 64000,
+                                    })
+                                  }
                                   className="input w-full"
                                 />
                               </div>
                             </div>
                             <div>
-                              <label className="block text-sm text-text-secondary mb-1">Profile Instructions</label>
+                              <label className="block text-sm text-text-secondary mb-1">
+                                Profile Instructions
+                              </label>
                               <textarea
                                 value={formData.claudeMd}
-                                onChange={(e) => setFormData({ ...formData, claudeMd: e.target.value })}
+                                onChange={(e) =>
+                                  setFormData({ ...formData, claudeMd: e.target.value })
+                                }
                                 className="input w-full h-32 font-mono text-sm"
                               />
                             </div>
                             <div className="flex justify-end gap-2">
                               <button
-                                onClick={() => { setEditing(null); resetForm(); }}
+                                onClick={() => {
+                                  setEditing(null)
+                                  resetForm()
+                                }}
                                 className="btn btn-secondary btn-sm"
                               >
                                 <X className="w-4 h-4" />
@@ -609,7 +680,11 @@ function CustomProfilesPanel({
                                 disabled={saving}
                                 className="btn btn-primary btn-sm"
                               >
-                                {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                {saving ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Save className="w-4 h-4" />
+                                )}
                                 Save Changes
                               </button>
                             </div>
@@ -640,7 +715,9 @@ function CustomProfilesPanel({
                             </div>
                             {profile.claudeMd && (
                               <div className="p-3 bg-background rounded-lg">
-                                <p className="text-xs text-text-muted mb-2">Profile Instructions:</p>
+                                <p className="text-xs text-text-muted mb-2">
+                                  Profile Instructions:
+                                </p>
                                 <pre className="text-sm text-text-secondary whitespace-pre-wrap font-mono">
                                   {profile.claudeMd.slice(0, 300)}
                                   {profile.claudeMd.length > 300 && '...'}
@@ -671,10 +748,11 @@ function CustomProfilesPanel({
           <div className="text-sm text-text-secondary">
             <p className="font-medium text-text-primary mb-1">About Work Profiles</p>
             <p>
-              Work profiles let you quickly switch between different Claude configurations.
-              Create profiles for specific contexts like <code className="text-accent-purple">claude-eng</code> for
-              engineering work or <code className="text-accent-purple">claude-sec</code> for security research.
-              Each profile can have its own model, token limits, and custom instructions.
+              Work profiles let you quickly switch between different Claude configurations. Create
+              profiles for specific contexts like{' '}
+              <code className="text-accent-purple">claude-eng</code> for engineering work or{' '}
+              <code className="text-accent-purple">claude-sec</code> for security research. Each
+              profile can have its own model, token limits, and custom instructions.
             </p>
           </div>
         </div>

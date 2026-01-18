@@ -26,6 +26,7 @@ import type {
   PgVectorCollection,
   PgVectorAutoEmbedConfig,
   PgVectorIndexConfig,
+  PgVectorSearchResult,
   VectorIndexType,
 } from '../../../shared/types'
 
@@ -81,6 +82,13 @@ const IndexConfigSchema = z.object({
     lists: z.number().int().min(1).max(10000).optional(),
     probes: z.number().int().min(1).max(1000).optional(),
   }),
+})
+
+const SearchSchema = z.object({
+  query: z.string().min(1, 'Query cannot be empty'),
+  table: z.string().optional(),
+  limit: z.number().int().min(1).max(100).default(20),
+  threshold: z.number().min(0).max(1).default(0.5),
 })
 
 // ============================================================================
@@ -309,6 +317,99 @@ async function vacuumPgVectorTable(tableName: string): Promise<boolean> {
   }
 }
 
+/**
+ * Semantic search across vector tables
+ */
+async function searchPgVectors(
+  query: string,
+  tableName?: string,
+  limit = 20,
+  threshold = 0.5
+): Promise<PgVectorSearchResult[]> {
+  const results: PgVectorSearchResult[] = []
+
+  try {
+    // Generate embedding using Ollama
+    const embedding = await generateEmbedding(query)
+    if (!embedding || embedding.length === 0) {
+      console.info('[pgvector] No embedding generated, falling back to text search')
+      return results
+    }
+
+    await postgresService.connect()
+
+    // If no table specified, search all tables with vectors
+    let tables: string[] = []
+    if (tableName) {
+      tables = [tableName]
+    } else {
+      const tablesResult = await postgresService.query<{ table_name: string }>(
+        `SELECT DISTINCT c.relname as table_name
+         FROM pg_class c
+         JOIN pg_attribute a ON a.attrelid = c.oid
+         JOIN pg_type t ON t.oid = a.atttypid
+         WHERE t.typname = 'vector' AND c.relkind = 'r'`
+      )
+      tables = tablesResult.map((r) => r.table_name)
+    }
+
+    for (const table of tables) {
+      try {
+        // Find the vector column and content column
+        const colsResult = await postgresService.query<{
+          column_name: string
+          data_type: string
+        }>(
+          `SELECT column_name, data_type FROM information_schema.columns
+           WHERE table_name = $1`,
+          [table]
+        )
+
+        const vectorCol =
+          colsResult.find((c) => c.data_type === 'USER-DEFINED')?.column_name || 'embedding'
+        const contentCol =
+          colsResult.find((c) => c.column_name === 'content' || c.column_name === 'text')
+            ?.column_name || 'content'
+        const idCol = colsResult.find((c) => c.column_name === 'id')?.column_name || 'id'
+
+        // Search for similar vectors
+        const embeddingStr = `[${embedding.join(',')}]`
+        const searchResult = await postgresService.query<{
+          id: string | number
+          content: string
+          similarity: number
+        }>(
+          `SELECT "${idCol}" as id, "${contentCol}" as content,
+                  1 - ("${vectorCol}" <=> $1::vector) as similarity
+           FROM "${table}"
+           WHERE 1 - ("${vectorCol}" <=> $1::vector) >= $2
+           ORDER BY "${vectorCol}" <=> $1::vector
+           LIMIT $3`,
+          [embeddingStr, threshold, limit]
+        )
+
+        for (const row of searchResult) {
+          results.push({
+            id: row.id,
+            tableName: table,
+            content: row.content || '',
+            similarity: row.similarity,
+          })
+        }
+      } catch (error) {
+        console.error(`[pgvector] Failed to search table ${table}:`, error)
+      }
+    }
+
+    // Sort all results by similarity
+    results.sort((a, b) => b.similarity - a.similarity)
+    return results.slice(0, limit)
+  } catch (error) {
+    console.error('[pgvector] Search failed:', error)
+    return results
+  }
+}
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -393,4 +494,13 @@ export const pgvectorRouter = router({
   createIndex: auditedProcedure.input(IndexConfigSchema).mutation(({ input }): Promise<boolean> => {
     return createPgVectorIndex(input.table, input.config)
   }),
+
+  /**
+   * Semantic search across vector tables
+   */
+  search: publicProcedure
+    .input(SearchSchema)
+    .query(({ input }): Promise<PgVectorSearchResult[]> => {
+      return searchPgVectors(input.query, input.table, input.limit, input.threshold)
+    }),
 })

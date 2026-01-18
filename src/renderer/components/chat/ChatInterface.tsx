@@ -16,9 +16,14 @@ import {
   Check,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useChatStore, type ChatMessage, type ChatSession } from '@/stores/chat'
 
 export function ChatInterface() {
+  // tRPC hooks
+  const utils = trpc.useUtils()
+  const chatSendMutation = trpc.chat.send.useMutation()
+
   const {
     currentSession,
     inputValue,
@@ -41,17 +46,19 @@ export function ChatInterface() {
   useEffect(() => {
     const loadProjects = async () => {
       try {
-        const projectList = await window.electron.invoke('claude:projects')
-        setProjects(projectList.map((p: { path: string; name: string }) => ({
-          path: p.path,
-          name: p.name,
-        })))
+        const projectList = await utils.claude.projects.fetch()
+        setProjects(
+          projectList.map((p: { path: string; name: string }) => ({
+            path: p.path,
+            name: p.name,
+          }))
+        )
       } catch (error) {
         console.error('Failed to load projects:', error)
       }
     }
     loadProjects()
-  }, [])
+  }, [utils])
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -60,36 +67,42 @@ export function ChatInterface() {
 
   // Listen for streamed responses
   useEffect(() => {
-    const unsubscribe = window.electron.on('chat:response', (data: {
-      type: 'chunk' | 'done' | 'error'
-      content?: string
-      messageId?: string
-      error?: string
-    }) => {
-      if (data.type === 'chunk' && data.messageId && data.content) {
-        updateMessage(data.messageId, data.content)
-      } else if (data.type === 'done') {
-        setIsStreaming(false)
-      } else if (data.type === 'error') {
-        setIsStreaming(false)
-        console.error('Chat error:', data.error)
+    const unsubscribe = window.electron.on(
+      'chat:response',
+      (data: {
+        type: 'chunk' | 'done' | 'error'
+        content?: string
+        messageId?: string
+        error?: string
+      }) => {
+        if (data.type === 'chunk' && data.messageId && data.content) {
+          updateMessage(data.messageId, data.content)
+        } else if (data.type === 'done') {
+          setIsStreaming(false)
+        } else if (data.type === 'error') {
+          setIsStreaming(false)
+          console.error('Chat error:', data.error)
+        }
       }
-    })
+    )
 
     return () => unsubscribe()
   }, [updateMessage, setIsStreaming])
 
-  const startNewSession = useCallback((projectPath: string, projectName: string) => {
-    const session: ChatSession = {
-      id: `session-${Date.now()}`,
-      projectPath,
-      projectName,
-      startedAt: Date.now(),
-      messages: [],
-    }
-    setCurrentSession(session)
-    setShowProjectSelector(false)
-  }, [setCurrentSession])
+  const startNewSession = useCallback(
+    (projectPath: string, projectName: string) => {
+      const session: ChatSession = {
+        id: `session-${Date.now()}`,
+        projectPath,
+        projectName,
+        startedAt: Date.now(),
+        messages: [],
+      }
+      setCurrentSession(session)
+      setShowProjectSelector(false)
+    },
+    [setCurrentSession]
+  )
 
   const handleSend = useCallback(async () => {
     if (!inputValue.trim() || !currentSession || isStreaming) return
@@ -116,13 +129,26 @@ export function ChatInterface() {
     addMessage(assistantMessage)
 
     try {
-      await window.electron.invoke('chat:send', currentSession.projectPath, inputValue.trim(), assistantMessageId)
+      await chatSendMutation.mutateAsync({
+        projectPath: currentSession.projectPath,
+        message: inputValue.trim(),
+        messageId: assistantMessageId,
+      })
     } catch (error) {
       console.error('Failed to send message:', error)
       setIsStreaming(false)
       updateMessage(assistantMessageId, 'Error: Failed to get response from Claude Code.')
     }
-  }, [inputValue, currentSession, isStreaming, addMessage, setInputValue, setIsStreaming, updateMessage])
+  }, [
+    inputValue,
+    currentSession,
+    isStreaming,
+    addMessage,
+    setInputValue,
+    setIsStreaming,
+    updateMessage,
+    chatSendMutation,
+  ])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -168,10 +194,7 @@ export function ChatInterface() {
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => setShowProjectSelector(true)}
-            className="btn btn-primary"
-          >
+          <button onClick={() => setShowProjectSelector(true)} className="btn btn-primary">
             <Plus className="w-4 h-4 mr-2" />
             New Chat Session
           </button>
@@ -181,27 +204,27 @@ export function ChatInterface() {
   }
 
   return (
-    <div className={cn(
-      'flex flex-col h-full animate-in',
-      expanded && 'fixed inset-0 z-50 bg-background p-4'
-    )}>
+    <div
+      className={cn(
+        'flex flex-col h-full animate-in',
+        expanded && 'fixed inset-0 z-50 bg-background p-4'
+      )}
+    >
       {/* Header */}
       <div className="flex items-center gap-4 pb-4 border-b border-border">
         <div className="flex items-center gap-2">
           <Terminal className="w-5 h-5 text-accent-purple" />
           <div>
             <p className="font-medium text-text-primary">{currentSession.projectName}</p>
-            <p className="text-xs text-text-muted truncate max-w-xs">{currentSession.projectPath}</p>
+            <p className="text-xs text-text-muted truncate max-w-xs">
+              {currentSession.projectPath}
+            </p>
           </div>
         </div>
 
         <div className="flex-1" />
 
-        <button
-          onClick={clearMessages}
-          className="btn btn-secondary btn-sm"
-          title="Clear messages"
-        >
+        <button onClick={clearMessages} className="btn btn-secondary btn-sm" title="Clear messages">
           <Trash2 className="w-4 h-4" />
         </button>
 
@@ -352,10 +375,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="mt-3 space-y-2">
             {message.toolCalls.map((tool) => (
-              <div
-                key={tool.id}
-                className="flex items-center gap-2 text-xs text-text-muted"
-              >
+              <div key={tool.id} className="flex items-center gap-2 text-xs text-text-muted">
                 <Wrench className="w-3 h-3" />
                 <span>{tool.name}</span>
               </div>

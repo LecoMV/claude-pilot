@@ -135,4 +135,19 @@ export const plansRouter = router({
   stats: publicProcedure.query((): PlanExecutionStats => {
     return planService.getStats()
   }),
+
+  /**
+   * Mark a step as completed (for manual steps)
+   */
+  stepComplete: auditedProcedure
+    .input(
+      z.object({
+        planId: z.string().min(1, 'Plan ID cannot be empty'),
+        stepId: z.string().min(1, 'Step ID cannot be empty'),
+        output: z.string().optional(),
+      })
+    )
+    .mutation(({ input }): boolean => {
+      return planService.stepComplete(input.planId, input.stepId, input.output)
+    }),
 })

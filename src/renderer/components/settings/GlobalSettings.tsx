@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   FileText,
   BookOpen,
@@ -15,19 +15,18 @@ import {
   Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useProfileStore, type ClaudeRule } from '@/stores/profile'
 import { CodeEditor, CodeViewer } from '@/components/common/CodeEditor'
 
 export function GlobalSettings() {
   const {
     rules,
-    loading,
     rulesLoading,
     editingClaudeMd,
     claudeMdContent,
     setRules,
     setGlobalSettings,
-    setLoading,
     setEditingClaudeMd,
     setClaudeMdContent,
   } = useProfileStore()
@@ -41,18 +40,63 @@ export function GlobalSettings() {
     thinkingBudget: 32000,
   })
 
-  // Load rules, CLAUDE.md, and settings
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true)
-      const [rulesData, claudeMd, settings] = await Promise.all([
-        window.electron.invoke('profile:rules'),
-        window.electron.invoke('profile:claudemd'),
-        window.electron.invoke('profile:settings'),
-      ])
-      setRules(rulesData || [])
-      setClaudeMdContent(claudeMd || '')
-      const safeSettings = settings || {}
+  // tRPC queries
+  const rulesQuery = trpc.profiles.rules.useQuery(undefined, { refetchInterval: 30000 })
+  const claudemdQuery = trpc.profiles.claudemd.useQuery(undefined, { refetchInterval: false })
+  const settingsQuery = trpc.profiles.settings.useQuery(undefined, { refetchInterval: 30000 })
+
+  const loading = rulesQuery.isLoading || claudemdQuery.isLoading || settingsQuery.isLoading
+
+  // tRPC mutations
+  const saveSettingsMutation = trpc.profiles.saveSettings.useMutation({
+    onSuccess: () => {
+      setGlobalSettings(localSettings)
+    },
+    onError: (error) => {
+      console.error('Failed to save settings:', error)
+    },
+    onSettled: () => {
+      setSaving(false)
+    },
+  })
+
+  const saveClaudemdMutation = trpc.profiles.saveClaudemd.useMutation({
+    onSuccess: () => {
+      setEditingClaudeMd(false)
+    },
+    onError: (error) => {
+      console.error('Failed to save CLAUDE.md:', error)
+    },
+    onSettled: () => {
+      setSaving(false)
+    },
+  })
+
+  const toggleRuleMutation = trpc.profiles.toggleRule.useMutation({
+    onSuccess: () => {
+      rulesQuery.refetch()
+    },
+    onError: (error) => {
+      console.error('Failed to toggle rule:', error)
+    },
+  })
+
+  // Sync tRPC data to store
+  useEffect(() => {
+    if (rulesQuery.data) {
+      setRules(rulesQuery.data)
+    }
+  }, [rulesQuery.data, setRules])
+
+  useEffect(() => {
+    if (claudemdQuery.data !== undefined) {
+      setClaudeMdContent(claudemdQuery.data)
+    }
+  }, [claudemdQuery.data, setClaudeMdContent])
+
+  useEffect(() => {
+    if (settingsQuery.data) {
+      const safeSettings = settingsQuery.data
       setGlobalSettings(safeSettings)
       setLocalSettings({
         model: safeSettings.model || 'claude-sonnet-4-20250514',
@@ -60,51 +104,31 @@ export function GlobalSettings() {
         thinkingEnabled: safeSettings.thinkingEnabled ?? true,
         thinkingBudget: safeSettings.thinkingBudget || 32000,
       })
-    } catch (error) {
-      console.error('[GlobalSettings] Failed to load data:', error)
-    } finally {
-      setLoading(false)
     }
-  }, [setRules, setClaudeMdContent, setGlobalSettings, setLoading])
+  }, [settingsQuery.data, setGlobalSettings])
 
-  useEffect(() => {
-    loadData()
-  }, [loadData])
+  const loadData = () => {
+    rulesQuery.refetch()
+    claudemdQuery.refetch()
+    settingsQuery.refetch()
+  }
 
   // Save model settings
-  const handleSaveSettings = async () => {
+  const handleSaveSettings = () => {
     setSaving(true)
-    try {
-      await window.electron.invoke('profile:saveSettings', localSettings)
-      setGlobalSettings(localSettings)
-    } catch (error) {
-      console.error('Failed to save settings:', error)
-    } finally {
-      setSaving(false)
-    }
+    saveSettingsMutation.mutate(localSettings)
   }
 
   // Save CLAUDE.md
-  const handleSaveClaudeMd = async () => {
+  const handleSaveClaudeMd = () => {
     setSaving(true)
-    try {
-      await window.electron.invoke('profile:saveClaudemd', claudeMdContent)
-      setEditingClaudeMd(false)
-    } catch (error) {
-      console.error('Failed to save CLAUDE.md:', error)
-    } finally {
-      setSaving(false)
-    }
+    saveClaudemdMutation.mutate({ content: claudeMdContent })
   }
 
   // Toggle rule
-  const handleToggleRule = async (ruleName: string, enabled: boolean) => {
-    try {
-      await window.electron.invoke('profile:toggleRule', ruleName, enabled)
-      setRules(rules.map((r) => (r.name === ruleName ? { ...r, enabled } : r)))
-    } catch (error) {
-      console.error('Failed to toggle rule:', error)
-    }
+  const handleToggleRule = (ruleName: string, enabled: boolean) => {
+    setRules(rules.map((r) => (r.name === ruleName ? { ...r, enabled } : r)))
+    toggleRuleMutation.mutate({ name: ruleName, enabled })
   }
 
   if (loading) {
@@ -231,12 +255,19 @@ function ClaudeMdPanel({
   onSave,
   saving,
 }: ClaudeMdPanelProps) {
-  const openClaudeFolder = async () => {
-    try {
-      const homePath = await window.electron.invoke('system:getHomePath')
-      await window.electron.invoke('shell:openPath', `${homePath}/.claude`)
-    } catch (error) {
-      console.error('Failed to open .claude folder:', error)
+  const homePathQuery = trpc.system.homePath.useQuery()
+  const openPathMutation = trpc.system.openPath.useMutation()
+
+  const openClaudeFolder = () => {
+    if (homePathQuery.data) {
+      openPathMutation.mutate(
+        { path: `${homePathQuery.data}/.claude` },
+        {
+          onError: (error) => {
+            console.error('Failed to open .claude folder:', error)
+          },
+        }
+      )
     }
   }
 
@@ -290,7 +321,9 @@ function ClaudeMdPanel({
             />
           ) : (
             <CodeViewer
-              value={content || '# No CLAUDE.md content\n\nClick Edit to add your global instructions.'}
+              value={
+                content || '# No CLAUDE.md content\n\nClick Edit to add your global instructions.'
+              }
               language="markdown"
               height="450px"
             />
@@ -327,12 +360,30 @@ function RulesPanel({ rules, loading, onToggle }: RulesPanelProps) {
   const [editContent, setEditContent] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const openRulesFolder = async () => {
-    try {
-      const homePath = await window.electron.invoke('system:getHomePath')
-      await window.electron.invoke('shell:openPath', `${homePath}/.claude/rules`)
-    } catch (error) {
-      console.error('Failed to open rules folder:', error)
+  const homePathQuery = trpc.system.homePath.useQuery()
+  const openPathMutation = trpc.system.openPath.useMutation()
+  const saveRuleMutation = trpc.profiles.saveRule.useMutation({
+    onSuccess: () => {
+      setEditingRule(null)
+    },
+    onError: (error) => {
+      console.error('Failed to save rule:', error)
+    },
+    onSettled: () => {
+      setSaving(false)
+    },
+  })
+
+  const openRulesFolder = () => {
+    if (homePathQuery.data) {
+      openPathMutation.mutate(
+        { path: `${homePathQuery.data}/.claude/rules` },
+        {
+          onError: (error) => {
+            console.error('Failed to open rules folder:', error)
+          },
+        }
+      )
     }
   }
 
@@ -342,17 +393,10 @@ function RulesPanel({ rules, loading, onToggle }: RulesPanelProps) {
     setExpandedRule(rule.name)
   }
 
-  const handleSaveRule = async (rule: ClaudeRule) => {
+  const handleSaveRule = (rule: ClaudeRule) => {
     setSaving(true)
-    try {
-      await window.electron.invoke('profile:saveRule', rule.path, editContent)
-      rule.content = editContent
-      setEditingRule(null)
-    } catch (error) {
-      console.error('Failed to save rule:', error)
-    } finally {
-      setSaving(false)
-    }
+    rule.content = editContent
+    saveRuleMutation.mutate({ path: rule.path, content: editContent })
   }
 
   const handleCancelEdit = () => {
@@ -376,11 +420,7 @@ function RulesPanel({ rules, loading, onToggle }: RulesPanelProps) {
             <h3 className="font-medium text-text-primary">Custom Rules</h3>
             <p className="text-xs text-text-muted mt-1">~/.claude/rules/*.md</p>
           </div>
-          <button
-            onClick={openRulesFolder}
-            className="btn btn-secondary"
-            title="Open rules folder"
-          >
+          <button onClick={openRulesFolder} className="btn btn-secondary" title="Open rules folder">
             <FolderOpen className="w-4 h-4" />
             Open Folder
           </button>
@@ -410,9 +450,7 @@ function RulesPanel({ rules, loading, onToggle }: RulesPanelProps) {
                 >
                   <div className="flex items-center justify-between p-3">
                     <button
-                      onClick={() =>
-                        setExpandedRule(expandedRule === rule.name ? null : rule.name)
-                      }
+                      onClick={() => setExpandedRule(expandedRule === rule.name ? null : rule.name)}
                       className="flex items-center gap-3 text-left flex-1"
                     >
                       <ChevronRight
@@ -469,10 +507,7 @@ function RulesPanel({ rules, loading, onToggle }: RulesPanelProps) {
                             height="300px"
                           />
                           <div className="flex justify-end gap-2">
-                            <button
-                              onClick={handleCancelEdit}
-                              className="btn btn-secondary btn-sm"
-                            >
+                            <button onClick={handleCancelEdit} className="btn btn-secondary btn-sm">
                               <X className="w-4 h-4" />
                               Cancel
                             </button>
@@ -515,8 +550,8 @@ function RulesPanel({ rules, loading, onToggle }: RulesPanelProps) {
             <p className="font-medium text-text-primary mb-1">About Rules</p>
             <p>
               Rules are markdown files that provide additional context and instructions to Claude.
-              They can be enabled/disabled per session. Create new rules by adding .md files to
-              the rules folder.
+              They can be enabled/disabled per session. Create new rules by adding .md files to the
+              rules folder.
             </p>
           </div>
         </div>
@@ -579,9 +614,7 @@ function ModelSettingsPanel({ settings, onChange, onSave, saving }: ModelSetting
               <div
                 className={cn(
                   'w-4 h-4 rounded-full border-2 flex items-center justify-center',
-                  settings.model === model.id
-                    ? 'border-accent-purple'
-                    : 'border-text-muted'
+                  settings.model === model.id ? 'border-accent-purple' : 'border-text-muted'
                 )}
               >
                 {settings.model === model.id && (
@@ -607,15 +640,11 @@ function ModelSettingsPanel({ settings, onChange, onSave, saving }: ModelSetting
         </div>
         <div className="card-body space-y-4">
           <div>
-            <label className="block text-sm text-text-secondary mb-2">
-              Max Output Tokens
-            </label>
+            <label className="block text-sm text-text-secondary mb-2">Max Output Tokens</label>
             <input
               type="number"
               value={settings.maxTokens}
-              onChange={(e) =>
-                onChange({ ...settings, maxTokens: parseInt(e.target.value) || 0 })
-              }
+              onChange={(e) => onChange({ ...settings, maxTokens: parseInt(e.target.value) || 0 })}
               className="input w-full"
               min={1000}
               max={128000}

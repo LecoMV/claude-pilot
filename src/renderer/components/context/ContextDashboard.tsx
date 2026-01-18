@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Gauge,
   History,
@@ -19,6 +19,7 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useContextStore, type SessionSummary } from '@/stores/context'
 import type { ExternalSession } from '@shared/types'
 
@@ -27,63 +28,83 @@ export function ContextDashboard() {
     sessions,
     tokenUsage,
     compactionSettings,
-    loading,
     selectedSession,
     setSessions,
     setTokenUsage,
     setCompactionSettings,
-    setLoading,
     setSelectedSession,
   } = useContextStore()
 
   const [activeTab, setActiveTab] = useState<'active' | 'usage' | 'sessions'>('active')
-  const [activeSessions, setActiveSessions] = useState<ExternalSession[]>([])
   const [selectedActiveSession, setSelectedActiveSession] = useState<ExternalSession | null>(null)
 
-  // Load data
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true)
-      const [usage, settings, sessionList, activeList] = await Promise.all([
-        window.electron.invoke('context:tokenUsage'),
-        window.electron.invoke('context:compactionSettings'),
-        window.electron.invoke('context:sessions'),
-        window.electron.invoke('sessions:getActive'),
-      ])
-      setTokenUsage(usage)
-      setCompactionSettings(settings)
-      setSessions(sessionList)
-      setActiveSessions(activeList || [])
-    } catch (error) {
-      console.error('Failed to load context data:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [setTokenUsage, setCompactionSettings, setSessions, setLoading])
+  // tRPC queries
+  const tokenUsageQuery = trpc.context.tokenUsage.useQuery(undefined, { refetchInterval: 30000 })
+  const compactionSettingsQuery = trpc.context.compactionSettings.useQuery(undefined, {
+    refetchInterval: 30000,
+  })
+  const sessionsQuery = trpc.context.sessions.useQuery(undefined, { refetchInterval: 30000 })
+  const activeSessionsQuery = trpc.sessions.getActive.useQuery(undefined, {
+    refetchInterval: 15000,
+  })
+
+  // tRPC mutations
+  const compactMutation = trpc.context.compact.useMutation({
+    onSuccess: () => {
+      tokenUsageQuery.refetch()
+    },
+  })
+  const setAutoCompactMutation = trpc.context.setAutoCompact.useMutation({
+    onSuccess: () => {
+      compactionSettingsQuery.refetch()
+    },
+  })
+
+  // Sync data to store
+  useEffect(() => {
+    if (tokenUsageQuery.data) setTokenUsage(tokenUsageQuery.data)
+  }, [tokenUsageQuery.data, setTokenUsage])
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    if (compactionSettingsQuery.data) setCompactionSettings(compactionSettingsQuery.data)
+  }, [compactionSettingsQuery.data, setCompactionSettings])
+
+  useEffect(() => {
+    if (sessionsQuery.data) setSessions(sessionsQuery.data)
+  }, [sessionsQuery.data, setSessions])
+
+  // Derive data
+  const activeSessions = activeSessionsQuery.data ?? []
+  const loading =
+    tokenUsageQuery.isLoading ||
+    compactionSettingsQuery.isLoading ||
+    sessionsQuery.isLoading ||
+    activeSessionsQuery.isLoading
+  const sessionsLoading = sessionsQuery.isLoading
+
+  const handleRefresh = () => {
+    tokenUsageQuery.refetch()
+    compactionSettingsQuery.refetch()
+    sessionsQuery.refetch()
+    activeSessionsQuery.refetch()
+  }
 
   // Trigger compaction
-  const handleCompact = async () => {
-    try {
-      await window.electron.invoke('context:compact')
-      loadData()
-    } catch (error) {
-      console.error('Failed to compact:', error)
-    }
+  const handleCompact = () => {
+    compactMutation.mutate(undefined, {
+      onError: (error) => console.error('Failed to compact:', error),
+    })
   }
 
   // Toggle auto-compact
-  const handleToggleAutoCompact = async () => {
+  const handleToggleAutoCompact = () => {
     if (!compactionSettings) return
-    try {
-      await window.electron.invoke('context:setAutoCompact', !compactionSettings.autoCompact)
-      setCompactionSettings({ ...compactionSettings, autoCompact: !compactionSettings.autoCompact })
-    } catch (error) {
-      console.error('Failed to toggle auto-compact:', error)
-    }
+    setAutoCompactMutation.mutate(
+      { enabled: !compactionSettings.autoCompact },
+      {
+        onError: (error) => console.error('Failed to toggle auto-compact:', error),
+      }
+    )
   }
 
   if (loading) {
@@ -118,7 +139,7 @@ export function ContextDashboard() {
           label="Session History"
         />
         <div className="flex-1" />
-        <button onClick={loadData} className="btn btn-secondary">
+        <button onClick={handleRefresh} className="btn btn-secondary">
           <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
           Refresh
         </button>
@@ -129,7 +150,7 @@ export function ContextDashboard() {
           sessions={activeSessions}
           selectedSession={selectedActiveSession}
           onSelectSession={setSelectedActiveSession}
-          onRefresh={loadData}
+          onRefresh={handleRefresh}
         />
       )}
 
@@ -176,10 +197,14 @@ function TabButton({ active, onClick, icon: Icon, label, badge }: TabButtonProps
       <Icon className="w-4 h-4" />
       {label}
       {badge !== undefined && (
-        <span className={cn(
-          'ml-1 px-1.5 py-0.5 text-xs rounded-full',
-          active ? 'bg-accent-purple/20 text-accent-purple' : 'bg-accent-green/20 text-accent-green'
-        )}>
+        <span
+          className={cn(
+            'ml-1 px-1.5 py-0.5 text-xs rounded-full',
+            active
+              ? 'bg-accent-purple/20 text-accent-purple'
+              : 'bg-accent-green/20 text-accent-green'
+          )}
+        >
           {badge}
         </span>
       )}
@@ -195,7 +220,11 @@ interface ActiveSessionsPanelProps {
   onRefresh: () => void
 }
 
-function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: ActiveSessionsPanelProps) {
+function ActiveSessionsPanel({
+  sessions,
+  selectedSession,
+  onSelectSession,
+}: ActiveSessionsPanelProps) {
   const formatTokens = (num: number) => {
     if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
     if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
@@ -232,11 +261,11 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
 
   // Pricing per million tokens (as of 2025)
   const MODEL_PRICING: Record<string, { input: number; output: number; cached: number }> = {
-    'claude-sonnet-4': { input: 3, output: 15, cached: 0.30 },
-    'claude-opus-4': { input: 15, output: 75, cached: 1.50 },
-    'claude-opus-4-5': { input: 15, output: 75, cached: 1.50 },
-    'claude-3-5-sonnet': { input: 3, output: 15, cached: 0.30 },
-    'default': { input: 3, output: 15, cached: 0.30 },
+    'claude-sonnet-4': { input: 3, output: 15, cached: 0.3 },
+    'claude-opus-4': { input: 15, output: 75, cached: 1.5 },
+    'claude-opus-4-5': { input: 15, output: 75, cached: 1.5 },
+    'claude-3-5-sonnet': { input: 3, output: 15, cached: 0.3 },
+    default: { input: 3, output: 15, cached: 0.3 },
   }
 
   const estimateCost = (session: ExternalSession) => {
@@ -244,7 +273,8 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
     const pricing = MODEL_PRICING[model] || MODEL_PRICING['default']
     const inputCost = (session.stats.inputTokens / 1_000_000) * pricing.input
     const outputCost = (session.stats.outputTokens / 1_000_000) * pricing.output
-    const cachedSavings = (session.stats.cachedTokens / 1_000_000) * (pricing.input - pricing.cached)
+    const cachedSavings =
+      (session.stats.cachedTokens / 1_000_000) * (pricing.input - pricing.cached)
     return {
       total: inputCost + outputCost,
       saved: cachedSavings,
@@ -259,22 +289,26 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
 
   const getEstimatedMessagesRemaining = (session: ExternalSession) => {
     const remaining = getRemainingTokens(session)
-    const avgTokensPerMessage = session.stats.messageCount > 0
-      ? (session.stats.inputTokens + session.stats.outputTokens) / session.stats.messageCount
-      : 2000 // Default estimate
+    const avgTokensPerMessage =
+      session.stats.messageCount > 0
+        ? (session.stats.inputTokens + session.stats.outputTokens) / session.stats.messageCount
+        : 2000 // Default estimate
     return Math.floor(remaining / Math.max(avgTokensPerMessage, 500))
   }
 
-  const openProjectFolder = async (path: string) => {
-    try {
-      await window.electron.invoke('shell:openPath', path)
-    } catch (error) {
-      console.error('Failed to open project folder:', error)
-    }
+  const openPathMutation = trpc.system.openPath.useMutation()
+
+  const openProjectFolder = (path: string) => {
+    openPathMutation.mutate(
+      { path },
+      {
+        onError: (error) => console.error('Failed to open project folder:', error),
+      }
+    )
   }
 
   // Check if any session is critically low on context
-  const criticalSessions = sessions.filter(s => getUsagePercentage(s) >= 85)
+  const criticalSessions = sessions.filter((s) => getUsagePercentage(s) >= 85)
 
   return (
     <div className="space-y-4">
@@ -289,14 +323,16 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
                 {criticalSessions.length === 1 ? (
                   <>
                     <span className="font-medium">{criticalSessions[0].projectName}</span> is at{' '}
-                    <span className="text-accent-yellow font-medium">{getUsagePercentage(criticalSessions[0]).toFixed(0)}%</span> context usage.
+                    <span className="text-accent-yellow font-medium">
+                      {getUsagePercentage(criticalSessions[0]).toFixed(0)}%
+                    </span>{' '}
+                    context usage.
                   </>
                 ) : (
-                  <>
-                    {criticalSessions.length} sessions are above 85% context usage.
-                  </>
-                )}
-                {' '}Consider running <code className="text-accent-purple">/compact</code> or starting a new session.
+                  <>{criticalSessions.length} sessions are above 85% context usage.</>
+                )}{' '}
+                Consider running <code className="text-accent-purple">/compact</code> or starting a
+                new session.
               </p>
             </div>
           </div>
@@ -311,13 +347,9 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
               <Radio className="w-4 h-4 text-accent-green animate-pulse" />
               Live Sessions
             </h3>
-            <p className="text-xs text-text-muted mt-1">
-              Claude Code sessions currently running
-            </p>
+            <p className="text-xs text-text-muted mt-1">Claude Code sessions currently running</p>
           </div>
-          <span className="text-sm text-text-muted">
-            {sessions.length} active
-          </span>
+          <span className="text-sm text-text-muted">{sessions.length} active</span>
         </div>
         <div className="card-body">
           {sessions.length === 0 ? (
@@ -359,7 +391,8 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
                             </span>
                           </div>
                           <p className="text-xs text-text-muted">
-                            {session.model?.replace('claude-', '').replace(/-\d+$/, '') || 'Unknown model'}
+                            {session.model?.replace('claude-', '').replace(/-\d+$/, '') ||
+                              'Unknown model'}
                             {session.gitBranch && ` • ${session.gitBranch}`}
                           </p>
                         </div>
@@ -376,7 +409,10 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
                     <div className="mb-3">
                       <div className="h-2 bg-surface-hover rounded-full overflow-hidden">
                         <div
-                          className={cn('h-full rounded-full transition-all', getProgressColor(usagePercent))}
+                          className={cn(
+                            'h-full rounded-full transition-all',
+                            getProgressColor(usagePercent)
+                          )}
                           style={{ width: `${usagePercent}%` }}
                         />
                       </div>
@@ -389,7 +425,9 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
                     {/* Stats */}
                     <div className="grid grid-cols-5 gap-2 text-xs">
                       <div className="bg-background rounded p-2 text-center">
-                        <p className="text-text-primary font-medium">{session.stats.messageCount}</p>
+                        <p className="text-text-primary font-medium">
+                          {session.stats.messageCount}
+                        </p>
                         <p className="text-text-muted">Messages</p>
                       </div>
                       <div className="bg-background rounded p-2 text-center">
@@ -397,15 +435,21 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
                         <p className="text-text-muted">Tool Calls</p>
                       </div>
                       <div className="bg-background rounded p-2 text-center">
-                        <p className="text-text-primary font-medium">{formatTokens(session.stats.cachedTokens)}</p>
+                        <p className="text-text-primary font-medium">
+                          {formatTokens(session.stats.cachedTokens)}
+                        </p>
                         <p className="text-text-muted">Cached</p>
                       </div>
                       <div className="bg-background rounded p-2 text-center">
-                        <p className="text-accent-green font-medium">~{getEstimatedMessagesRemaining(session)}</p>
+                        <p className="text-accent-green font-medium">
+                          ~{getEstimatedMessagesRemaining(session)}
+                        </p>
                         <p className="text-text-muted">Msgs Left</p>
                       </div>
                       <div className="bg-background rounded p-2 text-center">
-                        <p className="text-accent-blue font-medium">${estimateCost(session).total.toFixed(2)}</p>
+                        <p className="text-accent-blue font-medium">
+                          ${estimateCost(session).total.toFixed(2)}
+                        </p>
                         <p className="text-text-muted">Est. Cost</p>
                       </div>
                     </div>
@@ -455,10 +499,14 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
                           </div>
                           <div>
                             <p className="text-text-muted">Tokens Remaining</p>
-                            <p className={cn(
-                              'font-medium',
-                              getRemainingTokens(session) < 30000 ? 'text-accent-yellow' : 'text-text-primary'
-                            )}>
+                            <p
+                              className={cn(
+                                'font-medium',
+                                getRemainingTokens(session) < 30000
+                                  ? 'text-accent-yellow'
+                                  : 'text-text-primary'
+                              )}
+                            >
                               {formatTokens(getRemainingTokens(session))}
                             </p>
                           </div>
@@ -470,7 +518,10 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
                           </div>
                         </div>
                         <div className="flex items-center justify-between">
-                          <p className="text-xs text-text-muted truncate max-w-[300px]" title={session.projectPath}>
+                          <p
+                            className="text-xs text-text-muted truncate max-w-[300px]"
+                            title={session.projectPath}
+                          >
                             {session.projectPath}
                           </p>
                           <button
@@ -501,10 +552,10 @@ function ActiveSessionsPanel({ sessions, selectedSession, onSelectSession }: Act
           <div className="text-sm text-text-secondary">
             <p className="font-medium text-text-primary mb-1">About Active Sessions</p>
             <p>
-              This panel shows Claude Code sessions currently running in your terminals.
-              Each session tracks its own context window usage. When context fills up,
-              Claude will automatically create a summary checkpoint. You can trigger
-              manual compaction within each session using the <code className="text-accent-purple">/compact</code> command.
+              This panel shows Claude Code sessions currently running in your terminals. Each
+              session tracks its own context window usage. When context fills up, Claude will
+              automatically create a summary checkpoint. You can trigger manual compaction within
+              each session using the <code className="text-accent-purple">/compact</code> command.
             </p>
           </div>
         </div>
@@ -561,16 +612,22 @@ function UsagePanel({ tokenUsage, compactionSettings, onToggleAutoCompact }: Usa
         <div className="card-body">
           <div className="mb-6">
             <div className="flex items-end justify-between mb-2">
-              <span className={cn('text-4xl font-bold', getUsageColor(tokenUsage?.percentage || 0))}>
+              <span
+                className={cn('text-4xl font-bold', getUsageColor(tokenUsage?.percentage || 0))}
+              >
                 {tokenUsage?.percentage?.toFixed(1) || 0}%
               </span>
               <span className="text-text-muted">
-                {formatNumber(tokenUsage?.current || 0)} / {formatNumber(tokenUsage?.max || 200000)} tokens
+                {formatNumber(tokenUsage?.current || 0)} / {formatNumber(tokenUsage?.max || 200000)}{' '}
+                tokens
               </span>
             </div>
             <div className="h-3 bg-surface-hover rounded-full overflow-hidden">
               <div
-                className={cn('h-full rounded-full transition-all', getProgressColor(tokenUsage?.percentage || 0))}
+                className={cn(
+                  'h-full rounded-full transition-all',
+                  getProgressColor(tokenUsage?.percentage || 0)
+                )}
                 style={{ width: `${Math.min(tokenUsage?.percentage || 0, 100)}%` }}
               />
             </div>
@@ -637,7 +694,8 @@ function UsagePanel({ tokenUsage, compactionSettings, onToggleAutoCompact }: Usa
           <div className="pt-4 border-t border-border">
             <div className="p-3 bg-background rounded-lg text-center">
               <p className="text-sm text-text-secondary mb-2">
-                To compact a session, use the <code className="text-accent-purple">/compact</code> command within that session
+                To compact a session, use the <code className="text-accent-purple">/compact</code>{' '}
+                command within that session
               </p>
               <p className="text-xs text-text-muted">
                 Or wait for automatic compaction when context fills up
@@ -654,9 +712,9 @@ function UsagePanel({ tokenUsage, compactionSettings, onToggleAutoCompact }: Usa
           <div className="text-sm text-text-secondary">
             <p className="font-medium text-text-primary mb-1">About Token Estimation</p>
             <p>
-              This panel shows estimated token usage from stored checkpoints.
-              For accurate real-time usage, check the Active Sessions tab.
-              Each Claude Code session maintains its own context window (typically ~200K tokens).
+              This panel shows estimated token usage from stored checkpoints. For accurate real-time
+              usage, check the Active Sessions tab. Each Claude Code session maintains its own
+              context window (typically ~200K tokens).
             </p>
           </div>
         </div>
@@ -672,7 +730,12 @@ interface SessionsPanelProps {
   onSelectSession: (session: SessionSummary | null) => void
 }
 
-function SessionsPanel({ sessions, loading, selectedSession, onSelectSession }: SessionsPanelProps) {
+function SessionsPanel({
+  sessions,
+  loading,
+  selectedSession,
+  onSelectSession,
+}: SessionsPanelProps) {
   const formatDate = (ts: number) => {
     return new Date(ts).toLocaleDateString('en-US', {
       month: 'short',
@@ -704,9 +767,7 @@ function SessionsPanel({ sessions, loading, selectedSession, onSelectSession }: 
       <div className="card">
         <div className="card-header">
           <h3 className="font-medium text-text-primary">Recent Sessions</h3>
-          <p className="text-xs text-text-muted mt-1">
-            {sessions.length} sessions found
-          </p>
+          <p className="text-xs text-text-muted mt-1">{sessions.length} sessions found</p>
         </div>
         <div className="card-body max-h-[500px] overflow-y-auto">
           {sessions.length === 0 ? (

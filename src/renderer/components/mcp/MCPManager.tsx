@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Server,
   Power,
@@ -19,21 +19,17 @@ import {
   FolderOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useMCPStore } from '@/stores/mcp'
 import type { MCPServer } from '@shared/types'
 import { CodeEditor } from '@/components/common/CodeEditor'
 
 export function MCPManager() {
   const {
-    servers,
     selectedServer,
-    loading,
-    refreshing,
     showDetail,
     setServers,
     setSelectedServer,
-    setLoading,
-    setRefreshing,
     setShowDetail,
     getActiveCount,
     getDisabledCount,
@@ -42,73 +38,80 @@ export function MCPManager() {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'servers' | 'config'>('servers')
   const [configContent, setConfigContent] = useState('')
-  const [configLoading, setConfigLoading] = useState(false)
-  const [configSaving, setConfigSaving] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
 
-  const loadServers = useCallback(async () => {
-    try {
-      const result = await window.electron.invoke('mcp:list')
-      setServers(result)
-    } catch (error) {
-      console.error('Failed to load MCP servers:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [setServers, setLoading])
+  // tRPC queries
+  const listQuery = trpc.mcp.list.useQuery(undefined, {
+    refetchInterval: 30000, // Refresh every 30s
+  })
+  const configQuery = trpc.mcp.getConfig.useQuery(undefined, {
+    enabled: activeTab === 'config', // Only fetch when on config tab
+  })
+  const homePathQuery = trpc.system.homePath.useQuery()
 
-  const loadConfig = useCallback(async () => {
-    setConfigLoading(true)
-    setConfigError(null)
-    try {
-      const content = await window.electron.invoke('mcp:getConfig')
-      setConfigContent(content)
-    } catch (error) {
-      console.error('Failed to load MCP config:', error)
-      setConfigError('Failed to load configuration')
-    } finally {
-      setConfigLoading(false)
-    }
-  }, [])
+  // tRPC mutations
+  const toggleMutation = trpc.mcp.toggle.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+    },
+  })
+  const reloadMutation = trpc.mcp.reload.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+    },
+  })
+  const saveConfigMutation = trpc.mcp.saveConfig.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+    },
+  })
+  const openPathMutation = trpc.system.openPath.useMutation()
 
+  // Sync data to store
   useEffect(() => {
-    loadServers()
-  }, [loadServers])
+    if (listQuery.data) setServers(listQuery.data)
+  }, [listQuery.data, setServers])
 
+  // Sync config content when loaded
   useEffect(() => {
-    if (activeTab === 'config' && !configContent) {
-      loadConfig()
-    }
-  }, [activeTab, configContent, loadConfig])
+    if (configQuery.data) setConfigContent(configQuery.data)
+  }, [configQuery.data])
 
-  const handleRefresh = async () => {
-    setRefreshing(true)
-    await loadServers()
-    setRefreshing(false)
+  // Derive data from queries
+  const servers = listQuery.data ?? []
+  const loading = listQuery.isLoading
+  const refreshing = listQuery.isFetching || reloadMutation.isPending
+  const configLoading = configQuery.isLoading
+  const configSaving = saveConfigMutation.isPending
+
+  const loadConfig = () => {
+    configQuery.refetch()
   }
 
-  const handleToggle = async (name: string, enable: boolean) => {
-    try {
-      await window.electron.invoke('mcp:toggle', name, enable)
-      await loadServers()
-    } catch (error) {
-      console.error('Failed to toggle server:', error)
-    }
+  const handleRefresh = () => {
+    listQuery.refetch()
   }
 
-  const handleReload = async () => {
-    setRefreshing(true)
-    try {
-      await window.electron.invoke('mcp:reload')
-      await loadServers()
-    } catch (error) {
-      console.error('Failed to reload MCP config:', error)
-    } finally {
-      setRefreshing(false)
-    }
+  const handleToggle = (name: string, enable: boolean) => {
+    toggleMutation.mutate(
+      { name, enabled: enable },
+      {
+        onError: (error) => {
+          console.error('Failed to toggle server:', error)
+        },
+      }
+    )
   }
 
-  const handleSaveConfig = async () => {
+  const handleReload = () => {
+    reloadMutation.mutate(undefined, {
+      onError: (error) => {
+        console.error('Failed to reload MCP config:', error)
+      },
+    })
+  }
+
+  const handleSaveConfig = () => {
     // Validate JSON before saving
     try {
       JSON.parse(configContent)
@@ -117,27 +120,29 @@ export function MCPManager() {
       return
     }
 
-    setConfigSaving(true)
     setConfigError(null)
-    try {
-      await window.electron.invoke('mcp:saveConfig', configContent)
-      await loadServers() // Refresh server list after config change
-    } catch (error) {
-      console.error('Failed to save MCP config:', error)
-      setConfigError('Failed to save configuration')
-    } finally {
-      setConfigSaving(false)
-    }
+    saveConfigMutation.mutate(
+      { content: configContent },
+      {
+        onError: (error) => {
+          console.error('Failed to save MCP config:', error)
+          setConfigError('Failed to save configuration')
+        },
+      }
+    )
   }
 
-  const openMCPSettings = async () => {
-    try {
-      // Open the MCP configuration file in the default text editor
-      const homePath = await window.electron.invoke('system:getHomePath')
-      await window.electron.invoke('shell:openPath', `${homePath}/.claude`)
-    } catch (error) {
-      console.error('Failed to open MCP settings:', error)
-    }
+  const openMCPSettings = () => {
+    const homePath = homePathQuery.data
+    if (!homePath) return
+    openPathMutation.mutate(
+      { path: `${homePath}/.claude` },
+      {
+        onError: (error) => {
+          console.error('Failed to open MCP settings:', error)
+        },
+      }
+    )
   }
 
   const handleSelectServer = (server: MCPServer) => {
@@ -160,7 +165,12 @@ export function MCPManager() {
   return (
     <div className="flex h-full animate-in">
       {/* Main content */}
-      <div className={cn('flex-1 space-y-6 transition-all', showDetail && activeTab === 'servers' && 'mr-[400px]')}>
+      <div
+        className={cn(
+          'flex-1 space-y-6 transition-all',
+          showDetail && activeTab === 'servers' && 'mr-[400px]'
+        )}
+      >
         {/* Tab navigation */}
         <div className="flex items-center gap-2 border-b border-border pb-4">
           <button
@@ -211,15 +221,15 @@ export function MCPManager() {
                 />
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={handleRefresh}
-                  className="btn btn-secondary"
-                  disabled={refreshing}
-                >
+                <button onClick={handleRefresh} className="btn btn-secondary" disabled={refreshing}>
                   <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
                   Refresh
                 </button>
-                <button onClick={openMCPSettings} className="btn btn-primary" title="Open MCP config folder">
+                <button
+                  onClick={openMCPSettings}
+                  className="btn btn-primary"
+                  title="Open MCP config folder"
+                >
                   <Plus className="w-4 h-4" />
                   Add Server
                 </button>
@@ -256,7 +266,9 @@ export function MCPManager() {
               <div className="card-header flex items-center justify-between">
                 <div>
                   <h3 className="font-medium text-text-primary">MCP Configuration</h3>
-                  <p className="text-xs text-text-muted mt-1">~/.claude/settings.json (mcpServers section)</p>
+                  <p className="text-xs text-text-muted mt-1">
+                    ~/.claude/settings.json (mcpServers section)
+                  </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -320,8 +332,8 @@ export function MCPManager() {
                 <div className="text-sm text-text-secondary">
                   <p className="font-medium text-text-primary mb-1">About MCP Configuration</p>
                   <p>
-                    Edit the MCP servers configuration directly. Changes are validated as JSON before saving.
-                    After saving, the servers will be automatically reloaded.
+                    Edit the MCP servers configuration directly. Changes are validated as JSON
+                    before saving. After saving, the servers will be automatically reloaded.
                   </p>
                 </div>
               </div>
@@ -418,7 +430,11 @@ function ServerCard({ server, selected, onSelect, onToggle }: ServerCardProps) {
             )}
             title={server.config.disabled ? 'Enable' : 'Disable'}
           >
-            {server.config.disabled ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
+            {server.config.disabled ? (
+              <Power className="w-4 h-4" />
+            ) : (
+              <PowerOff className="w-4 h-4" />
+            )}
           </button>
           <ChevronRight className="w-4 h-4 text-text-muted" />
         </div>
@@ -435,7 +451,13 @@ interface ServerDetailPanelProps {
   isReloading: boolean
 }
 
-function ServerDetailPanel({ server, onClose, onToggle, onReload, isReloading }: ServerDetailPanelProps) {
+function ServerDetailPanel({
+  server,
+  onClose,
+  onToggle,
+  onReload,
+  isReloading,
+}: ServerDetailPanelProps) {
   const [copied, setCopied] = useState(false)
 
   const copyCommand = () => {
@@ -506,7 +528,11 @@ function ServerDetailPanel({ server, onClose, onToggle, onReload, isReloading }:
                 className="p-1 rounded text-text-muted hover:text-text-primary flex-shrink-0"
                 title="Copy command"
               >
-                {copied ? <CheckCircle className="w-4 h-4 text-accent-green" /> : <Copy className="w-4 h-4" />}
+                {copied ? (
+                  <CheckCircle className="w-4 h-4 text-accent-green" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
               </button>
             </div>
             {server.config.args && server.config.args.length > 0 && (
@@ -540,9 +566,7 @@ function ServerDetailPanel({ server, onClose, onToggle, onReload, isReloading }:
           <h3 className="text-sm font-medium text-text-secondary mb-2">Statistics</h3>
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-background rounded-lg p-3 text-center">
-              <p className="text-2xl font-semibold text-text-primary">
-                {server.toolCount ?? '--'}
-              </p>
+              <p className="text-2xl font-semibold text-text-primary">{server.toolCount ?? '--'}</p>
               <p className="text-xs text-text-muted">Tools</p>
             </div>
             <div className="bg-background rounded-lg p-3 text-center">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useEffect } from 'react'
 import {
   Server,
   Box,
@@ -15,74 +15,79 @@ import {
   Network,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useServicesStore, type SystemdService, type PodmanContainer } from '@/stores/services'
 
 export function ServicesManager() {
   const {
-    systemdServices,
-    podmanContainers,
-    loading,
     activeTab,
     selectedService,
     selectedContainer,
     filter,
     setSystemdServices,
     setPodmanContainers,
-    setLoading,
     setActiveTab,
     setSelectedService,
     setSelectedContainer,
     setFilter,
   } = useServicesStore()
 
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true)
-      const [services, containers] = await Promise.all([
-        window.electron.invoke('services:systemd'),
-        window.electron.invoke('services:podman'),
-      ])
-      setSystemdServices(services)
-      setPodmanContainers(containers)
-    } catch (error) {
-      console.error('Failed to load services:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [setSystemdServices, setPodmanContainers, setLoading])
+  // tRPC queries for data fetching
+  const systemdQuery = trpc.services.systemd.useQuery(undefined, {
+    refetchInterval: 10000, // Refresh every 10s
+  })
+  const podmanQuery = trpc.services.podman.useQuery(undefined, {
+    refetchInterval: 10000,
+  })
+
+  // tRPC mutations for actions
+  const systemdActionMutation = trpc.services.systemdAction.useMutation({
+    onSuccess: () => {
+      systemdQuery.refetch()
+    },
+  })
+  const podmanActionMutation = trpc.services.podmanAction.useMutation({
+    onSuccess: () => {
+      podmanQuery.refetch()
+    },
+  })
+
+  // Sync data to store for components that need it
+  useEffect(() => {
+    if (systemdQuery.data) setSystemdServices(systemdQuery.data)
+  }, [systemdQuery.data, setSystemdServices])
 
   useEffect(() => {
-    loadData()
-    const interval = setInterval(loadData, 10000) // Refresh every 10s
-    return () => clearInterval(interval)
-  }, [loadData])
+    if (podmanQuery.data) setPodmanContainers(podmanQuery.data)
+  }, [podmanQuery.data, setPodmanContainers])
 
-  const handleServiceAction = async (name: string, action: 'start' | 'stop' | 'restart') => {
-    try {
-      await window.electron.invoke('services:systemdAction', name, action)
-      loadData()
-    } catch (error) {
-      console.error(`Failed to ${action} service:`, error)
-    }
+  const systemdServices = systemdQuery.data ?? []
+  const podmanContainers = podmanQuery.data ?? []
+  const loading = systemdQuery.isLoading || podmanQuery.isLoading
+
+  const handleServiceAction = (name: string, action: 'start' | 'stop' | 'restart') => {
+    systemdActionMutation.mutate({ name, action })
   }
 
-  const handleContainerAction = async (id: string, action: 'start' | 'stop' | 'restart') => {
-    try {
-      await window.electron.invoke('services:podmanAction', id, action)
-      loadData()
-    } catch (error) {
-      console.error(`Failed to ${action} container:`, error)
-    }
+  const handleContainerAction = (id: string, action: 'start' | 'stop' | 'restart') => {
+    podmanActionMutation.mutate({ id, action })
   }
 
-  const filteredServices = systemdServices.filter((s) =>
-    s.name.toLowerCase().includes(filter.toLowerCase()) ||
-    s.description.toLowerCase().includes(filter.toLowerCase())
+  const handleRefresh = () => {
+    systemdQuery.refetch()
+    podmanQuery.refetch()
+  }
+
+  const filteredServices = systemdServices.filter(
+    (s) =>
+      s.name.toLowerCase().includes(filter.toLowerCase()) ||
+      s.description.toLowerCase().includes(filter.toLowerCase())
   )
 
-  const filteredContainers = podmanContainers.filter((c) =>
-    c.name.toLowerCase().includes(filter.toLowerCase()) ||
-    c.image.toLowerCase().includes(filter.toLowerCase())
+  const filteredContainers = podmanContainers.filter(
+    (c) =>
+      c.name.toLowerCase().includes(filter.toLowerCase()) ||
+      c.image.toLowerCase().includes(filter.toLowerCase())
   )
 
   const runningContainers = podmanContainers.filter((c) => c.status === 'running').length
@@ -106,12 +111,7 @@ export function ServicesManager() {
           label="Containers"
           color="text-accent-blue"
         />
-        <StatCard
-          icon={Play}
-          value={runningContainers}
-          label="Running"
-          color="text-accent-green"
-        />
+        <StatCard icon={Play} value={runningContainers} label="Running" color="text-accent-green" />
         <StatCard
           icon={Server}
           value={systemdServices.length}
@@ -155,7 +155,7 @@ export function ServicesManager() {
             className="input pl-10 w-full"
           />
         </div>
-        <button onClick={loadData} className="btn btn-secondary">
+        <button onClick={handleRefresh} className="btn btn-secondary">
           <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
         </button>
       </div>
@@ -351,9 +351,7 @@ function ServicesList({ services, selected, onSelect, onAction }: ServicesListPr
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {service.pid && (
-                <span className="text-xs text-text-muted">PID: {service.pid}</span>
-              )}
+              {service.pid && <span className="text-xs text-text-muted">PID: {service.pid}</span>}
               <ActionButtons
                 status={service.status}
                 onStart={() => onAction(service.name, 'start')}

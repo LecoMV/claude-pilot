@@ -12,7 +12,7 @@
  * - AgentDetails.tsx: Agent details panel
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Brain,
   Activity,
@@ -28,6 +28,7 @@ import {
   Layers,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useAgentsStore, type AgentType } from '@/stores/agents'
 import { topologyOptions, type SwarmTopology, type AgentTemplate } from './constants'
 import { SpawnAgentModal } from './SpawnAgentModal'
@@ -38,18 +39,7 @@ import { StatCard } from './StatCard'
 import { AgentDetails } from './AgentDetails'
 
 export function AgentCanvas() {
-  const {
-    agents,
-    swarm,
-    hiveMind,
-    loading,
-    selectedAgent,
-    setAgents,
-    setSwarm,
-    setHiveMind,
-    setLoading,
-    setSelectedAgent,
-  } = useAgentsStore()
+  const { selectedAgent, setAgents, setSwarm, setHiveMind, setSelectedAgent } = useAgentsStore()
 
   const [showSpawnModal, setShowSpawnModal] = useState(false)
   const [showTaskModal, setShowTaskModal] = useState(false)
@@ -60,102 +50,154 @@ export function AgentCanvas() {
   const [taskDescription, setTaskDescription] = useState('')
   const [targetAgentId, setTargetAgentId] = useState<string | 'auto'>('auto')
 
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true)
-      const [agentList, swarmStatus, hiveMindStatus] = await Promise.all([
-        window.electron.invoke('agents:list'),
-        window.electron.invoke('agents:swarmStatus'),
-        window.electron.invoke('agents:hiveMindStatus'),
-      ])
-      setAgents(agentList)
-      setSwarm(swarmStatus)
-      setHiveMind(hiveMindStatus)
-    } catch (error) {
-      console.error('Failed to load agents:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [setAgents, setSwarm, setHiveMind, setLoading])
+  // tRPC queries for data fetching
+  const listQuery = trpc.agents.list.useQuery(undefined, {
+    refetchInterval: 15000,
+  })
+  const swarmQuery = trpc.agents.swarmStatus.useQuery(undefined, {
+    refetchInterval: 15000,
+  })
+  const hiveMindQuery = trpc.agents.hiveMindStatus.useQuery(undefined, {
+    refetchInterval: 15000,
+  })
+
+  // tRPC mutations for actions
+  const spawnMutation = trpc.agents.spawn.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+    },
+  })
+  const terminateMutation = trpc.agents.terminate.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+    },
+  })
+  const initSwarmMutation = trpc.agents.initSwarm.useMutation({
+    onSuccess: () => {
+      swarmQuery.refetch()
+      listQuery.refetch()
+    },
+  })
+  const shutdownSwarmMutation = trpc.agents.shutdownSwarm.useMutation({
+    onSuccess: () => {
+      swarmQuery.refetch()
+    },
+  })
+  const submitTaskMutation = trpc.agents.submitTask.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+    },
+  })
+
+  // Sync data to store for components that need it
+  useEffect(() => {
+    if (listQuery.data) setAgents(listQuery.data)
+  }, [listQuery.data, setAgents])
 
   useEffect(() => {
-    loadData()
-    const interval = setInterval(loadData, 15000)
-    return () => clearInterval(interval)
-  }, [loadData])
+    if (swarmQuery.data !== undefined) setSwarm(swarmQuery.data)
+  }, [swarmQuery.data, setSwarm])
+
+  useEffect(() => {
+    if (hiveMindQuery.data !== undefined) setHiveMind(hiveMindQuery.data)
+  }, [hiveMindQuery.data, setHiveMind])
+
+  // Derive data from queries - wrapped in useMemo to prevent unstable deps
+  const agents = useMemo(() => listQuery.data ?? [], [listQuery.data])
+  const swarm = swarmQuery.data ?? null
+  const hiveMind = hiveMindQuery.data ?? null
+  const loading = listQuery.isLoading || swarmQuery.isLoading || hiveMindQuery.isLoading
+
+  const handleRefresh = () => {
+    listQuery.refetch()
+    swarmQuery.refetch()
+    hiveMindQuery.refetch()
+  }
 
   // Event handlers
-  const handleSpawnAgent = async () => {
+  const handleSpawnAgent = () => {
     if (!newAgentName) return
-    try {
-      await window.electron.invoke('agents:spawn', newAgentType, newAgentName)
-      setShowSpawnModal(false)
-      setNewAgentName('')
-      loadData()
-    } catch (error) {
-      console.error('Failed to spawn agent:', error)
-    }
+    spawnMutation.mutate(
+      { type: newAgentType, name: newAgentName },
+      {
+        onSuccess: () => {
+          setShowSpawnModal(false)
+          setNewAgentName('')
+        },
+        onError: (error) => {
+          console.error('Failed to spawn agent:', error)
+        },
+      }
+    )
   }
 
-  const handleTerminateAgent = async (agentId: string) => {
+  const handleTerminateAgent = (agentId: string) => {
     // eslint-disable-next-line no-alert
     if (!confirm('Terminate this agent?')) return
-    try {
-      await window.electron.invoke('agents:terminate', agentId)
-      setSelectedAgent(null)
-      loadData()
-    } catch (error) {
-      console.error('Failed to terminate agent:', error)
-    }
+    terminateMutation.mutate(
+      { id: agentId },
+      {
+        onSuccess: () => {
+          setSelectedAgent(null)
+        },
+        onError: (error) => {
+          console.error('Failed to terminate agent:', error)
+        },
+      }
+    )
   }
 
-  const handleInitSwarm = async (topology: SwarmTopology = selectedTopology) => {
-    try {
-      await window.electron.invoke('agents:initSwarm', topology)
-      loadData()
-    } catch (error) {
-      console.error('Failed to init swarm:', error)
-    }
+  const handleInitSwarm = (topology: SwarmTopology = selectedTopology) => {
+    initSwarmMutation.mutate(
+      { topology },
+      {
+        onError: (error) => {
+          console.error('Failed to init swarm:', error)
+        },
+      }
+    )
   }
 
-  const handleSubmitTask = async () => {
+  const handleSubmitTask = () => {
     if (!taskDescription.trim()) return
-    try {
-      await window.electron.invoke('agents:submitTask', {
+    submitTaskMutation.mutate(
+      {
         description: taskDescription,
         targetAgent: targetAgentId === 'auto' ? undefined : targetAgentId,
-      })
-      setShowTaskModal(false)
-      setTaskDescription('')
-      setTargetAgentId('auto')
-      loadData()
-    } catch (error) {
-      console.error('Failed to submit task:', error)
-    }
+      },
+      {
+        onSuccess: () => {
+          setShowTaskModal(false)
+          setTaskDescription('')
+          setTargetAgentId('auto')
+        },
+        onError: (error) => {
+          console.error('Failed to submit task:', error)
+        },
+      }
+    )
   }
 
   const handleSpawnTemplate = async (template: AgentTemplate) => {
     try {
-      await window.electron.invoke('agents:initSwarm', template.topology)
+      await initSwarmMutation.mutateAsync({ topology: template.topology })
       for (const agent of template.agents) {
-        await window.electron.invoke('agents:spawn', agent.type, agent.name)
+        await spawnMutation.mutateAsync({ type: agent.type, name: agent.name })
       }
       setShowTemplatesModal(false)
-      loadData()
     } catch (error) {
       console.error('Failed to spawn template:', error)
     }
   }
 
-  const handleShutdownSwarm = async () => {
+  const handleShutdownSwarm = () => {
     // eslint-disable-next-line no-alert
     if (!confirm('Shutdown the swarm?')) return
-    try {
-      await window.electron.invoke('agents:shutdownSwarm')
-      loadData()
-    } catch (error) {
-      console.error('Failed to shutdown swarm:', error)
-    }
+    shutdownSwarmMutation.mutate(undefined, {
+      onError: (error) => {
+        console.error('Failed to shutdown swarm:', error)
+      },
+    })
   }
 
   // Canvas calculations
@@ -297,7 +339,7 @@ export function AgentCanvas() {
 
         <div className="flex-1" />
 
-        <button onClick={loadData} className="btn btn-secondary">
+        <button onClick={handleRefresh} className="btn btn-secondary">
           <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
         </button>
       </div>

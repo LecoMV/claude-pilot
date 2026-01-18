@@ -30,12 +30,22 @@ import {
   Eye,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useMemoryStore, type MemorySource } from '@/stores/memory'
 import { GraphViewer } from './GraphViewer'
 import type { Learning } from '@shared/types'
 
 // Available categories for filtering (reserved for future use)
-const _CATEGORIES = ['all', 'bugbounty', 'project', 'architecture', 'security', 'general', 'htb', 'memory']
+const _CATEGORIES = [
+  'all',
+  'bugbounty',
+  'project',
+  'architecture',
+  'security',
+  'general',
+  'htb',
+  'memory',
+]
 void _CATEGORIES // Suppress unused warning
 
 // Qdrant collections
@@ -136,6 +146,9 @@ export function MemoryBrowser() {
   const [copied, setCopied] = useState(false)
   const [showGraph, setShowGraph] = useState(false)
 
+  // tRPC utils for fetching in callbacks
+  const utils = trpc.useUtils()
+
   // Animated counter for stats
   const [animatedStats, setAnimatedStats] = useState({
     postgresql: 0,
@@ -144,22 +157,8 @@ export function MemoryBrowser() {
     qdrant: 0,
   })
 
-  // Load initial data and stats
-  const loadStats = useCallback(async () => {
-    try {
-      setStatsLoading(true)
-      const result = await window.electron.invoke('memory:stats')
-      setStats(result)
-
-      // Animate the stats
-      animateStats(result)
-    } catch (error) {
-      console.error('Failed to load stats:', error)
-    }
-  }, [setStats, setStatsLoading])
-
   // Animate stats numbers
-  const animateStats = (targetStats: typeof stats) => {
+  const animateStats = useCallback((targetStats: typeof stats) => {
     if (!targetStats) return
 
     const duration = 1500
@@ -191,40 +190,56 @@ export function MemoryBrowser() {
         setAnimatedStats(targets)
       }
     }, stepTime)
-  }
+  }, [])
+
+  // Load initial data and stats
+  const loadStats = useCallback(async () => {
+    try {
+      setStatsLoading(true)
+      const result = await utils.memory.stats.fetch()
+      setStats(result)
+
+      // Animate the stats
+      animateStats(result)
+    } catch (error) {
+      console.error('Failed to load stats:', error)
+    }
+  }, [setStats, setStatsLoading, utils, animateStats])
 
   const loadInitialLearnings = useCallback(async () => {
     try {
-      const result = await window.electron.invoke('memory:learnings', undefined, 50)
+      const result = await utils.memory.learnings.fetch({ limit: 50 })
       setLearnings(result)
       setInitialLoaded(true)
     } catch (error) {
       console.error('Failed to load learnings:', error)
     }
-  }, [setLearnings])
+  }, [setLearnings, utils])
 
   // Load Qdrant memories
-  const loadQdrantMemories = useCallback(async (reset = true) => {
-    setQdrantLoading(true)
-    try {
-      const result = await window.electron.invoke(
-        'memory:qdrant:browse',
-        qdrantCollection,
-        50,
-        reset ? undefined : qdrantNextOffset || undefined
-      )
-      if (reset) {
-        setQdrantPoints(result.points)
-      } else {
-        setQdrantPoints((prev) => [...prev, ...result.points])
+  const loadQdrantMemories = useCallback(
+    async (reset = true) => {
+      setQdrantLoading(true)
+      try {
+        const result = await utils.memory.qdrantBrowse.fetch({
+          collection: qdrantCollection,
+          limit: 50,
+          offset: reset ? undefined : qdrantNextOffset || undefined,
+        })
+        if (reset) {
+          setQdrantPoints(result.points)
+        } else {
+          setQdrantPoints((prev) => [...prev, ...result.points])
+        }
+        setQdrantNextOffset(result.nextOffset)
+      } catch (error) {
+        console.error('Failed to load Qdrant memories:', error)
+      } finally {
+        setQdrantLoading(false)
       }
-      setQdrantNextOffset(result.nextOffset)
-    } catch (error) {
-      console.error('Failed to load Qdrant memories:', error)
-    } finally {
-      setQdrantLoading(false)
-    }
-  }, [qdrantCollection, qdrantNextOffset])
+    },
+    [qdrantCollection, qdrantNextOffset, utils]
+  )
 
   useEffect(() => {
     loadStats()
@@ -245,6 +260,7 @@ export function MemoryBrowser() {
     if (activeSource === 'qdrant') {
       loadQdrantMemories(true)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only reload when collection changes, not on every loadQdrantMemories change
   }, [qdrantCollection])
 
   // Handle search based on source
@@ -254,7 +270,7 @@ export function MemoryBrowser() {
     if (activeSource === 'postgresql') {
       setSearching(true)
       try {
-        const result = await window.electron.invoke('memory:learnings', searchQuery, 100)
+        const result = await utils.memory.learnings.fetch({ query: searchQuery, limit: 100 })
         setLearnings(result)
       } catch (error) {
         console.error('Search failed:', error)
@@ -264,12 +280,11 @@ export function MemoryBrowser() {
     } else if (activeSource === 'memgraph') {
       setMemgraphSearching(true)
       try {
-        const result = await window.electron.invoke(
-          'memory:memgraph:search',
-          searchQuery,
-          memgraphNodeType === 'all' ? undefined : memgraphNodeType,
-          100
-        )
+        const result = await utils.memory.memgraphSearch.fetch({
+          query: searchQuery,
+          nodeType: memgraphNodeType === 'all' ? undefined : memgraphNodeType,
+          limit: 100,
+        })
         setMemgraphResults(result.results)
       } catch (error) {
         console.error('Memgraph search failed:', error)
@@ -279,12 +294,20 @@ export function MemoryBrowser() {
     } else if (activeSource === 'qdrant') {
       setQdrantLoading(true)
       try {
-        const result = await window.electron.invoke('memory:qdrant:search', searchQuery, qdrantCollection, 50)
-        setQdrantPoints(result.results.map((r: { id: string; payload: Record<string, unknown>; score?: number }) => ({
-          id: r.id,
-          payload: r.payload,
-          score: r.score
-        })))
+        const result = await utils.memory.qdrantSearch.fetch({
+          query: searchQuery,
+          collection: qdrantCollection,
+          limit: 50,
+        })
+        setQdrantPoints(
+          result.results.map(
+            (r: { id: string; payload: Record<string, unknown>; score?: number }) => ({
+              id: r.id,
+              payload: r.payload,
+              score: r.score,
+            })
+          )
+        )
         setQdrantNextOffset(null)
       } catch (error) {
         console.error('Qdrant search failed:', error)
@@ -299,7 +322,7 @@ export function MemoryBrowser() {
     if (!rawQuery.trim()) return
     setRawLoading(true)
     try {
-      const result = await window.electron.invoke('memory:raw', activeSource, rawQuery)
+      const result = await utils.memory.raw.fetch({ source: activeSource, query: rawQuery })
       setRawResult(result)
     } catch (error) {
       setRawResult({
@@ -321,7 +344,10 @@ export function MemoryBrowser() {
 
     try {
       // Use unified search with RRF (Reciprocal Rank Fusion) for better results
-      const { results, stats } = await window.electron.invoke('memory:unified-search', naturalQuery, 15)
+      const { results, stats: searchStats } = await utils.memory.unifiedSearch.fetch({
+        query: naturalQuery,
+        limit: 15,
+      })
 
       if (results.length > 0) {
         // Group results by source
@@ -337,22 +363,30 @@ export function MemoryBrowser() {
         }
 
         // Build response with unified ranking
-        const formattedResults = results.map((r, i) => {
-          const icon = sourceIcons[r.source] || '📄'
-          const source = sourceLabels[r.source] || r.source
-          const score = (r.score * 100).toFixed(1)
-          return `${i + 1}. ${icon} **[${source}]** ${r.title}\n   ${r.content}\n   _Score: ${score}% | ID: ${r.id}_`
-        }).join('\n\n')
+        const formattedResults = results
+          .map((r, i) => {
+            const icon = sourceIcons[r.source] || '📄'
+            const source = sourceLabels[r.source] || r.source
+            const score = (r.score * 100).toFixed(1)
+            return `${i + 1}. ${icon} **[${source}]** ${r.title}\n   ${r.content}\n   _Score: ${score}% | ID: ${r.id}_`
+          })
+          .join('\n\n')
 
         // Stats summary
-        const statsLine = `_Searched ${stats.postgresql} learnings, ${stats.memgraph} graph nodes, ${stats.qdrant} vector memories in ${stats.totalTime}ms_`
+        const statsLine = `_Searched ${searchStats.postgresql} learnings, ${searchStats.memgraph} graph nodes, ${searchStats.qdrant} vector memories in ${searchStats.totalTime}ms_`
 
-        setNaturalResponse(`### 🔍 Results for: "${naturalQuery}"\n\n${statsLine}\n\n---\n\n${formattedResults}`)
+        setNaturalResponse(
+          `### 🔍 Results for: "${naturalQuery}"\n\n${statsLine}\n\n---\n\n${formattedResults}`
+        )
       } else {
-        setNaturalResponse(`### No results found for: "${naturalQuery}"\n\nTry different keywords or check the raw query mode for advanced searches.\n\n_Searched all ${stats.totalTime}ms_`)
+        setNaturalResponse(
+          `### No results found for: "${naturalQuery}"\n\nTry different keywords or check the raw query mode for advanced searches.\n\n_Searched all ${searchStats.totalTime}ms_`
+        )
       }
     } catch (error) {
-      setNaturalResponse(`### Error\n\nFailed to search: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      setNaturalResponse(
+        `### Error\n\nFailed to search: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
     } finally {
       setNaturalLoading(false)
     }
@@ -436,6 +470,7 @@ export function MemoryBrowser() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Handlers use current state; no need to re-subscribe on every handler change
   }, [viewMode, rawQuery, naturalQuery, searchQuery])
 
   return (
@@ -457,11 +492,7 @@ export function MemoryBrowser() {
                 Unified access to learnings, knowledge graph, and vector memories
               </p>
             </div>
-            <button
-              onClick={loadStats}
-              className="btn btn-secondary"
-              disabled={statsLoading}
-            >
+            <button onClick={loadStats} className="btn btn-secondary" disabled={statsLoading}>
               <RefreshCw className={cn('w-4 h-4', statsLoading && 'animate-spin')} />
               Refresh
             </button>
@@ -655,7 +686,17 @@ interface StatCardProps {
   highlight?: boolean
 }
 
-function StatCard({ icon: Icon, label, sublabel, value, loading, color, onClick, active, highlight }: StatCardProps) {
+function StatCard({
+  icon: Icon,
+  label,
+  sublabel,
+  value,
+  loading,
+  color,
+  onClick,
+  active,
+  highlight,
+}: StatCardProps) {
   const colorClasses = {
     blue: 'text-accent-blue bg-accent-blue/10 border-accent-blue/30',
     purple: 'text-accent-purple bg-accent-purple/10 border-accent-purple/30',
@@ -704,17 +745,23 @@ function StatCard({ icon: Icon, label, sublabel, value, loading, color, onClick,
         <div className={cn('p-2 rounded-lg', iconBgClasses[color])}>
           <Icon className="w-5 h-5" />
         </div>
-        <ArrowRight className={cn(
-          'w-4 h-4 text-text-muted opacity-0 transition-opacity',
-          'group-hover:opacity-100'
-        )} />
+        <ArrowRight
+          className={cn(
+            'w-4 h-4 text-text-muted opacity-0 transition-opacity',
+            'group-hover:opacity-100'
+          )}
+        />
       </div>
 
       <div className="mt-3">
-        <p className={cn(
-          'text-2xl font-bold tabular-nums',
-          active ? `text-${color === 'purple' ? 'accent-purple' : `accent-${color}`}` : 'text-text-primary'
-        )}>
+        <p
+          className={cn(
+            'text-2xl font-bold tabular-nums',
+            active
+              ? `text-${color === 'purple' ? 'accent-purple' : `accent-${color}`}`
+              : 'text-text-primary'
+          )}
+        >
           {loading ? (
             <span className="inline-block w-16 h-7 bg-border/50 rounded animate-pulse" />
           ) : (
@@ -750,10 +797,12 @@ function SourcePill({ icon: Icon, label, active, onClick, badge }: SourcePillPro
       <Icon className="w-4 h-4" />
       <span>{label}</span>
       {badge && (
-        <span className={cn(
-          'px-1.5 py-0.5 rounded text-xs',
-          active ? 'bg-white/20' : 'bg-accent-purple/10 text-accent-purple'
-        )}>
+        <span
+          className={cn(
+            'px-1.5 py-0.5 rounded text-xs',
+            active ? 'bg-white/20' : 'bg-accent-purple/10 text-accent-purple'
+          )}
+        >
           {badge}
         </span>
       )}
@@ -891,14 +940,21 @@ function SearchPanel({
           )}
 
           <button onClick={handleSearch} className="btn btn-primary" disabled={searching}>
-            {searching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+            {searching ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <Search className="w-4 h-4" />
+            )}
             Search
           </button>
         </div>
 
         <div className="flex items-center gap-2 mt-3 text-xs text-text-muted">
           <Command className="w-3 h-3" />
-          <span>Press <kbd className="px-1.5 py-0.5 rounded bg-surface-hover font-mono">⌘</kbd> + <kbd className="px-1.5 py-0.5 rounded bg-surface-hover font-mono">Enter</kbd> to search</span>
+          <span>
+            Press <kbd className="px-1.5 py-0.5 rounded bg-surface-hover font-mono">⌘</kbd> +{' '}
+            <kbd className="px-1.5 py-0.5 rounded bg-surface-hover font-mono">Enter</kbd> to search
+          </span>
         </div>
       </div>
     </div>
@@ -929,7 +985,8 @@ function RawQueryPanel({
   copied,
 }: RawQueryPanelProps) {
   const syntaxHints = {
-    postgresql: 'SQL syntax • Tables: learnings (id, category, content, source, confidence, created_at, tags)',
+    postgresql:
+      'SQL syntax • Tables: learnings (id, category, content, source, confidence, created_at, tags)',
     memgraph: 'Cypher syntax • Nodes: CyberTechnique, Security, BugBounty, Pattern, Technology...',
     qdrant: 'REST API • Methods: GET, POST, PUT, DELETE • Example: GET /collections',
   }
@@ -941,12 +998,16 @@ function RawQueryPanel({
           <div className="flex items-center gap-2">
             <Terminal className="w-5 h-5 text-accent-yellow" />
             <h3 className="font-medium text-text-primary">Raw Query Mode</h3>
-            <span className={cn(
-              'px-2 py-0.5 rounded text-xs font-medium',
-              activeSource === 'postgresql' ? 'bg-accent-blue/20 text-accent-blue' :
-              activeSource === 'memgraph' ? 'bg-accent-purple/20 text-accent-purple' :
-              'bg-accent-green/20 text-accent-green'
-            )}>
+            <span
+              className={cn(
+                'px-2 py-0.5 rounded text-xs font-medium',
+                activeSource === 'postgresql'
+                  ? 'bg-accent-blue/20 text-accent-blue'
+                  : activeSource === 'memgraph'
+                    ? 'bg-accent-purple/20 text-accent-purple'
+                    : 'bg-accent-green/20 text-accent-green'
+              )}
+            >
               {activeSource.toUpperCase()}
             </span>
           </div>
@@ -1003,16 +1064,18 @@ function RawQueryPanel({
                   Executed in {rawResult.executionTime}ms
                 </span>
                 {rawResult.success && Array.isArray(rawResult.data) && (
-                  <span className="text-xs text-text-muted">
-                    • {rawResult.data.length} results
-                  </span>
+                  <span className="text-xs text-text-muted">• {rawResult.data.length} results</span>
                 )}
               </div>
               <button
                 onClick={() => handleCopy(JSON.stringify(rawResult.data, null, 2))}
                 className="btn btn-secondary btn-sm"
               >
-                {copied ? <Check className="w-4 h-4 text-accent-green" /> : <Copy className="w-4 h-4" />}
+                {copied ? (
+                  <Check className="w-4 h-4 text-accent-green" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
                 Copy
               </button>
             </div>
@@ -1038,7 +1101,10 @@ function RawQueryPanel({
 
         <div className="flex items-center gap-2 text-xs text-text-muted">
           <Command className="w-3 h-3" />
-          <span>Press <kbd className="px-1.5 py-0.5 rounded bg-surface-hover font-mono">⌘</kbd> + <kbd className="px-1.5 py-0.5 rounded bg-surface-hover font-mono">Enter</kbd> to execute</span>
+          <span>
+            Press <kbd className="px-1.5 py-0.5 rounded bg-surface-hover font-mono">⌘</kbd> +{' '}
+            <kbd className="px-1.5 py-0.5 rounded bg-surface-hover font-mono">Enter</kbd> to execute
+          </span>
         </div>
       </div>
     </div>
@@ -1107,18 +1173,34 @@ function NaturalQueryPanel({
             <div className="p-4 rounded-lg bg-background border border-border">
               {naturalResponse.split('\n').map((line, i) => {
                 if (line.startsWith('### ')) {
-                  return <h3 key={i} className="text-lg font-semibold text-text-primary mt-0 mb-3">{line.replace('### ', '')}</h3>
+                  return (
+                    <h3 key={i} className="text-lg font-semibold text-text-primary mt-0 mb-3">
+                      {line.replace('### ', '')}
+                    </h3>
+                  )
                 }
                 if (line.startsWith('**') && line.endsWith('**')) {
-                  return <p key={i} className="font-semibold text-accent-purple my-2">{line.replace(/\*\*/g, '')}</p>
+                  return (
+                    <p key={i} className="font-semibold text-accent-purple my-2">
+                      {line.replace(/\*\*/g, '')}
+                    </p>
+                  )
                 }
                 if (line.startsWith('---')) {
                   return <hr key={i} className="border-border my-4" />
                 }
                 if (line.match(/^\d+\./)) {
-                  return <p key={i} className="text-text-secondary ml-4 my-1">{line}</p>
+                  return (
+                    <p key={i} className="text-text-secondary ml-4 my-1">
+                      {line}
+                    </p>
+                  )
                 }
-                return line ? <p key={i} className="text-text-secondary my-1">{line}</p> : null
+                return line ? (
+                  <p key={i} className="text-text-secondary my-1">
+                    {line}
+                  </p>
+                ) : null
               })}
             </div>
           </div>
@@ -1129,7 +1211,10 @@ function NaturalQueryPanel({
             <div className="text-center">
               <Sparkles className="w-8 h-8 mx-auto mb-3 opacity-50" />
               <p className="text-sm">Unified Federated Search with RRF</p>
-              <p className="text-xs mt-1 opacity-70">Searches PostgreSQL, Memgraph, and Qdrant in parallel, then merges results using Reciprocal Rank Fusion for optimal relevance</p>
+              <p className="text-xs mt-1 opacity-70">
+                Searches PostgreSQL, Memgraph, and Qdrant in parallel, then merges results using
+                Reciprocal Rank Fusion for optimal relevance
+              </p>
               <div className="flex items-center justify-center gap-3 mt-3 text-xs">
                 <span className="flex items-center gap-1 px-2 py-1 rounded bg-accent-blue/10 text-accent-blue">
                   <Database className="w-3 h-3" /> FTS + Fuzzy
@@ -1215,10 +1300,7 @@ function ResultsPanel({
         {activeSource === 'memgraph' && (
           <button
             onClick={() => setShowGraph(!showGraph)}
-            className={cn(
-              'btn btn-sm',
-              showGraph ? 'btn-primary' : 'btn-secondary'
-            )}
+            className={cn('btn btn-sm', showGraph ? 'btn-primary' : 'btn-secondary')}
           >
             <GitBranch className="w-4 h-4" />
             {showGraph ? 'Hide Graph' : 'Show Graph'}
@@ -1226,10 +1308,14 @@ function ResultsPanel({
         )}
       </div>
 
-      <div className={cn(
-        'card-body overflow-y-auto',
-        activeSource === 'memgraph' && showGraph ? 'min-h-[500px] h-[600px]' : 'min-h-[300px] max-h-[600px]'
-      )}>
+      <div
+        className={cn(
+          'card-body overflow-y-auto',
+          activeSource === 'memgraph' && showGraph
+            ? 'min-h-[500px] h-[600px]'
+            : 'min-h-[300px] max-h-[600px]'
+        )}
+      >
         {activeSource === 'postgresql' ? (
           learnings.length > 0 ? (
             <div className="space-y-2">
@@ -1266,34 +1352,32 @@ function ResultsPanel({
               description="Enter a search term or click 'Show Graph' to visualize the graph"
             />
           )
+        ) : // Qdrant browser
+        qdrantLoading && qdrantPoints.length === 0 ? (
+          <div className="flex items-center justify-center py-12">
+            <RefreshCw className="w-8 h-8 animate-spin text-accent-purple" />
+          </div>
+        ) : qdrantPoints.length > 0 ? (
+          <div className="space-y-2">
+            {qdrantPoints.map((point) => (
+              <QdrantMemoryCard key={point.id} point={point} formatDate={formatDate} />
+            ))}
+            {qdrantNextOffset && (
+              <button
+                onClick={() => loadQdrantMemories(false)}
+                disabled={qdrantLoading}
+                className="w-full py-3 text-sm font-medium text-accent-purple hover:bg-accent-purple/10 rounded-lg transition-colors border border-dashed border-accent-purple/30"
+              >
+                {qdrantLoading ? 'Loading...' : 'Load More Memories'}
+              </button>
+            )}
+          </div>
         ) : (
-          // Qdrant browser
-          qdrantLoading && qdrantPoints.length === 0 ? (
-            <div className="flex items-center justify-center py-12">
-              <RefreshCw className="w-8 h-8 animate-spin text-accent-purple" />
-            </div>
-          ) : qdrantPoints.length > 0 ? (
-            <div className="space-y-2">
-              {qdrantPoints.map((point) => (
-                <QdrantMemoryCard key={point.id} point={point} formatDate={formatDate} />
-              ))}
-              {qdrantNextOffset && (
-                <button
-                  onClick={() => loadQdrantMemories(false)}
-                  disabled={qdrantLoading}
-                  className="w-full py-3 text-sm font-medium text-accent-purple hover:bg-accent-purple/10 rounded-lg transition-colors border border-dashed border-accent-purple/30"
-                >
-                  {qdrantLoading ? 'Loading...' : 'Load More Memories'}
-                </button>
-              )}
-            </div>
-          ) : (
-            <EmptyState
-              icon={Brain}
-              title="No memories found"
-              description="This collection is empty or try searching for specific content"
-            />
-          )
+          <EmptyState
+            icon={Brain}
+            title="No memories found"
+            description="This collection is empty or try searching for specific content"
+          />
         )}
       </div>
     </div>
@@ -1353,11 +1437,11 @@ function LearningCard({ learning, expanded, onToggle, formatDate }: LearningCard
                 {(learning.confidence * 100).toFixed(0)}%
               </span>
             )}
-            <span className="text-xs text-text-muted/60">
-              #{learning.id}
-            </span>
+            <span className="text-xs text-text-muted/60">#{learning.id}</span>
           </div>
-          <p className={cn('text-sm text-text-primary leading-relaxed', !expanded && 'line-clamp-2')}>
+          <p
+            className={cn('text-sm text-text-primary leading-relaxed', !expanded && 'line-clamp-2')}
+          >
             {learning.content}
           </p>
         </div>
@@ -1424,7 +1508,16 @@ function MemgraphNodeCard({ node }: MemgraphNodeCardProps) {
   const color = typeColors[node.type] || 'bg-text-muted/20 text-text-muted border-text-muted/30'
 
   // Priority order for displaying properties (especially for CyberTechnique nodes)
-  const priorityFields = ['name', 'title', 'description', 'category', 'instruction', 'input', 'output', 'source']
+  const priorityFields = [
+    'name',
+    'title',
+    'description',
+    'category',
+    'instruction',
+    'input',
+    'output',
+    'source',
+  ]
   const sortedProperties = Object.entries(node.properties).sort((a, b) => {
     const aIndex = priorityFields.indexOf(a[0])
     const bIndex = priorityFields.indexOf(b[0])
@@ -1435,23 +1528,28 @@ function MemgraphNodeCard({ node }: MemgraphNodeCardProps) {
   })
 
   // Get description or output for preview
-  const preview = node.properties.description || node.properties.output || node.properties.instruction
+  const preview =
+    node.properties.description || node.properties.output || node.properties.instruction
   const previewText = preview ? String(preview).slice(0, 150) : null
 
   return (
-    <div className={cn(
-      'border rounded-lg transition-all duration-200',
-      expanded
-        ? 'border-accent-purple bg-accent-purple/5'
-        : 'border-border hover:border-border-hover hover:bg-surface/50'
-    )}>
+    <div
+      className={cn(
+        'border rounded-lg transition-all duration-200',
+        expanded
+          ? 'border-accent-purple bg-accent-purple/5'
+          : 'border-border hover:border-border-hover hover:bg-surface/50'
+      )}
+    >
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full p-4 flex items-start justify-between gap-3 text-left"
       >
         <div className="flex flex-col gap-2 min-w-0 flex-1">
           <div className="flex items-center gap-3 flex-wrap">
-            <span className={cn('px-2 py-0.5 rounded border text-xs font-medium flex-shrink-0', color)}>
+            <span
+              className={cn('px-2 py-0.5 rounded border text-xs font-medium flex-shrink-0', color)}
+            >
               {node.type}
             </span>
             {node.properties.category && (
@@ -1499,7 +1597,10 @@ function MemgraphNodeCard({ node }: MemgraphNodeCardProps) {
                       <span>Output</span>
                       {String(node.properties.output).length > 500 && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); setShowFullContent(!showFullContent) }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setShowFullContent(!showFullContent)
+                          }}
                           className="text-accent-blue hover:underline"
                         >
                           {showFullContent ? 'Show less' : 'Show full'}
@@ -1509,7 +1610,8 @@ function MemgraphNodeCard({ node }: MemgraphNodeCardProps) {
                     <div className="text-sm text-text-primary whitespace-pre-wrap font-mono text-xs leading-relaxed">
                       {showFullContent
                         ? String(node.properties.output)
-                        : String(node.properties.output).slice(0, 500) + (String(node.properties.output).length > 500 ? '...' : '')}
+                        : String(node.properties.output).slice(0, 500) +
+                          (String(node.properties.output).length > 500 ? '...' : '')}
                     </div>
                   </div>
                 )}
@@ -1524,13 +1626,19 @@ function MemgraphNodeCard({ node }: MemgraphNodeCardProps) {
               </div>
               <div className="space-y-1.5 text-sm">
                 {sortedProperties
-                  .filter(([key]) => !['instruction', 'output'].includes(key) || node.type !== 'CyberTechnique')
+                  .filter(
+                    ([key]) =>
+                      !['instruction', 'output'].includes(key) || node.type !== 'CyberTechnique'
+                  )
                   .slice(0, 10)
                   .map(([key, value]) => (
                     <div key={key} className="flex gap-2">
-                      <span className="text-text-muted font-mono text-xs min-w-[100px] flex-shrink-0">{key}:</span>
+                      <span className="text-text-muted font-mono text-xs min-w-[100px] flex-shrink-0">
+                        {key}:
+                      </span>
                       <span className="text-text-primary text-sm break-words flex-1">
-                        {String(value).slice(0, 200)}{String(value).length > 200 ? '...' : ''}
+                        {String(value).slice(0, 200)}
+                        {String(value).length > 200 ? '...' : ''}
                       </span>
                     </div>
                   ))}
@@ -1542,9 +1650,7 @@ function MemgraphNodeCard({ node }: MemgraphNodeCardProps) {
               </div>
             </div>
           </div>
-          <div className="mt-2 text-xs text-text-muted font-mono">
-            ID: {node.id}
-          </div>
+          <div className="mt-2 text-xs text-text-muted font-mono">ID: {node.id}</div>
         </div>
       )}
     </div>
@@ -1563,12 +1669,14 @@ function QdrantMemoryCard({ point, formatDate }: QdrantMemoryCardProps) {
   const createdAt = point.payload?.created_at as string | undefined
 
   return (
-    <div className={cn(
-      'border rounded-lg transition-all duration-200',
-      expanded
-        ? 'border-accent-green bg-accent-green/5'
-        : 'border-border hover:border-border-hover hover:bg-surface/50'
-    )}>
+    <div
+      className={cn(
+        'border rounded-lg transition-all duration-200',
+        expanded
+          ? 'border-accent-green bg-accent-green/5'
+          : 'border-border hover:border-border-hover hover:bg-surface/50'
+      )}
+    >
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full p-4 flex items-start justify-between gap-3 text-left"
@@ -1591,7 +1699,9 @@ function QdrantMemoryCard({ point, formatDate }: QdrantMemoryCardProps) {
               </span>
             )}
           </div>
-          <p className={cn('text-sm text-text-primary leading-relaxed', !expanded && 'line-clamp-2')}>
+          <p
+            className={cn('text-sm text-text-primary leading-relaxed', !expanded && 'line-clamp-2')}
+          >
             {data}
           </p>
         </div>

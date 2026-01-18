@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import cytoscape, { Core, ElementDefinition } from 'cytoscape'
 import { RefreshCw, ZoomIn, ZoomOut, Maximize2, Home, Play } from 'lucide-react'
+import { trpc } from '@/lib/trpc/react'
 
 interface GraphNode {
   id: string
@@ -38,6 +39,9 @@ const getNodeColor = (type: string): string => {
 }
 
 export function GraphViewer() {
+  // tRPC hooks
+  const utils = trpc.useUtils()
+
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
   const [loading, setLoading] = useState(false)
@@ -47,18 +51,21 @@ export function GraphViewer() {
   const [query, setQuery] = useState('')
 
   // Load graph data from backend
-  const loadGraph = useCallback(async (cypherQuery?: string) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await window.electron.invoke('memory:graph', cypherQuery, 100)
-      setGraphData(result)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load graph')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const loadGraph = useCallback(
+    async (cypherQuery?: string) => {
+      setLoading(true)
+      setError(null)
+      try {
+        const result = await utils.memory.graph.fetch({ query: cypherQuery, limit: 100 })
+        setGraphData(result)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load graph')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [utils]
+  )
 
   // Initialize Cytoscape
   useEffect(() => {
@@ -246,16 +253,8 @@ export function GraphViewer() {
           onKeyDown={(e) => e.key === 'Enter' && handleRunQuery()}
           className="input flex-1 font-mono text-sm"
         />
-        <button
-          onClick={handleRunQuery}
-          disabled={loading}
-          className="btn btn-primary"
-        >
-          {loading ? (
-            <RefreshCw className="w-4 h-4 animate-spin" />
-          ) : (
-            <Play className="w-4 h-4" />
-          )}
+        <button onClick={handleRunQuery} disabled={loading} className="btn btn-primary">
+          {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
           Run
         </button>
       </div>
@@ -278,7 +277,9 @@ export function GraphViewer() {
         </div>
         <div className="text-xs text-text-muted">
           {graphData && (
-            <span>{graphData.nodes.length} nodes, {graphData.edges.length} edges</span>
+            <span>
+              {graphData.nodes.length} nodes, {graphData.edges.length} edges
+            </span>
           )}
         </div>
       </div>
@@ -316,15 +317,14 @@ export function GraphViewer() {
 
       {/* Legend */}
       <div className="flex items-center gap-4 mt-2 flex-wrap">
-        {Object.entries(nodeColors).filter(([k]) => k !== 'Unknown').map(([type, color]) => (
-          <div key={type} className="flex items-center gap-1.5 text-xs">
-            <div
-              className="w-3 h-3 rounded-full"
-              style={{ backgroundColor: color }}
-            />
-            <span className="text-text-muted">{type}</span>
-          </div>
-        ))}
+        {Object.entries(nodeColors)
+          .filter(([k]) => k !== 'Unknown')
+          .map(([type, color]) => (
+            <div key={type} className="flex items-center gap-1.5 text-xs">
+              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+              <span className="text-text-muted">{type}</span>
+            </div>
+          ))}
       </div>
 
       {/* Selected node details */}
@@ -334,18 +334,23 @@ export function GraphViewer() {
             <h4 className="font-medium text-text-primary">{selectedNode.label}</h4>
             <span
               className="px-2 py-0.5 text-xs rounded"
-              style={{ backgroundColor: getNodeColor(selectedNode.type) + '20', color: getNodeColor(selectedNode.type) }}
+              style={{
+                backgroundColor: getNodeColor(selectedNode.type) + '20',
+                color: getNodeColor(selectedNode.type),
+              }}
             >
               {selectedNode.type}
             </span>
           </div>
           <div className="text-xs text-text-muted space-y-1">
             <p>ID: {selectedNode.id}</p>
-            {Object.entries(selectedNode.properties).slice(0, 5).map(([key, value]) => (
-              <p key={key} className="truncate">
-                <span className="text-text-secondary">{key}:</span> {String(value).slice(0, 100)}
-              </p>
-            ))}
+            {Object.entries(selectedNode.properties)
+              .slice(0, 5)
+              .map(([key, value]) => (
+                <p key={key} className="truncate">
+                  <span className="text-text-secondary">{key}:</span> {String(value).slice(0, 100)}
+                </p>
+              ))}
           </div>
         </div>
       )}

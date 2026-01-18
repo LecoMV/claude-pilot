@@ -17,6 +17,7 @@ import {
   Activity,
   Zap,
 } from 'lucide-react'
+import { trpc } from '@/lib/trpc/react'
 
 interface CommandAction {
   id: string
@@ -35,6 +36,11 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPaletteProps) {
+  // tRPC hooks
+  const utils = trpc.useUtils()
+  const mcpReloadMutation = trpc.mcp.reload.useMutation()
+  const terminalCreateMutation = trpc.terminal.create.useMutation()
+
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -148,7 +154,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
         icon: <RefreshCw className="w-4 h-4" />,
         shortcut: 'R',
         action: async () => {
-          await window.electron.invoke('system:status')
+          await utils.system.status.fetch()
           onClose()
         },
       },
@@ -159,7 +165,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
         category: 'mcp',
         icon: <Plug className="w-4 h-4" />,
         action: async () => {
-          await window.electron.invoke('mcp:reload')
+          await mcpReloadMutation.mutateAsync()
           onClose()
         },
       },
@@ -170,7 +176,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
         category: 'action',
         icon: <Terminal className="w-4 h-4" />,
         action: async () => {
-          await window.electron.invoke('terminal:create')
+          await terminalCreateMutation.mutateAsync({})
           onNavigate('terminal')
         },
       },
@@ -201,7 +207,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
         action: () => onNavigate('chat'),
       },
     ],
-    [onNavigate, onClose]
+    [onNavigate, onClose, utils, mcpReloadMutation, terminalCreateMutation]
   )
 
   // Filter commands based on query

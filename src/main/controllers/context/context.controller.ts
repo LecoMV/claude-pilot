@@ -32,6 +32,7 @@ import type {
   CompactionSettings,
   SessionSummary,
   FileAccessPattern,
+  FilePrediction,
   PredictiveContextStats,
   PredictiveContextConfig,
 } from '@shared/types'
@@ -62,6 +63,11 @@ const PredictiveContextConfigSchema = z.object({
   trackHistory: z.boolean().optional(),
   preloadEnabled: z.boolean().optional(),
   cacheSize: z.number().min(10).max(10000).optional(),
+})
+
+const PredictSchema = z.object({
+  prompt: z.string().min(1, 'Prompt cannot be empty'),
+  projectPath: z.string().min(1, 'Project path cannot be empty'),
 })
 
 // ============================================================================
@@ -350,5 +356,12 @@ export const contextRouter = router({
    */
   clearCache: auditedProcedure.mutation((): boolean => {
     return predictiveContextService.clearCache()
+  }),
+
+  /**
+   * Predict files that might be needed based on a prompt
+   */
+  predict: publicProcedure.input(PredictSchema).query(({ input }): Promise<FilePrediction[]> => {
+    return predictiveContextService.predict(input.prompt, input.projectPath)
   }),
 })

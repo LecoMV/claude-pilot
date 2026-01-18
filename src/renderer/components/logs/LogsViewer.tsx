@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Terminal,
   Search,
@@ -19,6 +19,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useLogsStore, type LogSource, type LogLevel, type LogEntry } from '@/stores/logs'
 
 const sourceColors: Record<LogSource | 'all', string> = {
@@ -70,33 +71,34 @@ export function LogsViewer() {
     setAutoScroll,
   } = useLogsStore()
 
-  const [loading, setLoading] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Load initial logs
-  const loadLogs = useCallback(async () => {
-    try {
-      setLoading(true)
-      const recentLogs = await window.electron.invoke('logs:recent', 200)
-      addLogs(recentLogs)
-    } catch (error) {
-      console.error('Failed to load logs:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [addLogs])
+  // tRPC query for initial logs
+  const recentLogsQuery = trpc.logs.recent.useQuery(
+    { limit: 200 },
+    { refetchInterval: false, enabled: true }
+  )
+  const loading = recentLogsQuery.isLoading
 
+  // Sync logs to store when data arrives
   useEffect(() => {
-    loadLogs()
+    if (recentLogsQuery.data) {
+      addLogs(recentLogsQuery.data)
+    }
+  }, [recentLogsQuery.data, addLogs])
 
-    // Subscribe to real-time logs
+  // Subscribe to real-time logs (keep legacy IPC for streaming)
+  useEffect(() => {
     const unsubscribe = window.electron.on('logs:entry', (log: LogEntry) => {
       useLogsStore.getState().addLog(log)
     })
-
     return () => unsubscribe()
-  }, [loadLogs])
+  }, [])
+
+  const loadLogs = () => {
+    recentLogsQuery.refetch()
+  }
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -117,7 +119,10 @@ export function LogsViewer() {
 
   const exportLogs = () => {
     const content = filteredLogs
-      .map((log) => `[${new Date(log.timestamp).toISOString()}] [${log.source}] [${log.level}] ${log.message}`)
+      .map(
+        (log) =>
+          `[${new Date(log.timestamp).toISOString()}] [${log.source}] [${log.level}] ${log.message}`
+      )
       .join('\n')
 
     const blob = new Blob([content], { type: 'text/plain' })
@@ -139,9 +144,24 @@ export function LogsViewer() {
     <div className="space-y-4 animate-in">
       {/* Header Stats */}
       <div className="grid grid-cols-5 gap-4">
-        <StatCard icon={Terminal} value={logCounts.total} label="Total Logs" color="text-text-primary" />
-        <StatCard icon={AlertCircle} value={logCounts.error} label="Errors" color="text-accent-red" />
-        <StatCard icon={AlertTriangle} value={logCounts.warn} label="Warnings" color="text-accent-yellow" />
+        <StatCard
+          icon={Terminal}
+          value={logCounts.total}
+          label="Total Logs"
+          color="text-text-primary"
+        />
+        <StatCard
+          icon={AlertCircle}
+          value={logCounts.error}
+          label="Errors"
+          color="text-accent-red"
+        />
+        <StatCard
+          icon={AlertTriangle}
+          value={logCounts.warn}
+          label="Warnings"
+          color="text-accent-yellow"
+        />
         <StatCard
           icon={paused ? Pause : Play}
           value={paused ? 'Paused' : 'Live'}
@@ -227,7 +247,11 @@ export function LogsViewer() {
           <Download className="w-4 h-4" />
         </button>
 
-        <button onClick={clearLogs} className="btn btn-secondary text-accent-red" title="Clear logs">
+        <button
+          onClick={clearLogs}
+          className="btn btn-secondary text-accent-red"
+          title="Clear logs"
+        >
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
@@ -283,9 +307,7 @@ function LogLine({ log }: { log: LogEntry }) {
         {log.source}
       </span>
       <span className={cn('flex-1 break-all', levelColors[log.level])}>{log.message}</span>
-      {log.metadata && (
-        <span className="text-text-muted text-xs">{expanded ? '▼' : '▶'}</span>
-      )}
+      {log.metadata && <span className="text-text-muted text-xs">{expanded ? '▼' : '▶'}</span>}
       {expanded && log.metadata && (
         <div className="w-full mt-1 p-2 bg-surface rounded text-xs">
           <pre className="whitespace-pre-wrap text-text-muted">

@@ -18,6 +18,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import type {
   FilePrediction,
   FileAccessPattern,
@@ -57,14 +58,21 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
   const [showSettings, setShowSettings] = useState(false)
   const [activeTab, setActiveTab] = useState<'predict' | 'patterns' | 'stats'>('predict')
 
+  // tRPC utils for fetching in callbacks
+  const utils = trpc.useUtils()
+
+  // tRPC mutations
+  const setConfigMutation = trpc.context.setConfig.useMutation()
+  const clearCacheMutation = trpc.context.clearCache.useMutation()
+
   // Load data
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
       const [statsData, configData, patternsData] = await Promise.all([
-        window.electron.invoke('context:stats'),
-        window.electron.invoke('context:getConfig'),
-        projectPath ? window.electron.invoke('context:patterns', projectPath) : Promise.resolve([]),
+        utils.context.stats.fetch(),
+        utils.context.getConfig.fetch(),
+        projectPath ? utils.context.patterns.fetch({ projectPath }) : Promise.resolve([]),
       ])
       setStats(statsData)
       setConfig(configData)
@@ -74,7 +82,7 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
     } finally {
       setLoading(false)
     }
-  }, [projectPath])
+  }, [projectPath, utils])
 
   useEffect(() => {
     loadData()
@@ -86,34 +94,37 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
 
     setPredicting(true)
     try {
-      const results = await window.electron.invoke('context:predict', testPrompt, projectPath)
+      const results = await utils.context.predict.fetch({ prompt: testPrompt, projectPath })
       setPredictions(results)
     } catch (error) {
       console.error('Prediction failed:', error)
     } finally {
       setPredicting(false)
     }
-  }, [testPrompt, projectPath])
+  }, [testPrompt, projectPath, utils])
 
   // Save config
-  const saveConfig = useCallback(async (newConfig: PredictiveContextConfig) => {
-    try {
-      await window.electron.invoke('context:setConfig', newConfig)
-      setConfig(newConfig)
-    } catch (error) {
-      console.error('Failed to save config:', error)
-    }
-  }, [])
+  const saveConfig = useCallback(
+    async (newConfig: PredictiveContextConfig) => {
+      try {
+        await setConfigMutation.mutateAsync(newConfig)
+        setConfig(newConfig)
+      } catch (error) {
+        console.error('Failed to save config:', error)
+      }
+    },
+    [setConfigMutation]
+  )
 
   // Clear cache
   const handleClearCache = useCallback(async () => {
     try {
-      await window.electron.invoke('context:clearCache')
+      await clearCacheMutation.mutateAsync()
       loadData()
     } catch (error) {
       console.error('Failed to clear cache:', error)
     }
-  }, [loadData])
+  }, [loadData, clearCacheMutation])
 
   if (loading) {
     return (
@@ -128,14 +139,10 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className={cn(
-            'p-2 rounded-lg',
-            config?.enabled ? 'bg-green-500/20' : 'bg-surface'
-          )}>
-            <Brain className={cn(
-              'w-5 h-5',
-              config?.enabled ? 'text-green-400' : 'text-text-muted'
-            )} />
+          <div className={cn('p-2 rounded-lg', config?.enabled ? 'bg-green-500/20' : 'bg-surface')}>
+            <Brain
+              className={cn('w-5 h-5', config?.enabled ? 'text-green-400' : 'text-text-muted')}
+            />
           </div>
           <div>
             <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
@@ -223,7 +230,9 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
               <input
                 type="number"
                 value={config.maxPredictions}
-                onChange={(e) => saveConfig({ ...config, maxPredictions: parseInt(e.target.value) || 10 })}
+                onChange={(e) =>
+                  saveConfig({ ...config, maxPredictions: parseInt(e.target.value) || 10 })
+                }
                 className="w-full px-3 py-1.5 rounded-lg bg-background border border-border text-sm text-text-primary"
                 min={1}
                 max={50}
@@ -235,7 +244,9 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
               <input
                 type="number"
                 value={config.minConfidence}
-                onChange={(e) => saveConfig({ ...config, minConfidence: parseFloat(e.target.value) || 0.3 })}
+                onChange={(e) =>
+                  saveConfig({ ...config, minConfidence: parseFloat(e.target.value) || 0.3 })
+                }
                 className="w-full px-3 py-1.5 rounded-lg bg-background border border-border text-sm text-text-primary"
                 min={0}
                 max={1}
@@ -248,7 +259,9 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
               <input
                 type="number"
                 value={config.cacheSize}
-                onChange={(e) => saveConfig({ ...config, cacheSize: parseInt(e.target.value) || 1000 })}
+                onChange={(e) =>
+                  saveConfig({ ...config, cacheSize: parseInt(e.target.value) || 1000 })
+                }
                 className="w-full px-3 py-1.5 rounded-lg bg-background border border-border text-sm text-text-primary"
                 min={100}
                 max={10000}
@@ -276,7 +289,9 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
               <Target className="w-4 h-4 text-accent-purple" />
               <span className="text-xs text-text-muted">Total Predictions</span>
             </div>
-            <span className="text-xl font-semibold text-text-primary">{stats.totalPredictions}</span>
+            <span className="text-xl font-semibold text-text-primary">
+              {stats.totalPredictions}
+            </span>
           </div>
 
           <div className="p-3 bg-surface rounded-lg border border-border">
@@ -367,11 +382,7 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
                   : 'bg-accent-purple text-white hover:bg-accent-purple/80'
               )}
             >
-              {predicting ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                'Predict'
-              )}
+              {predicting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Predict'}
             </button>
           </div>
 
@@ -384,9 +395,7 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
           {/* Prediction results */}
           {predictions.length > 0 && (
             <div className="space-y-2">
-              <p className="text-sm text-text-muted">
-                {predictions.length} predicted files
-              </p>
+              <p className="text-sm text-text-muted">{predictions.length} predicted files</p>
 
               {predictions.map((prediction, index) => (
                 <div
@@ -399,18 +408,22 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
                       <span className="font-mono text-sm text-text-primary">{prediction.path}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={cn(
-                        'px-2 py-0.5 rounded-md text-xs border',
-                        sourceColors[prediction.source]
-                      )}>
+                      <span
+                        className={cn(
+                          'px-2 py-0.5 rounded-md text-xs border',
+                          sourceColors[prediction.source]
+                        )}
+                      >
                         {prediction.source}
                       </span>
                       <div className="flex items-center gap-1">
                         <BarChart3 className="w-3 h-3 text-accent-purple" />
-                        <span className={cn(
-                          'text-sm font-medium',
-                          getConfidenceColor(prediction.confidence)
-                        )}>
+                        <span
+                          className={cn(
+                            'text-sm font-medium',
+                            getConfidenceColor(prediction.confidence)
+                          )}
+                        >
                           {(prediction.confidence * 100).toFixed(0)}%
                         </span>
                       </div>
@@ -451,9 +464,7 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
                       <Eye className="w-3 h-3" />
                       {pattern.accessCount} accesses
                     </span>
-                    <span>
-                      {new Date(pattern.lastAccessed).toLocaleDateString()}
-                    </span>
+                    <span>{new Date(pattern.lastAccessed).toLocaleDateString()}</span>
                   </div>
                 </div>
 
@@ -478,7 +489,8 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
                 {pattern.cooccurringFiles.length > 0 && (
                   <div className="text-xs text-text-muted">
                     Often with: {pattern.cooccurringFiles.slice(0, 3).join(', ')}
-                    {pattern.cooccurringFiles.length > 3 && ` +${pattern.cooccurringFiles.length - 3} more`}
+                    {pattern.cooccurringFiles.length > 3 &&
+                      ` +${pattern.cooccurringFiles.length - 3} more`}
                   </div>
                 )}
               </div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Box,
   Download,
@@ -22,6 +22,7 @@ import {
   Server,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useOllamaStore, type OllamaModel } from '@/stores/ollama'
 
 const POPULAR_MODELS = [
@@ -46,16 +47,11 @@ const EMBEDDING_MODELS = [
 
 export function OllamaManager() {
   const {
-    models,
-    runningModels,
-    loading,
     pulling,
     pullProgress,
     selectedModel,
-    ollamaOnline,
     setModels,
     setRunningModels,
-    setLoading,
     setPulling,
     setPullProgress,
     setSelectedModel,
@@ -67,32 +63,52 @@ export function OllamaManager() {
   const [showPullModal, setShowPullModal] = useState(false)
   const [activeTab, setActiveTab] = useState<'models' | 'system'>('models')
 
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true)
-      const [modelList, running, status] = await Promise.all([
-        window.electron.invoke('ollama:list'),
-        window.electron.invoke('ollama:running'),
-        window.electron.invoke('ollama:status'),
-      ])
-      setModels(modelList)
-      setRunningModels(running)
-      setOllamaOnline(status.online)
-    } catch (error) {
-      console.error('Failed to load Ollama data:', error)
-      setOllamaOnline(false)
-    } finally {
-      setLoading(false)
-    }
-  }, [setModels, setRunningModels, setLoading, setOllamaOnline])
+  // tRPC queries
+  const listQuery = trpc.ollama.list.useQuery(undefined, {
+    refetchInterval: 15000, // Refresh every 15s
+  })
+  const runningQuery = trpc.ollama.running.useQuery(undefined, {
+    refetchInterval: 15000,
+  })
+  const statusQuery = trpc.ollama.status.useQuery(undefined, {
+    refetchInterval: 15000,
+  })
+
+  // tRPC mutations
+  const pullMutation = trpc.ollama.pull.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+      runningQuery.refetch()
+    },
+    onSettled: () => {
+      setPulling(null)
+      setPullProgress(null)
+    },
+  })
+  const deleteMutation = trpc.ollama.delete.useMutation({
+    onSuccess: () => listQuery.refetch(),
+  })
+  const runMutation = trpc.ollama.run.useMutation({
+    onSuccess: () => runningQuery.refetch(),
+  })
+  const stopMutation = trpc.ollama.stop.useMutation({
+    onSuccess: () => runningQuery.refetch(),
+  })
+
+  // Sync to store
+  useEffect(() => {
+    if (listQuery.data) setModels(listQuery.data)
+  }, [listQuery.data, setModels])
 
   useEffect(() => {
-    loadData()
-    const interval = setInterval(loadData, 15000) // Refresh every 15s
-    return () => clearInterval(interval)
-  }, [loadData])
+    if (runningQuery.data) setRunningModels(runningQuery.data)
+  }, [runningQuery.data, setRunningModels])
 
-  // Listen for pull progress updates
+  useEffect(() => {
+    if (statusQuery.data) setOllamaOnline(statusQuery.data.online)
+  }, [statusQuery.data, setOllamaOnline])
+
+  // Listen for pull progress updates (still uses legacy IPC for streaming)
   useEffect(() => {
     const unsubscribe = window.electron.on('ollama:pullProgress', (progress: unknown) => {
       setPullProgress(progress as typeof pullProgress)
@@ -100,55 +116,39 @@ export function OllamaManager() {
     return () => unsubscribe()
   }, [setPullProgress])
 
-  const handlePull = async (modelName: string) => {
+  const models = listQuery.data ?? []
+  const runningModels = runningQuery.data ?? []
+  const ollamaOnline = statusQuery.data?.online ?? false
+  const loading = listQuery.isLoading || runningQuery.isLoading || statusQuery.isLoading
+
+  const handleRefresh = () => {
+    listQuery.refetch()
+    runningQuery.refetch()
+    statusQuery.refetch()
+  }
+
+  const handlePull = (modelName: string) => {
     setPulling(modelName)
     setPullProgress({ status: 'Starting...', percent: 0 })
     setShowPullModal(false)
-
-    try {
-      await window.electron.invoke('ollama:pull', modelName)
-      loadData()
-    } catch (error) {
-      console.error('Failed to pull model:', error)
-    } finally {
-      setPulling(null)
-      setPullProgress(null)
-    }
+    pullMutation.mutate({ model: modelName })
   }
 
-  const handleDelete = async (modelName: string) => {
+  const handleDelete = (modelName: string) => {
     // eslint-disable-next-line no-alert
     if (!confirm(`Delete model ${modelName}?`)) return
-
-    try {
-      await window.electron.invoke('ollama:delete', modelName)
-      loadData()
-    } catch (error) {
-      console.error('Failed to delete model:', error)
-    }
+    deleteMutation.mutate({ model: modelName })
   }
 
-  const handleRun = async (modelName: string) => {
-    try {
-      await window.electron.invoke('ollama:run', modelName)
-      loadData()
-    } catch (error) {
-      console.error('Failed to run model:', error)
-    }
+  const handleRun = (modelName: string) => {
+    runMutation.mutate({ model: modelName })
   }
 
-  const handleStop = async (modelName: string) => {
-    try {
-      await window.electron.invoke('ollama:stop', modelName)
-      loadData()
-    } catch (error) {
-      console.error('Failed to stop model:', error)
-    }
+  const handleStop = (modelName: string) => {
+    stopMutation.mutate({ model: modelName })
   }
 
-  const filteredModels = models.filter(
-    (m) => m.name.toLowerCase().includes(filter.toLowerCase())
-  )
+  const filteredModels = models.filter((m) => m.name.toLowerCase().includes(filter.toLowerCase()))
 
   const totalSize = models.reduce((sum, m) => sum + m.size, 0)
 
@@ -164,7 +164,7 @@ export function OllamaManager() {
         <XCircle className="w-16 h-16 text-accent-red mb-4" />
         <h2 className="text-xl font-semibold text-text-primary mb-2">Ollama Not Running</h2>
         <p className="text-text-muted mb-4">Start the Ollama service to manage models</p>
-        <button onClick={loadData} className="btn btn-primary">
+        <button onClick={handleRefresh} className="btn btn-primary">
           <RefreshCw className="w-4 h-4 mr-2" />
           Retry Connection
         </button>
@@ -194,7 +194,7 @@ export function OllamaManager() {
           label="System LLM"
         />
         <div className="flex-1" />
-        <button onClick={loadData} className="btn btn-secondary">
+        <button onClick={handleRefresh} className="btn btn-secondary">
           <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
           Refresh
         </button>
@@ -210,12 +210,7 @@ export function OllamaManager() {
               label="Ollama Status"
               color={ollamaOnline ? 'text-accent-green' : 'text-accent-red'}
             />
-            <StatCard
-              icon={Box}
-              value={models.length}
-              label="Models"
-              color="text-accent-blue"
-            />
+            <StatCard icon={Box} value={models.length} label="Models" color="text-accent-blue" />
             <StatCard
               icon={Play}
               value={runningModels.length}
@@ -230,164 +225,163 @@ export function OllamaManager() {
             />
           </div>
 
-      {/* Pull progress */}
-      {pulling && pullProgress && (
-        <div className="card p-4 bg-accent-blue/10 border-accent-blue">
-          <div className="flex items-center gap-4">
-            <Loader className="w-5 h-5 animate-spin text-accent-blue" />
-            <div className="flex-1">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-text-primary font-medium">Pulling {pulling}</span>
-                <span className="text-text-muted">{pullProgress.status}</span>
-              </div>
-              <div className="h-2 bg-surface rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-accent-blue transition-all duration-300"
-                  style={{ width: `${pullProgress.percent}%` }}
-                />
+          {/* Pull progress */}
+          {pulling && pullProgress && (
+            <div className="card p-4 bg-accent-blue/10 border-accent-blue">
+              <div className="flex items-center gap-4">
+                <Loader className="w-5 h-5 animate-spin text-accent-blue" />
+                <div className="flex-1">
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-text-primary font-medium">Pulling {pulling}</span>
+                    <span className="text-text-muted">{pullProgress.status}</span>
+                  </div>
+                  <div className="h-2 bg-surface rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-accent-blue transition-all duration-300"
+                      style={{ width: `${pullProgress.percent}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="text-sm text-text-muted">{pullProgress.percent.toFixed(0)}%</span>
               </div>
             </div>
-            <span className="text-sm text-text-muted">{pullProgress.percent.toFixed(0)}%</span>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* Controls */}
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-          <input
-            type="text"
-            placeholder="Search models..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="input pl-10 w-full"
-          />
-        </div>
+          {/* Controls */}
+          <div className="flex items-center gap-4">
+            <div className="relative flex-1 max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+              <input
+                type="text"
+                placeholder="Search models..."
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                className="input pl-10 w-full"
+              />
+            </div>
 
-        <div className="flex-1" />
+            <div className="flex-1" />
 
-        <button
-          onClick={() => setShowPullModal(true)}
-          className="btn btn-primary"
-          disabled={!!pulling}
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Pull Model
-        </button>
-
-        <button onClick={loadData} className="btn btn-secondary">
-          <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
-        </button>
-      </div>
-
-      {/* Models List */}
-      {loading && models.length === 0 ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-2 border-accent-purple border-t-transparent rounded-full" />
-        </div>
-      ) : filteredModels.length === 0 ? (
-        <div className="card p-8 text-center">
-          <Box className="w-12 h-12 mx-auto text-text-muted mb-4" />
-          <p className="text-text-muted">
-            {models.length === 0 ? 'No models installed' : 'No models match your search'}
-          </p>
-          {models.length === 0 && (
             <button
               onClick={() => setShowPullModal(true)}
-              className="btn btn-primary mt-4"
+              className="btn btn-primary"
+              disabled={!!pulling}
             >
-              <Download className="w-4 h-4 mr-2" />
-              Pull Your First Model
+              <Plus className="w-4 h-4 mr-2" />
+              Pull Model
             </button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filteredModels.map((model) => (
-            <ModelCard
-              key={model.name}
-              model={model}
-              isRunning={runningModels.some((r) => r.name === model.name)}
-              isSelected={selectedModel?.name === model.name}
-              onSelect={() => setSelectedModel(selectedModel?.name === model.name ? null : model)}
-              onRun={() => handleRun(model.name)}
-              onStop={() => handleStop(model.name)}
-              onDelete={() => handleDelete(model.name)}
-              formatSize={formatSize}
-            />
-          ))}
-        </div>
-      )}
 
-      {/* Pull Modal */}
-      {showPullModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="card p-6 w-full max-w-lg max-h-[80vh] overflow-auto">
-            <h2 className="text-lg font-semibold text-text-primary mb-4">Pull Model</h2>
-
-            {/* Custom model input */}
-            <div className="mb-6">
-              <label className="text-sm text-text-muted mb-2 block">Custom Model</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="e.g., llama3.2:latest"
-                  value={customModel}
-                  onChange={(e) => setCustomModel(e.target.value)}
-                  className="input flex-1"
-                />
-                <button
-                  onClick={() => customModel && handlePull(customModel)}
-                  disabled={!customModel}
-                  className="btn btn-primary"
-                >
-                  <Download className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Popular models */}
-            <div>
-              <label className="text-sm text-text-muted mb-2 block">Popular Models</label>
-              <div className="space-y-2">
-                {POPULAR_MODELS.map((m) => (
-                  <button
-                    key={m.name}
-                    onClick={() => handlePull(m.name)}
-                    disabled={models.some((installed) => installed.name === m.name)}
-                    className={cn(
-                      'w-full flex items-center justify-between p-3 rounded-lg text-left transition-colors',
-                      models.some((installed) => installed.name === m.name)
-                        ? 'bg-surface text-text-muted cursor-not-allowed'
-                        : 'bg-surface hover:bg-surface-hover text-text-primary'
-                    )}
-                  >
-                    <div>
-                      <p className="font-medium">{m.name}</p>
-                      <p className="text-sm text-text-muted">{m.desc}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-text-muted">{m.size}</span>
-                      {models.some((installed) => installed.name === m.name) ? (
-                        <CheckCircle className="w-4 h-4 text-accent-green" />
-                      ) : (
-                        <Download className="w-4 h-4" />
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex justify-end mt-6">
-              <button onClick={() => setShowPullModal(false)} className="btn btn-secondary">
-                Cancel
-              </button>
-            </div>
+            <button onClick={handleRefresh} className="btn btn-secondary">
+              <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+            </button>
           </div>
-        </div>
-      )}
+
+          {/* Models List */}
+          {loading && models.length === 0 ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="animate-spin w-8 h-8 border-2 border-accent-purple border-t-transparent rounded-full" />
+            </div>
+          ) : filteredModels.length === 0 ? (
+            <div className="card p-8 text-center">
+              <Box className="w-12 h-12 mx-auto text-text-muted mb-4" />
+              <p className="text-text-muted">
+                {models.length === 0 ? 'No models installed' : 'No models match your search'}
+              </p>
+              {models.length === 0 && (
+                <button onClick={() => setShowPullModal(true)} className="btn btn-primary mt-4">
+                  <Download className="w-4 h-4 mr-2" />
+                  Pull Your First Model
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filteredModels.map((model) => (
+                <ModelCard
+                  key={model.name}
+                  model={model}
+                  isRunning={runningModels.some((r) => r.name === model.name)}
+                  isSelected={selectedModel?.name === model.name}
+                  onSelect={() =>
+                    setSelectedModel(selectedModel?.name === model.name ? null : model)
+                  }
+                  onRun={() => handleRun(model.name)}
+                  onStop={() => handleStop(model.name)}
+                  onDelete={() => handleDelete(model.name)}
+                  formatSize={formatSize}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Pull Modal */}
+          {showPullModal && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="card p-6 w-full max-w-lg max-h-[80vh] overflow-auto">
+                <h2 className="text-lg font-semibold text-text-primary mb-4">Pull Model</h2>
+
+                {/* Custom model input */}
+                <div className="mb-6">
+                  <label className="text-sm text-text-muted mb-2 block">Custom Model</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="e.g., llama3.2:latest"
+                      value={customModel}
+                      onChange={(e) => setCustomModel(e.target.value)}
+                      className="input flex-1"
+                    />
+                    <button
+                      onClick={() => customModel && handlePull(customModel)}
+                      disabled={!customModel}
+                      className="btn btn-primary"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Popular models */}
+                <div>
+                  <label className="text-sm text-text-muted mb-2 block">Popular Models</label>
+                  <div className="space-y-2">
+                    {POPULAR_MODELS.map((m) => (
+                      <button
+                        key={m.name}
+                        onClick={() => handlePull(m.name)}
+                        disabled={models.some((installed) => installed.name === m.name)}
+                        className={cn(
+                          'w-full flex items-center justify-between p-3 rounded-lg text-left transition-colors',
+                          models.some((installed) => installed.name === m.name)
+                            ? 'bg-surface text-text-muted cursor-not-allowed'
+                            : 'bg-surface hover:bg-surface-hover text-text-primary'
+                        )}
+                      >
+                        <div>
+                          <p className="font-medium">{m.name}</p>
+                          <p className="text-sm text-text-muted">{m.desc}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-text-muted">{m.size}</span>
+                          {models.some((installed) => installed.name === m.name) ? (
+                            <CheckCircle className="w-4 h-4 text-accent-green" />
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end mt-6">
+                  <button onClick={() => setShowPullModal(false)} className="btn btn-secondary">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -482,9 +476,7 @@ function ModelCard({
                   {model.details.family}
                 </span>
               )}
-              {model.details?.parameterSize && (
-                <span>{model.details.parameterSize}</span>
-              )}
+              {model.details?.parameterSize && <span>{model.details.parameterSize}</span>}
               <span className="flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 {new Date(model.modifiedAt).toLocaleDateString()}
@@ -600,7 +592,13 @@ interface SystemLLMPanelProps {
   formatSize: (bytes: number) => string
 }
 
-function SystemLLMPanel({ models, installedEmbeddings, onPull, pulling, formatSize }: SystemLLMPanelProps) {
+function SystemLLMPanel({
+  models,
+  installedEmbeddings,
+  onPull,
+  pulling,
+  formatSize,
+}: SystemLLMPanelProps) {
   return (
     <div className="space-y-6">
       {/* System Integration Status */}
@@ -780,11 +778,11 @@ function SystemLLMPanel({ models, installedEmbeddings, onPull, pulling, formatSi
           <div className="text-sm text-text-secondary">
             <p className="font-medium text-text-primary mb-1">About System LLM</p>
             <p>
-              System LLM models power local memory and embedding operations.
-              The <code className="text-accent-purple">nomic-embed-text</code> model is recommended
-              for balanced performance with mem0 and pgvector integrations.
-              Smaller models like <code className="text-accent-purple">all-minilm</code> are faster
-              but may have reduced semantic understanding.
+              System LLM models power local memory and embedding operations. The{' '}
+              <code className="text-accent-purple">nomic-embed-text</code> model is recommended for
+              balanced performance with mem0 and pgvector integrations. Smaller models like{' '}
+              <code className="text-accent-purple">all-minilm</code> are faster but may have reduced
+              semantic understanding.
             </p>
           </div>
         </div>

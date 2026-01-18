@@ -3,7 +3,7 @@
  * In-app interface for managing beads (issues/tasks)
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import {
   ListTodo,
   Plus,
@@ -25,7 +25,14 @@ import {
   Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Bead, BeadStats, BeadStatus, BeadType, BeadPriority, BeadListFilter, BeadCreateParams } from '../../../shared/types'
+import { trpc } from '@/lib/trpc/react'
+import type {
+  Bead,
+  BeadStatus,
+  BeadType,
+  BeadPriority,
+  BeadCreateParams,
+} from '../../../shared/types'
 
 type FilterStatus = BeadStatus | 'all'
 type FilterPriority = BeadPriority | 'all'
@@ -53,88 +60,135 @@ const STATUS_CONFIG: Record<BeadStatus, { icon: typeof Circle; color: string; la
 }
 
 export function BeadsPanel() {
-  const [beads, setBeads] = useState<Bead[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<FilterStatus>('all')
   const [priorityFilter, setPriorityFilter] = useState<FilterPriority>('all')
   const [typeFilter, setTypeFilter] = useState<FilterType>('all')
   const [showFilters, setShowFilters] = useState(false)
-  const [stats, setStats] = useState<BeadStats>({
+  const [selectedBead, setSelectedBead] = useState<Bead | null>(null)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  // Track which view we're showing (filtered list, ready, or blocked)
+  const [viewMode, setViewMode] = useState<'list' | 'ready' | 'blocked'>('list')
+
+  // Build filter object for query
+  const filter = {
+    status: statusFilter !== 'all' ? statusFilter : undefined,
+    priority: priorityFilter !== 'all' ? priorityFilter : undefined,
+    type: typeFilter !== 'all' ? typeFilter : undefined,
+    search: searchQuery || undefined,
+  }
+
+  // tRPC queries
+  const listQuery = trpc.beads.list.useQuery(
+    { filter },
+    { refetchInterval: 30000, enabled: viewMode === 'list' }
+  )
+  const statsQuery = trpc.beads.stats.useQuery(undefined, { refetchInterval: 30000 })
+  const readyQuery = trpc.beads.ready.useQuery(undefined, {
+    refetchInterval: 30000,
+    enabled: viewMode === 'ready',
+  })
+  const blockedQuery = trpc.beads.blocked.useQuery(undefined, {
+    refetchInterval: 30000,
+    enabled: viewMode === 'blocked',
+  })
+
+  // tRPC mutations
+  const closeMutation = trpc.beads.close.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+      statsQuery.refetch()
+      readyQuery.refetch()
+      blockedQuery.refetch()
+    },
+  })
+  const updateMutation = trpc.beads.update.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+      statsQuery.refetch()
+      readyQuery.refetch()
+      blockedQuery.refetch()
+    },
+  })
+  const createMutation = trpc.beads.create.useMutation({
+    onSuccess: () => {
+      listQuery.refetch()
+      statsQuery.refetch()
+    },
+  })
+
+  // Derive current beads based on view mode
+  const beads =
+    viewMode === 'ready'
+      ? (readyQuery.data ?? [])
+      : viewMode === 'blocked'
+        ? (blockedQuery.data ?? [])
+        : (listQuery.data ?? [])
+
+  const stats = statsQuery.data ?? {
     total: 0,
     open: 0,
     inProgress: 0,
     closed: 0,
     blocked: 0,
     ready: 0,
-  })
-  const [selectedBead, setSelectedBead] = useState<Bead | null>(null)
-  const [showCreateModal, setShowCreateModal] = useState(false)
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  }
 
-  // Load beads using IPC
-  const loadBeads = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  const loading =
+    viewMode === 'ready'
+      ? readyQuery.isLoading
+      : viewMode === 'blocked'
+        ? blockedQuery.isLoading
+        : listQuery.isLoading
 
-    try {
-      // Build filter
-      const filter: BeadListFilter = {}
-      if (statusFilter !== 'all') filter.status = statusFilter
-      if (priorityFilter !== 'all') filter.priority = priorityFilter
-      if (typeFilter !== 'all') filter.type = typeFilter
-      if (searchQuery) filter.search = searchQuery
+  const error =
+    viewMode === 'ready'
+      ? readyQuery.error?.message
+      : viewMode === 'blocked'
+        ? blockedQuery.error?.message
+        : listQuery.error?.message
 
-      // Fetch beads and stats in parallel
-      const [beadsResult, statsResult] = await Promise.all([
-        window.electron.invoke('beads:list', filter),
-        window.electron.invoke('beads:stats'),
-      ])
-
-      setBeads(beadsResult)
-      setStats(statsResult)
-    } catch (err) {
-      setError('Failed to load beads. Ensure beads is initialized in this project.')
-      console.error('Beads load error:', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [statusFilter, priorityFilter, typeFilter, searchQuery])
-
-  useEffect(() => {
-    loadBeads()
-  }, [loadBeads])
+  const handleRefresh = () => {
+    listQuery.refetch()
+    statsQuery.refetch()
+    readyQuery.refetch()
+    blockedQuery.refetch()
+  }
 
   // Update bead status
-  const handleStatusChange = async (beadId: string, newStatus: BeadStatus) => {
+  const handleStatusChange = (beadId: string, newStatus: BeadStatus) => {
     setActionLoading(beadId)
-    try {
-      if (newStatus === 'closed') {
-        await window.electron.invoke('beads:close', beadId)
-      } else {
-        await window.electron.invoke('beads:update', beadId, { status: newStatus })
-      }
-      await loadBeads()
-    } catch (err) {
-      console.error('Failed to update bead status:', err)
-    } finally {
-      setActionLoading(null)
+    if (newStatus === 'closed') {
+      closeMutation.mutate(
+        { id: beadId },
+        {
+          onSettled: () => setActionLoading(null),
+          onError: (err) => console.error('Failed to close bead:', err),
+        }
+      )
+    } else {
+      updateMutation.mutate(
+        { id: beadId, params: { status: newStatus } },
+        {
+          onSettled: () => setActionLoading(null),
+          onError: (err) => console.error('Failed to update bead status:', err),
+        }
+      )
     }
   }
 
   // Create new bead
-  const handleCreate = async (params: BeadCreateParams) => {
+  const handleCreate = (params: BeadCreateParams) => {
     setActionLoading('create')
-    try {
-      await window.electron.invoke('beads:create', params)
-      setShowCreateModal(false)
-      await loadBeads()
-    } catch (err) {
-      console.error('Failed to create bead:', err)
-    } finally {
-      setActionLoading(null)
-    }
+    createMutation.mutate(
+      { params },
+      {
+        onSuccess: () => setShowCreateModal(false),
+        onSettled: () => setActionLoading(null),
+        onError: (err) => console.error('Failed to create bead:', err),
+      }
+    )
   }
 
   if (loading && beads.length === 0) {
@@ -165,7 +219,7 @@ export function BeadsPanel() {
             New
           </button>
           <button
-            onClick={loadBeads}
+            onClick={handleRefresh}
             className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded-lg transition-colors"
             title="Refresh"
           >
@@ -187,28 +241,37 @@ export function BeadsPanel() {
       {/* Quick Filters */}
       <div className="flex gap-2">
         <button
-          onClick={async () => {
-            const ready = await window.electron.invoke('beads:ready')
-            setBeads(ready)
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent-green/10 text-accent-green rounded-lg hover:bg-accent-green/20 transition-colors"
+          onClick={() => setViewMode('ready')}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors',
+            viewMode === 'ready'
+              ? 'bg-accent-green/20 text-accent-green'
+              : 'bg-accent-green/10 text-accent-green hover:bg-accent-green/20'
+          )}
         >
           <Zap className="w-3.5 h-3.5" />
           Ready to Work
         </button>
         <button
-          onClick={async () => {
-            const blocked = await window.electron.invoke('beads:blocked')
-            setBeads(blocked)
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent-red/10 text-accent-red rounded-lg hover:bg-accent-red/20 transition-colors"
+          onClick={() => setViewMode('blocked')}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors',
+            viewMode === 'blocked'
+              ? 'bg-accent-red/20 text-accent-red'
+              : 'bg-accent-red/10 text-accent-red hover:bg-accent-red/20'
+          )}
         >
           <Ban className="w-3.5 h-3.5" />
           Blocked
         </button>
         <button
-          onClick={loadBeads}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-surface-hover text-text-muted rounded-lg hover:bg-surface-hover/80 transition-colors"
+          onClick={() => setViewMode('list')}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors',
+            viewMode === 'list'
+              ? 'bg-accent-purple/20 text-accent-purple'
+              : 'bg-surface-hover text-text-muted hover:bg-surface-hover/80'
+          )}
         >
           <RefreshCw className="w-3.5 h-3.5" />
           All
@@ -234,7 +297,9 @@ export function BeadsPanel() {
             onClick={() => setShowFilters(!showFilters)}
             className={cn(
               'flex items-center gap-2 px-3 py-2 rounded-lg transition-colors',
-              showFilters ? 'bg-accent-purple/10 text-accent-purple' : 'bg-surface-hover text-text-muted'
+              showFilters
+                ? 'bg-accent-purple/10 text-accent-purple'
+                : 'bg-surface-hover text-text-muted'
             )}
           >
             <Filter className="w-4 h-4" />
@@ -250,7 +315,7 @@ export function BeadsPanel() {
             <div>
               <p className="text-xs text-text-muted mb-2">Status</p>
               <div className="flex gap-1">
-                {(['all', 'open', 'in_progress', 'closed'] as const).map(status => (
+                {(['all', 'open', 'in_progress', 'closed'] as const).map((status) => (
                   <button
                     key={status}
                     onClick={() => setStatusFilter(status)}
@@ -271,7 +336,7 @@ export function BeadsPanel() {
             <div>
               <p className="text-xs text-text-muted mb-2">Priority</p>
               <div className="flex gap-1">
-                {(['all', 0, 1, 2, 3, 4] as const).map(priority => (
+                {(['all', 0, 1, 2, 3, 4] as const).map((priority) => (
                   <button
                     key={priority}
                     onClick={() => setPriorityFilter(priority)}
@@ -292,7 +357,7 @@ export function BeadsPanel() {
             <div>
               <p className="text-xs text-text-muted mb-2">Type</p>
               <div className="flex gap-1">
-                {(['all', 'task', 'bug', 'feature', 'epic'] as const).map(type => (
+                {(['all', 'task', 'bug', 'feature', 'epic'] as const).map((type) => (
                   <button
                     key={type}
                     onClick={() => setTypeFilter(type)}
@@ -321,7 +386,7 @@ export function BeadsPanel() {
 
       {/* Beads List */}
       <div className="space-y-2">
-        {beads.map(bead => (
+        {beads.map((bead) => (
           <BeadCard
             key={bead.id}
             bead={bead}
@@ -335,7 +400,10 @@ export function BeadsPanel() {
           <div className="text-center py-12">
             <ListTodo className="w-12 h-12 text-text-muted mx-auto mb-4" />
             <p className="text-text-muted">
-              {searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || typeFilter !== 'all'
+              {searchQuery ||
+              statusFilter !== 'all' ||
+              priorityFilter !== 'all' ||
+              typeFilter !== 'all'
                 ? 'No beads match your filters'
                 : 'No beads found'}
             </p>
@@ -395,10 +463,9 @@ function BeadCard({ bead, isLoading, onStatusChange, onSelect }: BeadCardProps) 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-mono text-text-muted">{bead.id}</span>
-            <span className={cn(
-              'px-1.5 py-0.5 text-xs rounded border',
-              PRIORITY_COLORS[bead.priority]
-            )}>
+            <span
+              className={cn('px-1.5 py-0.5 text-xs rounded border', PRIORITY_COLORS[bead.priority])}
+            >
               P{bead.priority}
             </span>
             <span className="flex items-center gap-1 text-xs text-text-muted">
@@ -414,13 +481,9 @@ function BeadCard({ bead, isLoading, onStatusChange, onSelect }: BeadCardProps) 
               <Calendar className="w-3 h-3" />
               {bead.updated}
             </span>
-            {bead.assignee && (
-              <span>Assigned: {bead.assignee}</span>
-            )}
+            {bead.assignee && <span>Assigned: {bead.assignee}</span>}
             {bead.blockedBy && bead.blockedBy.length > 0 && (
-              <span className="text-accent-red">
-                Blocked by {bead.blockedBy.length}
-              </span>
+              <span className="text-accent-red">Blocked by {bead.blockedBy.length}</span>
             )}
           </div>
         </div>
@@ -508,8 +571,14 @@ function CreateBeadModal({ onClose, onCreate, isLoading }: CreateBeadModalProps)
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-background border border-border rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-background border border-border rounded-xl p-6 w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+      >
         <h3 className="text-lg font-semibold text-text-primary mb-4">Create New Bead</h3>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -600,15 +669,20 @@ function BeadDetailModal({ bead, onClose, onStatusChange, isLoading }: BeadDetai
   const TypeIcon = TYPE_ICONS[bead.type]
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-background border border-border rounded-xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-background border border-border rounded-xl p-6 w-full max-w-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-2">
             <span className="text-sm font-mono text-text-muted">{bead.id}</span>
-            <span className={cn(
-              'px-1.5 py-0.5 text-xs rounded border',
-              PRIORITY_COLORS[bead.priority]
-            )}>
+            <span
+              className={cn('px-1.5 py-0.5 text-xs rounded border', PRIORITY_COLORS[bead.priority])}
+            >
               P{bead.priority}
             </span>
             <span className="flex items-center gap-1 text-xs text-text-muted">
@@ -626,9 +700,7 @@ function BeadDetailModal({ bead, onClose, onStatusChange, isLoading }: BeadDetai
 
         <h2 className="text-xl font-semibold text-text-primary mb-4">{bead.title}</h2>
 
-        {bead.description && (
-          <p className="text-text-secondary mb-4">{bead.description}</p>
-        )}
+        {bead.description && <p className="text-text-secondary mb-4">{bead.description}</p>}
 
         <div className="flex items-center gap-4 text-sm text-text-muted mb-6">
           <span className={cn('flex items-center gap-1', STATUS_CONFIG[bead.status].color)}>
@@ -641,12 +713,15 @@ function BeadDetailModal({ bead, onClose, onStatusChange, isLoading }: BeadDetai
           </span>
         </div>
 
-        {(bead.blockedBy && bead.blockedBy.length > 0) && (
+        {bead.blockedBy && bead.blockedBy.length > 0 && (
           <div className="mb-4">
             <p className="text-sm text-text-muted mb-2">Blocked by:</p>
             <div className="flex flex-wrap gap-2">
-              {bead.blockedBy.map(id => (
-                <span key={id} className="px-2 py-1 text-xs bg-accent-red/10 text-accent-red rounded">
+              {bead.blockedBy.map((id) => (
+                <span
+                  key={id}
+                  className="px-2 py-1 text-xs bg-accent-red/10 text-accent-red rounded"
+                >
                   {id}
                 </span>
               ))}
@@ -654,12 +729,15 @@ function BeadDetailModal({ bead, onClose, onStatusChange, isLoading }: BeadDetai
           </div>
         )}
 
-        {(bead.blocks && bead.blocks.length > 0) && (
+        {bead.blocks && bead.blocks.length > 0 && (
           <div className="mb-4">
             <p className="text-sm text-text-muted mb-2">Blocks:</p>
             <div className="flex flex-wrap gap-2">
-              {bead.blocks.map(id => (
-                <span key={id} className="px-2 py-1 text-xs bg-accent-yellow/10 text-accent-yellow rounded">
+              {bead.blocks.map((id) => (
+                <span
+                  key={id}
+                  className="px-2 py-1 text-xs bg-accent-yellow/10 text-accent-yellow rounded"
+                >
                   {id}
                 </span>
               ))}
@@ -674,7 +752,11 @@ function BeadDetailModal({ bead, onClose, onStatusChange, isLoading }: BeadDetai
               disabled={isLoading}
               className="px-4 py-2 bg-accent-yellow/10 text-accent-yellow rounded-lg hover:bg-accent-yellow/20 disabled:opacity-50 transition-colors flex items-center gap-2"
             >
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Play className="w-4 h-4" />
+              )}
               Start Work
             </button>
           )}
@@ -684,7 +766,11 @@ function BeadDetailModal({ bead, onClose, onStatusChange, isLoading }: BeadDetai
               disabled={isLoading}
               className="px-4 py-2 bg-accent-green/10 text-accent-green rounded-lg hover:bg-accent-green/20 disabled:opacity-50 transition-colors flex items-center gap-2"
             >
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CheckCircle className="w-4 h-4" />
+              )}
               Mark Complete
             </button>
           )}

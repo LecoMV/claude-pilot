@@ -30,6 +30,7 @@ import {
   Save,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import type { ExternalSession } from '@shared/types'
 
 interface SmartCompactionPanelProps {
@@ -84,14 +85,24 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
   const [error, setError] = useState<string | null>(null)
   const [step, setStep] = useState<'preview' | 'sync' | 'compact' | 'done'>('preview')
 
+  // tRPC queries and utils
+  const homePathQuery = trpc.system.homePath.useQuery()
+  const utils = trpc.useUtils()
+
+  // tRPC mutations
+  const compactMutation = trpc.context.compact.useMutation()
+
   // Load compaction preview
   const loadPreview = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      // Analyze session for valuable data to preserve
-      const messages = await window.electron.invoke('sessions:getMessages', session.id, 1000)
+      // Analyze session for valuable data to preserve using tRPC
+      const messages = await utils.sessions.getMessages.fetch({
+        sessionId: session.id,
+        limit: 1000,
+      })
 
       // Find valuable outputs
       const valuableData: ValuableData[] = []
@@ -161,11 +172,11 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
       // Check for pending memory items
       const memoryItems: MemoryItem[] = []
 
-      // Check learnings to sync
-      const learnings = await window.electron.invoke('memory:learnings', '', 10)
+      // Check learnings to sync using tRPC
+      const learnings = await utils.memory.learnings.fetch({ query: '', limit: 10 })
       for (const learning of learnings) {
         memoryItems.push({
-          id: learning.id,
+          id: String(learning.id),
           source: 'postgresql',
           type: 'learning',
           content: learning.content.substring(0, 200),
@@ -193,7 +204,7 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
     } finally {
       setLoading(false)
     }
-  }, [session])
+  }, [session, utils])
 
   useEffect(() => {
     loadPreview()
@@ -224,13 +235,18 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
   // Export session before compaction
   const handleExport = async () => {
     try {
-      const homePath = await window.electron.invoke('system:getHomePath')
+      const homePath = homePathQuery.data
+      if (!homePath) return
+
       const timestamp = new Date().toISOString().split('T')[0]
       const filename = `session-${session.id}-${timestamp}.json`
       const exportDir = `${homePath}/.config/claude-pilot/exports`
 
-      // Get all messages for export
-      const _messages = await window.electron.invoke('sessions:getMessages', session.id, 10000)
+      // Get all messages for export using tRPC
+      const _messages = await utils.sessions.getMessages.fetch({
+        sessionId: session.id,
+        limit: 10000,
+      })
 
       // Export data is prepared for future IPC handler
       // const exportData = { session, messages, exportedAt: new Date().toISOString() }
@@ -249,8 +265,8 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
     // Sync PostgreSQL learnings
     setSyncStatus((s) => ({ ...s, postgresql: 'syncing' }))
     try {
-      // Learnings are auto-synced, just verify
-      await window.electron.invoke('memory:learnings', '', 1)
+      // Learnings are auto-synced, just verify using tRPC
+      await utils.memory.learnings.fetch({ query: '', limit: 1 })
       setSyncStatus((s) => ({ ...s, postgresql: 'done' }))
     } catch {
       setSyncStatus((s) => ({ ...s, postgresql: 'error' }))
@@ -259,8 +275,8 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
     // Sync Memgraph
     setSyncStatus((s) => ({ ...s, memgraph: 'syncing' }))
     try {
-      // Check connection
-      const stats = await window.electron.invoke('memory:stats')
+      // Check connection using tRPC
+      const stats = await utils.memory.stats.fetch()
       if (stats.memgraph.nodes >= 0) {
         setSyncStatus((s) => ({ ...s, memgraph: 'done' }))
       }
@@ -271,7 +287,7 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
     // Sync Mem0/Qdrant
     setSyncStatus((s) => ({ ...s, mem0: 'syncing' }))
     try {
-      const stats = await window.electron.invoke('memory:stats')
+      const stats = await utils.memory.stats.fetch()
       if (stats.qdrant.vectors >= 0) {
         setSyncStatus((s) => ({ ...s, mem0: 'done' }))
       }
@@ -282,8 +298,8 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
     // Sync Beads
     setSyncStatus((s) => ({ ...s, beads: 'syncing' }))
     try {
-      // Check if beads exist
-      const hasBeads = await window.electron.invoke('beads:hasBeads', session.projectPath)
+      // Check if beads exist using tRPC
+      const hasBeads = await utils.beads.hasBeads.fetch({ projectPath: session.projectPath || '' })
       setSyncStatus((s) => ({ ...s, beads: hasBeads ? 'done' : 'idle' }))
     } catch {
       setSyncStatus((s) => ({ ...s, beads: 'error' }))
@@ -302,8 +318,8 @@ export function SmartCompactionPanel({ session, onClose }: SmartCompactionPanelP
         await handleExport()
       }
 
-      // Trigger compaction
-      await window.electron.invoke('context:compact')
+      // Trigger compaction using tRPC mutation
+      await compactMutation.mutateAsync()
 
       setStep('done')
     } catch (err) {

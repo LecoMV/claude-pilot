@@ -46,6 +46,11 @@ const InitSwarmSchema = z.object({
   topology: z.string().min(1),
 })
 
+const SubmitTaskSchema = z.object({
+  description: z.string().min(1).max(1000),
+  targetAgent: z.string().optional(),
+})
+
 // ============================================================================
 // Agent State
 // ============================================================================
@@ -144,6 +149,30 @@ function shutdownSwarm(): boolean {
   return true
 }
 
+function submitTask(description: string, targetAgent?: string): boolean {
+  // Assign task to target agent or first available agent
+  const agent = targetAgent
+    ? agentState.agents.find((a) => a.id === targetAgent)
+    : agentState.agents.find((a) => a.status === 'active' || a.status === 'idle')
+
+  if (agent) {
+    agent.status = 'busy'
+    agent.taskCount++
+    // Simulate task completion after some time
+    setTimeout(
+      () => {
+        const idx = agentState.agents.findIndex((a) => a.id === agent.id)
+        if (idx >= 0 && agentState.agents[idx].status === 'busy') {
+          agentState.agents[idx].status = 'active'
+        }
+      },
+      5000 + Math.random() * 5000
+    )
+    return true
+  }
+  return false
+}
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -196,5 +225,12 @@ export const agentsRouter = router({
    */
   shutdownSwarm: auditedProcedure.mutation((): boolean => {
     return shutdownSwarm()
+  }),
+
+  /**
+   * Submit a task to an agent
+   */
+  submitTask: auditedProcedure.input(SubmitTaskSchema).mutation(({ input }): boolean => {
+    return submitTask(input.description, input.targetAgent)
   }),
 })

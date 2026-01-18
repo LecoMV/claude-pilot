@@ -16,6 +16,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import type {
   PgVectorStatus,
   PgVectorCollection,
@@ -42,6 +43,12 @@ const indexTypeColors: Record<VectorIndexType, string> = {
 }
 
 export function PgVectorPanel() {
+  // tRPC hooks
+  const utils = trpc.useUtils()
+  const setAutoConfigMutation = trpc.pgvector.setAutoConfig.useMutation()
+  const createIndexMutation = trpc.pgvector.createIndex.useMutation()
+  const vacuumMutation = trpc.pgvector.vacuum.useMutation()
+
   // State
   const [status, setStatus] = useState<PgVectorStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -64,24 +71,24 @@ export function PgVectorPanel() {
   const loadStatus = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await window.electron.invoke('pgvector:status')
+      const data = await utils.pgvector.status.fetch()
       setStatus(data)
     } catch (error) {
       console.error('Failed to load pgvector status:', error)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [utils])
 
   // Load auto-embed config
   const loadAutoConfig = useCallback(async () => {
     try {
-      const config = await window.electron.invoke('pgvector:getAutoConfig')
+      const config = await utils.pgvector.getAutoConfig.fetch()
       setAutoConfig(config)
     } catch (error) {
       console.error('Failed to load auto-embed config:', error)
     }
-  }, [])
+  }, [utils])
 
   useEffect(() => {
     loadStatus()
@@ -94,59 +101,60 @@ export function PgVectorPanel() {
 
     setSearching(true)
     try {
-      const results = await window.electron.invoke(
-        'pgvector:search',
-        searchQuery,
-        selectedTable || undefined,
-        20,
-        threshold
-      )
+      const results = await utils.pgvector.search.fetch({
+        query: searchQuery,
+        table: selectedTable || undefined,
+        limit: 20,
+        threshold,
+      })
       setSearchResults(results)
     } catch (error) {
       console.error('Search failed:', error)
     } finally {
       setSearching(false)
     }
-  }, [searchQuery, selectedTable, threshold])
+  }, [searchQuery, selectedTable, threshold, utils])
 
   // Save auto-embed config
-  const saveAutoConfig = useCallback(async (config: PgVectorAutoEmbedConfig) => {
-    try {
-      await window.electron.invoke('pgvector:setAutoConfig', config)
-      setAutoConfig(config)
-    } catch (error) {
-      console.error('Failed to save config:', error)
-    }
-  }, [])
+  const saveAutoConfig = useCallback(
+    async (config: PgVectorAutoEmbedConfig) => {
+      try {
+        await setAutoConfigMutation.mutateAsync({ config })
+        setAutoConfig(config)
+      } catch (error) {
+        console.error('Failed to save config:', error)
+      }
+    },
+    [setAutoConfigMutation]
+  )
 
   // Create/rebuild index
   const handleCreateIndex = useCallback(async () => {
     if (!selectedCollection) return
 
     try {
-      await window.electron.invoke(
-        'pgvector:createIndex',
-        selectedCollection.tableName,
-        indexConfig
-      )
+      await createIndexMutation.mutateAsync({
+        table: selectedCollection.tableName,
+        config: indexConfig,
+      })
       setIndexModalOpen(false)
       loadStatus()
     } catch (error) {
       console.error('Failed to create index:', error)
     }
-  }, [selectedCollection, indexConfig, loadStatus])
+  }, [selectedCollection, indexConfig, loadStatus, createIndexMutation])
 
   // Vacuum table
   const handleVacuum = useCallback(
     async (table: string) => {
       try {
-        await window.electron.invoke('pgvector:vacuum', table)
+        await vacuumMutation.mutateAsync({ table })
         loadStatus()
       } catch (error) {
         console.error('Failed to vacuum table:', error)
       }
     },
-    [loadStatus]
+    [loadStatus, vacuumMutation]
   )
 
   if (loading) {

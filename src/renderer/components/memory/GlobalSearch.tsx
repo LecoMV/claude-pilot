@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 
 interface SearchResult {
   id: string
@@ -64,6 +65,9 @@ const SOURCE_CONFIG = {
 }
 
 export function GlobalSearch() {
+  // tRPC hooks
+  const utils = trpc.useUtils()
+
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [stats, setStats] = useState<SearchStats | null>(null)
@@ -98,11 +102,10 @@ export function GlobalSearch() {
       setError(null)
 
       try {
-        const response = (await window.electron.invoke(
-          'memory:unified-search',
-          q,
-          50
-        )) as SearchResponse
+        const response = (await utils.memory.unifiedSearch.fetch({
+          query: q,
+          limit: 50,
+        })) as SearchResponse
 
         // Filter by selected sources
         const filtered = response.results.filter((r) => selectedSources.has(r.source))
@@ -119,7 +122,7 @@ export function GlobalSearch() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- saveRecentSearch is stable
-    [query, selectedSources]
+    [query, selectedSources, utils]
   )
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

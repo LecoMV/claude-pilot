@@ -19,6 +19,7 @@ import {
   FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import type { SessionMessage, ExternalSession } from '@shared/types'
 
 interface TranscriptViewerProps {
@@ -51,6 +52,9 @@ const MESSAGE_TYPE_CONFIG = {
 }
 
 export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
+  // tRPC hooks
+  const utils = trpc.useUtils()
+
   const [messages, setMessages] = useState<SessionMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -66,7 +70,7 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
       setLoading(true)
       setError(null)
       try {
-        const msgs = await window.electron.invoke('sessions:getMessages', session.id, 1000)
+        const msgs = await utils.sessions.getMessages.fetch({ sessionId: session.id, limit: 1000 })
         setMessages(msgs)
       } catch (err) {
         setError((err as Error).message)
@@ -75,7 +79,7 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
       }
     }
     loadMessages()
-  }, [session.id])
+  }, [session.id, utils])
 
   // Filter messages
   const filteredMessages = useMemo(() => {
@@ -83,16 +87,17 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
 
     // Filter by type
     if (!showToolResults) {
-      filtered = filtered.filter(m => m.type !== 'tool-result')
+      filtered = filtered.filter((m) => m.type !== 'tool-result')
     }
 
     // Filter by search
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
-      filtered = filtered.filter(m =>
-        m.content?.toLowerCase().includes(query) ||
-        m.toolName?.toLowerCase().includes(query) ||
-        m.toolOutput?.toLowerCase().includes(query)
+      filtered = filtered.filter(
+        (m) =>
+          m.content?.toLowerCase().includes(query) ||
+          m.toolName?.toLowerCase().includes(query) ||
+          m.toolOutput?.toLowerCase().includes(query)
       )
     }
 
@@ -195,12 +200,8 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
 
         {/* Stats */}
         <div className="flex items-center gap-4 text-sm">
-          <span className="text-text-muted">
-            {filteredMessages.length} messages
-          </span>
-          <span className="text-text-muted">
-            Input: {tokenStats.input.toLocaleString()} tokens
-          </span>
+          <span className="text-text-muted">{filteredMessages.length} messages</span>
+          <span className="text-text-muted">Input: {tokenStats.input.toLocaleString()} tokens</span>
           <span className="text-text-muted">
             Output: {tokenStats.output.toLocaleString()} tokens
           </span>
@@ -259,11 +260,7 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
           return (
             <div
               key={message.uuid}
-              className={cn(
-                'rounded-lg border',
-                config.bgColor,
-                config.borderColor
-              )}
+              className={cn('rounded-lg border', config.bgColor, config.borderColor)}
             >
               {/* Message Header */}
               <div className="flex items-center justify-between px-4 py-2 border-b border-inherit">
@@ -273,22 +270,20 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
                     {config.label}
                   </span>
                   {isToolResult && message.toolName && (
-                    <span className="text-xs text-text-muted font-mono">
-                      {message.toolName}
-                    </span>
+                    <span className="text-xs text-text-muted font-mono">{message.toolName}</span>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-text-muted">
-                    {formatTime(message.timestamp)}
-                  </span>
+                  <span className="text-xs text-text-muted">{formatTime(message.timestamp)}</span>
                   {message.usage && (
                     <span className="text-xs text-text-muted">
                       {message.usage.input_tokens + message.usage.output_tokens} tokens
                     </span>
                   )}
                   <button
-                    onClick={() => copyToClipboard(message.content || message.toolOutput || '', message.uuid)}
+                    onClick={() =>
+                      copyToClipboard(message.content || message.toolOutput || '', message.uuid)
+                    }
                     className="p-1 text-text-muted hover:text-text-primary rounded"
                   >
                     {copiedId === message.uuid ? (
@@ -310,7 +305,11 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
                           onClick={() => toggleToolExpanded(message.uuid)}
                           className="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary"
                         >
-                          {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          {isExpanded ? (
+                            <ChevronUp className="w-3 h-3" />
+                          ) : (
+                            <ChevronDown className="w-3 h-3" />
+                          )}
                           Input
                         </button>
                         {isExpanded && (
@@ -356,6 +355,9 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
 
 // Standalone viewer wrapper
 export function TranscriptViewerPage() {
+  // tRPC hooks
+  const utils = trpc.useUtils()
+
   const [selectedSession, setSelectedSession] = useState<ExternalSession | null>(null)
   const [sessions, setSessions] = useState<ExternalSession[]>([])
   const [loading, setLoading] = useState(true)
@@ -363,7 +365,7 @@ export function TranscriptViewerPage() {
   useEffect(() => {
     const loadSessions = async () => {
       try {
-        const discovered = await window.electron.invoke('sessions:discover')
+        const discovered = await utils.sessions.discover.fetch()
         setSessions(discovered.slice(0, 20)) // Last 20 sessions
       } catch (err) {
         console.error('Failed to load sessions:', err)
@@ -372,7 +374,7 @@ export function TranscriptViewerPage() {
       }
     }
     loadSessions()
-  }, [])
+  }, [utils])
 
   if (selectedSession) {
     return (
@@ -400,7 +402,7 @@ export function TranscriptViewerPage() {
     <div className="space-y-4">
       <h2 className="text-lg font-semibold text-text-primary">Session Transcripts</h2>
       <div className="space-y-2">
-        {sessions.map(session => (
+        {sessions.map((session) => (
           <button
             key={session.id}
             onClick={() => setSelectedSession(session)}
@@ -410,7 +412,8 @@ export function TranscriptViewerPage() {
               <div>
                 <p className="font-medium text-text-primary">{session.projectName}</p>
                 <p className="text-sm text-text-muted">
-                  {session.stats.messageCount} messages • {new Date(session.startTime).toLocaleString()}
+                  {session.stats.messageCount} messages •{' '}
+                  {new Date(session.startTime).toLocaleString()}
                 </p>
               </div>
               <ChevronDown className="w-5 h-5 text-text-muted -rotate-90" />

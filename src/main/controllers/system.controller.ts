@@ -16,6 +16,7 @@ import { join } from 'path'
 import { homedir, cpus, totalmem, freemem } from 'os'
 import { promisify } from 'util'
 import { exec } from 'child_process'
+import { shell, dialog, BrowserWindow } from 'electron'
 import type { SystemStatus, ResourceUsage, GPUUsage } from '../../shared/types'
 
 // Native services
@@ -393,6 +394,29 @@ export const systemRouter = router({
    */
   homePath: publicProcedure.query((): string => {
     return HOME
+  }),
+
+  /**
+   * Open a path in the system file explorer
+   */
+  openPath: auditedProcedure
+    .input(z.object({ path: z.string().min(1).max(500) }))
+    .mutation(({ input }): Promise<string> => {
+      return shell.openPath(input.path)
+    }),
+
+  /**
+   * Open a directory selection dialog
+   */
+  openDirectory: auditedProcedure.mutation(async (): Promise<string | null> => {
+    const win = BrowserWindow.getFocusedWindow()
+    const result = await dialog.showOpenDialog(win ?? undefined, {
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+    return result.filePaths[0]
   }),
 
   /**

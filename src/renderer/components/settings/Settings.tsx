@@ -21,6 +21,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { trpc } from '@/lib/trpc/react'
 import { useSettingsStore, type AppSettings } from '@/stores/settings'
 import { useBudgetStore } from '@/stores/budget'
 import type { BudgetSettings as BudgetSettingsType } from '@shared/types'
@@ -378,6 +379,11 @@ interface CredentialState {
 }
 
 function SecuritySettings({ settings, onChange }: SettingsProps) {
+  // tRPC hooks
+  const utils = trpc.useUtils()
+  const storeMutation = trpc.credentials.store.useMutation()
+  const deleteMutation = trpc.credentials.delete.useMutation()
+
   const [encryptionAvailable, setEncryptionAvailable] = useState<boolean | null>(null)
   const [credentials, setCredentials] = useState<CredentialState>({})
   const [loading, setLoading] = useState(true)
@@ -387,8 +393,8 @@ function SecuritySettings({ settings, onChange }: SettingsProps) {
     const loadCredentials = async () => {
       try {
         const [available, keys] = await Promise.all([
-          window.electron.invoke('credentials:isEncryptionAvailable'),
-          window.electron.invoke('credentials:list'),
+          utils.credentials.isEncryptionAvailable.fetch(),
+          utils.credentials.list.fetch(),
         ])
         setEncryptionAvailable(available)
 
@@ -412,7 +418,7 @@ function SecuritySettings({ settings, onChange }: SettingsProps) {
       }
     }
     loadCredentials()
-  }, [])
+  }, [utils])
 
   const handleCredentialChange = useCallback((key: string, value: string) => {
     setCredentials((prev) => ({
@@ -432,7 +438,7 @@ function SecuritySettings({ settings, onChange }: SettingsProps) {
       }))
 
       try {
-        await window.electron.invoke('credentials:store', key, cred.value)
+        await storeMutation.mutateAsync({ key, value: cred.value })
         setCredentials((prev) => ({
           ...prev,
           [key]: { ...prev[key], hasValue: true, editing: false, value: '', saving: false },
@@ -445,20 +451,23 @@ function SecuritySettings({ settings, onChange }: SettingsProps) {
         }))
       }
     },
-    [credentials]
+    [credentials, storeMutation]
   )
 
-  const handleCredentialDelete = useCallback(async (key: string) => {
-    try {
-      await window.electron.invoke('credentials:delete', key)
-      setCredentials((prev) => ({
-        ...prev,
-        [key]: { ...prev[key], hasValue: false, editing: false, value: '' },
-      }))
-    } catch (error) {
-      console.error(`Failed to delete credential ${key}:`, error)
-    }
-  }, [])
+  const handleCredentialDelete = useCallback(
+    async (key: string) => {
+      try {
+        await deleteMutation.mutateAsync({ key })
+        setCredentials((prev) => ({
+          ...prev,
+          [key]: { ...prev[key], hasValue: false, editing: false, value: '' },
+        }))
+      } catch (error) {
+        console.error(`Failed to delete credential ${key}:`, error)
+      }
+    },
+    [deleteMutation]
+  )
 
   const toggleShowValue = useCallback((key: string) => {
     setCredentials((prev) => ({

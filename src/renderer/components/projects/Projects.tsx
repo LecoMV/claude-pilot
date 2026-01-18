@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Folder,
   FileText,
@@ -10,56 +10,52 @@ import {
   Terminal,
   RefreshCw,
 } from 'lucide-react'
+import { trpc } from '@/lib/trpc/react'
 import type { ClaudeProject } from '@shared/types'
 
 export function Projects() {
-  const [projects, setProjects] = useState<ClaudeProject[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [loading, setLoading] = useState(true)
   const [selectedProject, setSelectedProject] = useState<ClaudeProject | null>(null)
 
-  useEffect(() => {
-    loadProjects()
-  }, [])
+  // tRPC query
+  const projectsQuery = trpc.claude.projects.useQuery(undefined, { refetchInterval: 30000 })
 
-  const loadProjects = async () => {
-    setLoading(true)
-    try {
-      const result = await window.electron.invoke('claude:projects')
-      setProjects(result)
-    } catch (error) {
-      console.error('Failed to load projects:', error)
-    } finally {
-      setLoading(false)
-    }
+  // tRPC mutations
+  const openPathMutation = trpc.system.openPath.useMutation()
+  const openAtMutation = trpc.terminal.openAt.useMutation()
+  const openDirectoryMutation = trpc.system.openDirectory.useMutation()
+
+  const projects = projectsQuery.data ?? []
+  const loading = projectsQuery.isLoading
+
+  const loadProjects = () => {
+    projectsQuery.refetch()
   }
 
-  const openInFileManager = async (path: string) => {
-    try {
-      await window.electron.invoke('shell:openPath', path)
-    } catch (error) {
-      console.error('Failed to open folder:', error)
-    }
+  const openInFileManager = (path: string) => {
+    openPathMutation.mutate(
+      { path },
+      { onError: (error) => console.error('Failed to open folder:', error) }
+    )
   }
 
-  const openInTerminal = async (path: string) => {
-    try {
-      await window.electron.invoke('terminal:openAt', path)
-    } catch (error) {
-      console.error('Failed to open terminal:', error)
-    }
+  const openInTerminal = (path: string) => {
+    openAtMutation.mutate(
+      { path },
+      { onError: (error) => console.error('Failed to open terminal:', error) }
+    )
   }
 
-  const addProjectFolder = async () => {
-    try {
-      const result = await window.electron.invoke('dialog:openDirectory')
-      if (result) {
-        // Refresh projects list after adding
-        await loadProjects()
-      }
-    } catch (error) {
-      console.error('Failed to add project:', error)
-    }
+  const addProjectFolder = () => {
+    openDirectoryMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        if (result) {
+          // Refresh projects list after adding
+          projectsQuery.refetch()
+        }
+      },
+      onError: (error) => console.error('Failed to add project:', error),
+    })
   }
 
   const filteredProjects = projects.filter((p) =>
@@ -89,11 +85,7 @@ export function Projects() {
           />
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={loadProjects}
-            className="btn btn-secondary"
-            title="Refresh projects"
-          >
+          <button onClick={loadProjects} className="btn btn-secondary" title="Refresh projects">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button onClick={addProjectFolder} className="btn btn-primary">
@@ -110,7 +102,9 @@ export function Projects() {
             key={project.path}
             project={project}
             isSelected={selectedProject?.path === project.path}
-            onSelect={() => setSelectedProject(selectedProject?.path === project.path ? null : project)}
+            onSelect={() =>
+              setSelectedProject(selectedProject?.path === project.path ? null : project)
+            }
             onOpenFolder={() => openInFileManager(project.path)}
             onOpenTerminal={() => openInTerminal(project.path)}
           />
@@ -142,11 +136,19 @@ interface ProjectCardProps {
   onOpenTerminal: () => void
 }
 
-function ProjectCard({ project, isSelected, onSelect, onOpenFolder, onOpenTerminal }: ProjectCardProps) {
+function ProjectCard({
+  project,
+  isSelected,
+  onSelect,
+  onOpenFolder,
+  onOpenTerminal,
+}: ProjectCardProps) {
   return (
     <div
       className={`card transition-colors cursor-pointer ${
-        isSelected ? 'border-accent-purple ring-1 ring-accent-purple/30' : 'hover:border-accent-purple/50'
+        isSelected
+          ? 'border-accent-purple ring-1 ring-accent-purple/30'
+          : 'hover:border-accent-purple/50'
       }`}
       onClick={onSelect}
     >
@@ -179,9 +181,7 @@ function ProjectCard({ project, isSelected, onSelect, onOpenFolder, onOpenTermin
           </div>
         </div>
 
-        <h3 className="font-medium text-text-primary truncate mb-1">
-          {project.name}
-        </h3>
+        <h3 className="font-medium text-text-primary truncate mb-1">{project.name}</h3>
         <p className="text-sm text-text-muted truncate mb-3">{project.path}</p>
 
         <div className="flex items-center gap-3 text-sm">
