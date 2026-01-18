@@ -4,10 +4,7 @@
  * Combines all domain controllers into a single router.
  * This is the main entry point for tRPC in the main process.
  *
- * Migration Strategy (Hybrid IPC):
- * - New features use tRPC procedures
- * - Legacy handlers remain in handlers.ts
- * - Gradually migrate 1 controller per sprint
+ * Migration Complete: All 201 legacy handlers migrated to tRPC controllers.
  */
 
 import { router } from './trpc'
@@ -20,34 +17,88 @@ import { configRouter } from '../controllers/config.controller'
 // Sprint 1: Security controllers
 import { credentialsRouter, auditRouter, watchdogRouter } from '../controllers/security'
 
+// Sprint 2: MCP controllers
+import { mcpRouter, proxyRouter } from '../controllers/mcp'
+
+// Sprint 3: Session controllers
+import { sessionRouter, transcriptRouter, beadsRouter } from '../controllers/sessions'
+
+// Sprint 4: Context & Analysis controllers
+import { contextRouter } from '../controllers/context'
+import { plansRouter, branchesRouter } from '../controllers/analysis'
+
+// Sprint 5: Integration controllers
+import { ollamaRouter, pgvectorRouter, treesitterRouter } from '../controllers/integrations'
+
+// Sprint 6: Utility controllers
+import {
+  profilesRouter,
+  servicesRouter,
+  logsRouter,
+  agentsRouter,
+  settingsRouter,
+  claudeRouter,
+  workersRouter,
+  streamRouter,
+  updateRouter,
+  terminalRouter,
+} from '../controllers/utilities'
+
 // ============================================================================
 // MAIN APP ROUTER
 // ============================================================================
 
 export const appRouter = router({
-  // Spike/Demo controller - proves the pattern works
+  // Demo controller - proves the pattern works
   demo: demoRouter,
 
-  // System status and resources (migrated from handlers.ts)
+  // System status and resources
   system: systemRouter,
 
-  // Memory operations - Postgres/Qdrant/Memgraph (migrated from handlers.ts)
+  // Memory operations - Postgres/Qdrant/Memgraph
   memory: memoryRouter,
 
-  // Embedding operations - Ollama/pgvector/Qdrant (migrated from handlers.ts)
+  // Embedding operations - Ollama/pgvector/Qdrant
   embedding: embeddingRouter,
 
   // Configuration - 5-tier hierarchical config resolver
   config: configRouter,
 
-  // Sprint 1: Security controllers (migrated from handlers.ts)
-  credentials: credentialsRouter, // Secure credential storage via OS keychain
-  audit: auditRouter, // OCSF-compliant audit logging + SIEM integration
-  watchdog: watchdogRouter, // Service health monitoring + auto-recovery
+  // Sprint 1: Security (26 handlers)
+  credentials: credentialsRouter,
+  audit: auditRouter,
+  watchdog: watchdogRouter,
 
-  // Future controllers (migrate from handlers.ts):
-  // session: sessionRouter,     // Claude process management
-  // mcp: mcpRouter,             // MCP proxy/federation
+  // Sprint 2: MCP (16 handlers)
+  mcp: mcpRouter,
+  proxy: proxyRouter,
+
+  // Sprint 3: Sessions (18 handlers)
+  session: sessionRouter,
+  transcript: transcriptRouter,
+  beads: beadsRouter,
+
+  // Sprint 4: Context & Analysis (30 handlers)
+  context: contextRouter,
+  plans: plansRouter,
+  branches: branchesRouter,
+
+  // Sprint 5: Integrations (23 handlers)
+  ollama: ollamaRouter,
+  pgvector: pgvectorRouter,
+  treesitter: treesitterRouter,
+
+  // Sprint 6: Utilities (39 handlers)
+  profiles: profilesRouter,
+  services: servicesRouter,
+  logs: logsRouter,
+  agents: agentsRouter,
+  settings: settingsRouter,
+  claude: claudeRouter,
+  workers: workersRouter,
+  stream: streamRouter,
+  update: updateRouter,
+  terminal: terminalRouter,
 })
 
 // Export type for frontend - this is the magic!
