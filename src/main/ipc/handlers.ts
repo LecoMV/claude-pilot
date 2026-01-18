@@ -919,7 +919,9 @@ export function registerIpcHandlers(): void {
     return saveAppSettings(settings)
   })
 
-  // Credential handlers - secure credential storage using OS keychain
+  // ==================== Credential Handlers (DEPRECATED) ====================
+  // @deprecated Use trpc.credentials.* instead - Sprint 1 migration
+  // DELETE AFTER: Frontend migration to tRPC complete
   // Uses wrapIPCHandler for consistent error logging and audit trail
   ipcMain.handle('credentials:store', (_event, key: string, value: string): boolean => {
     return wrapIPCHandler(
@@ -968,7 +970,9 @@ export function registerIpcHandlers(): void {
     return credentialService.isEncryptionAvailable()
   })
 
-  // ==================== Audit Handlers (OCSF) ====================
+  // ==================== Audit Handlers (DEPRECATED) ====================
+  // @deprecated Use trpc.audit.* instead - Sprint 1 migration
+  // DELETE AFTER: Frontend migration to tRPC complete
   ipcMain.handle(
     'audit:query',
     (
@@ -1008,7 +1012,9 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // ==================== SIEM Log Shipping Handlers (deploy-e1fc) ====================
+  // ==================== SIEM Log Shipping Handlers (DEPRECATED) ====================
+  // @deprecated Use trpc.audit.siem.* instead - Sprint 1 migration
+  // DELETE AFTER: Frontend migration to tRPC complete
   ipcMain.handle(
     'audit:siem:register',
     (
@@ -1061,7 +1067,9 @@ export function registerIpcHandlers(): void {
     return true
   })
 
-  // ==================== Watchdog Handlers ====================
+  // ==================== Watchdog Handlers (DEPRECATED) ====================
+  // @deprecated Use trpc.watchdog.* instead - Sprint 1 migration
+  // DELETE AFTER: Frontend migration to tRPC complete
   ipcMain.handle('watchdog:start', (): boolean => {
     try {
       watchdogService.start()

@@ -17,6 +17,9 @@ import { memoryRouter } from '../controllers/memory.controller'
 import { embeddingRouter } from '../controllers/embedding.controller'
 import { configRouter } from '../controllers/config.controller'
 
+// Sprint 1: Security controllers
+import { credentialsRouter, auditRouter, watchdogRouter } from '../controllers/security'
+
 // ============================================================================
 // MAIN APP ROUTER
 // ============================================================================
@@ -37,11 +40,14 @@ export const appRouter = router({
   // Configuration - 5-tier hierarchical config resolver
   config: configRouter,
 
+  // Sprint 1: Security controllers (migrated from handlers.ts)
+  credentials: credentialsRouter, // Secure credential storage via OS keychain
+  audit: auditRouter, // OCSF-compliant audit logging + SIEM integration
+  watchdog: watchdogRouter, // Service health monitoring + auto-recovery
+
   // Future controllers (migrate from handlers.ts):
   // session: sessionRouter,     // Claude process management
   // mcp: mcpRouter,             // MCP proxy/federation
-  // audit: auditRouter,         // Logging, SIEM
-  // security: securityRouter,   // Credentials, governance
 })
 
 // Export type for frontend - this is the magic!
