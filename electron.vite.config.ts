@@ -15,7 +15,9 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    // Bundle electron-trpc for sandboxed preload compatibility
+    // See: https://electron-vite.org/guide/troubleshooting
+    plugins: [externalizeDepsPlugin({ exclude: ['electron-trpc'] })],
     build: {
       // Output CommonJS for sandbox compatibility
       rollupOptions: {
