@@ -296,6 +296,21 @@ const ALLOWED_CHANNELS = new Set<string>([
   'embedding:resetSessionPosition',
   'embedding:resetAllSessionPositions',
   'embedding:deleteSessionEmbeddings',
+
+  // Streaming (MessagePort zero-copy transfers) - deploy-482i
+  'stream:createFileStream',
+  'stream:createDataStream',
+  'stream:getStatus',
+  'stream:close',
+  'stream:list',
+  'stream:stats',
+
+  // Worker Pool (Piscina) - deploy-scb9
+  'workers:stats',
+  'workers:runInteractive',
+  'workers:runBackground',
+  'workers:getConfig',
+  'workers:isReady',
 ])
 
 /**
@@ -338,6 +353,13 @@ const ALLOWED_EVENT_CHANNELS = new Set<string>([
 
   // Ollama events
   'ollama:pullProgress',
+
+  // Streaming events (MessagePort)
+  'stream:port',
+  'stream:workerPort',
+  'stream:progress',
+  'stream:complete',
+  'stream:error',
 ])
 
 /**
@@ -723,6 +745,28 @@ const claudeAPI = {
     resetAllSessionPositions: () => electronAPI.invoke('embedding:resetAllSessionPositions'),
     deleteSessionEmbeddings: (sessionId: string) =>
       electronAPI.invoke('embedding:deleteSessionEmbeddings', sessionId),
+  },
+
+  // Worker Pool (Piscina) - deploy-scb9
+  workers: {
+    getStats: () => electronAPI.invoke('workers:stats'),
+    isReady: () => electronAPI.invoke('workers:isReady'),
+    getConfig: () => electronAPI.invoke('workers:getConfig'),
+    runInteractive: (taskName: string, data: unknown, transferList?: Transferable[]) =>
+      electronAPI.invoke('workers:runInteractive', taskName, data, transferList),
+    runBackground: (taskName: string, data: unknown, transferList?: Transferable[]) =>
+      electronAPI.invoke('workers:runBackground', taskName, data, transferList),
+  },
+
+  // MessagePort Streaming - deploy-482i
+  streaming: {
+    getStats: () => electronAPI.invoke('stream:stats'),
+    list: () => electronAPI.invoke('stream:list'),
+    getStatus: (streamId: string) => electronAPI.invoke('stream:getStatus', streamId),
+    close: (streamId: string) => electronAPI.invoke('stream:close', streamId),
+    createFileStream: (filePath: string) => electronAPI.invoke('stream:createFileStream', filePath),
+    createDataStream: (metadata?: Record<string, unknown>) =>
+      electronAPI.invoke('stream:createDataStream', metadata),
   },
 }
 

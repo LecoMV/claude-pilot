@@ -114,13 +114,9 @@ export class ContentChunker {
     const overlapChars = config.overlapSize * CHARS_PER_TOKEN
 
     // Split by message markers (common patterns)
-    const messagePatterns = [
-      /^(Human|User|Assistant|Claude|AI):\s*/gim,
-      /^(>>|>)\s*/gm,
-      /^---+$/gm,
-    ]
+    const messagePatterns = [/^(Human|User|Assistant|Claude|AI):\s*/gim, /^(>>|>)\s*/gm, /^---+$/gm]
 
-    let boundaries: number[] = [0]
+    const boundaries: number[] = [0]
     for (const pattern of messagePatterns) {
       let match
       while ((match = pattern.exec(content)) !== null) {
@@ -253,11 +249,7 @@ export class ContentChunker {
   /**
    * Chunk by paragraphs (double newlines)
    */
-  private chunkByParagraphs(
-    content: string,
-    maxChars: number,
-    overlapChars: number
-  ): string[] {
+  private chunkByParagraphs(content: string, maxChars: number, overlapChars: number): string[] {
     const paragraphs = content.split(/\n\s*\n/)
     const chunks: string[] = []
     let currentChunk = ''

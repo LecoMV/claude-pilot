@@ -9,6 +9,7 @@ import { terminalManager, registerTerminalHandlers } from './services/terminal'
 import { initializeTRPC, cleanupTRPC } from './trpc'
 import { credentialService } from './services/credentials'
 import { auditService } from './services/audit'
+import { workerPool } from './services/workers'
 import { setupGlobalErrorHandlers, configureErrorHandler, handleError } from './utils/error-handler'
 
 // Initialize Sentry for crash reporting (deploy-b4go)
@@ -122,6 +123,11 @@ function configureSessionSecurity(): void {
         'X-XSS-Protection': ['1; mode=block'],
         'Referrer-Policy': ['strict-origin-when-cross-origin'],
         'Permissions-Policy': ['geolocation=(), camera=(), microphone=()'],
+        // P0: Enable SharedArrayBuffer for worker thread optimization (deploy-scb9)
+        // COOP/COEP headers required for cross-origin isolation
+        // Using 'credentialless' for COEP to allow credentialed subresources
+        'Cross-Origin-Opener-Policy': ['same-origin'],
+        'Cross-Origin-Embedder-Policy': ['credentialless'],
       },
     })
   })
@@ -228,6 +234,14 @@ app.whenReady().then(() => {
 
   // Initialize OCSF audit logging service
   auditService.initialize()
+
+  // Initialize Piscina worker pools for CPU-intensive operations (deploy-scb9)
+  // This enables SharedArrayBuffer-based zero-copy transfers
+  try {
+    workerPool.initialize()
+  } catch (error) {
+    console.error('[Main] Failed to initialize worker pools:', error)
+  }
 
   // Default open or close DevTools by F12 in development
   app.on('browser-window-created', (_, window) => {

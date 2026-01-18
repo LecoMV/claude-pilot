@@ -15,6 +15,8 @@ import { predictiveContextService } from '../services/predictive-context'
 import { planService } from '../services/plans'
 import { branchService } from '../services/branches'
 import { transcriptService, type ParseOptions, type TranscriptStats } from '../services/transcript'
+import { workerPool } from '../services/workers'
+import { messagePortStreamer } from '../services/streaming'
 import {
   existsSync,
   readdirSync,
@@ -5686,11 +5688,7 @@ ipcMain.handle('embedding:stopAutoEmbed', async (): Promise<void> => {
 
 ipcMain.handle(
   'embedding:search',
-  async (
-    _event,
-    query: string,
-    options?: SearchOptions
-  ): Promise<SearchResult[]> => {
+  async (_event, query: string, options?: SearchOptions): Promise<SearchResult[]> => {
     const manager = await ensureEmbeddingManager()
     return manager.search(query, options)
   }
@@ -5781,10 +5779,13 @@ ipcMain.handle('embedding:processSession', async (_event, filePath: string): Pro
   return manager.processSessionFile(filePath)
 })
 
-ipcMain.handle('embedding:resetSessionPosition', async (_event, filePath: string): Promise<void> => {
-  const manager = await ensureEmbeddingManager()
-  manager.resetSessionPosition(filePath)
-})
+ipcMain.handle(
+  'embedding:resetSessionPosition',
+  async (_event, filePath: string): Promise<void> => {
+    const manager = await ensureEmbeddingManager()
+    manager.resetSessionPosition(filePath)
+  }
+)
 
 ipcMain.handle('embedding:resetAllSessionPositions', async (): Promise<void> => {
   const manager = await ensureEmbeddingManager()
@@ -5799,9 +5800,69 @@ ipcMain.handle(
   }
 )
 
+// =============================================================================
+// Worker Pool Handlers (deploy-scb9)
+// =============================================================================
+
+ipcMain.handle('workers:stats', () => {
+  return workerPool.getStats()
+})
+
+ipcMain.handle('workers:isReady', () => {
+  return workerPool.isInitialized()
+})
+
+ipcMain.handle('workers:getConfig', () => {
+  return workerPool.getConfig()
+})
+
+ipcMain.handle(
+  'workers:runInteractive',
+  (_event, taskName: string, data: unknown, transferList?: Transferable[]) => {
+    return workerPool.runInteractive(taskName, data, transferList)
+  }
+)
+
+ipcMain.handle(
+  'workers:runBackground',
+  (_event, taskName: string, data: unknown, transferList?: Transferable[]) => {
+    return workerPool.runBackground(taskName, data, transferList)
+  }
+)
+
+// =============================================================================
+// MessagePort Streaming Handlers (deploy-482i)
+// =============================================================================
+// Note: Most streaming is handled via MessagePorts (zero-copy)
+// These handlers are for stream management and stats
+
+ipcMain.handle('stream:stats', () => {
+  return messagePortStreamer.getStats()
+})
+
+ipcMain.handle('stream:list', () => {
+  return messagePortStreamer.listStreams()
+})
+
+ipcMain.handle('stream:getStatus', (_event, streamId: string) => {
+  return messagePortStreamer.getStreamStatus(streamId)
+})
+
+ipcMain.handle('stream:close', (_event, streamId: string) => {
+  return messagePortStreamer.closeStream(streamId)
+})
+
 // Shutdown handler for graceful cleanup
 app.on('before-quit', async () => {
   if (embeddingManagerInitialized) {
     await shutdownEmbeddingManager()
   }
+
+  // Shutdown worker pools
+  if (workerPool.isInitialized()) {
+    await workerPool.shutdown()
+  }
+
+  // Close all active streams
+  messagePortStreamer.closeAll()
 })
