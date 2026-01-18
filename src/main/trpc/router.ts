@@ -12,6 +12,8 @@
 
 import { router } from './trpc'
 import { demoRouter } from '../controllers/demo.controller'
+import { systemRouter } from '../controllers/system.controller'
+import { memoryRouter } from '../controllers/memory.controller'
 
 // ============================================================================
 // MAIN APP ROUTER
@@ -21,14 +23,18 @@ export const appRouter = router({
   // Spike/Demo controller - proves the pattern works
   demo: demoRouter,
 
+  // System status and resources (migrated from handlers.ts)
+  system: systemRouter,
+
+  // Memory operations - Postgres/Qdrant/Memgraph (migrated from handlers.ts)
+  memory: memoryRouter,
+
   // Future controllers (migrate from handlers.ts):
   // session: sessionRouter,     // Claude process management
-  // memory: memoryRouter,       // Postgres/Qdrant/Memgraph
   // embedding: embeddingRouter, // Vector operations
   // mcp: mcpRouter,             // MCP proxy/federation
   // audit: auditRouter,         // Logging, SIEM
   // security: securityRouter,   // Credentials, governance
-  // system: systemRouter,       // Status, resources
 })
 
 // Export type for frontend - this is the magic!
