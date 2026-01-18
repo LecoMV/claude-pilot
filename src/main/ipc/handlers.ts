@@ -1,7 +1,12 @@
 import { ipcMain, BrowserWindow, type WebContents, shell, dialog, app } from 'electron'
 import pkg from 'electron-updater'
 const { autoUpdater } = pkg
-import { execSync, spawn, ChildProcess } from 'child_process'
+import { spawn, ChildProcess } from 'child_process'
+import { cpus, totalmem, freemem } from 'os'
+import { spawnAsync, commandExists } from '../utils/spawn-async'
+import { findClaudeProcesses, getChildren } from '../utils/process-utils'
+import QdrantService from '../services/memory/qdrant.service'
+import { glob } from 'glob'
 import { memgraphService } from '../services/memgraph'
 import { postgresService } from '../services/postgresql'
 import { credentialService } from '../services/credentials'
@@ -342,14 +347,14 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('system:resources', (): ResourceUsage => {
+  ipcMain.handle('system:resources', (): Promise<ResourceUsage> => {
     return getResourceUsage()
   })
 
   // Claude handlers
-  ipcMain.handle('claude:version', (): string => {
+  ipcMain.handle('claude:version', async (): Promise<string> => {
     try {
-      const result = execSync('claude --version', { encoding: 'utf-8' })
+      const result = await spawnAsync('claude', ['--version'], { timeout: 2000 })
       return result.trim()
     } catch {
       return 'unknown'
@@ -1145,16 +1150,23 @@ export function registerIpcHandlers(): void {
   })
 }
 
-function getClaudeStatus() {
+async function getClaudeStatus() {
   // Return cached data if available (30 second cache - version rarely changes)
   type ClaudeStatus = { online: boolean; version?: string; lastCheck: number }
   const cached = dataCache.get<ClaudeStatus>('claudeStatus')
   if (cached) return cached
 
   try {
-    execSync('which claude', { encoding: 'utf-8', timeout: 1000 })
-    const version = execSync('claude --version', { encoding: 'utf-8', timeout: 2000 }).trim()
-    const status = { online: true, version, lastCheck: Date.now() }
+    // Use commandExists from spawn-async (no shell)
+    const exists = await commandExists('claude')
+    if (!exists) {
+      const status = { online: false, lastCheck: Date.now() }
+      dataCache.set('claudeStatus', status, 5000)
+      return status
+    }
+
+    const version = await spawnAsync('claude', ['--version'], { timeout: 2000 })
+    const status = { online: true, version: version.trim(), lastCheck: Date.now() }
     dataCache.set('claudeStatus', status, 30000) // 30s cache
     return status
   } catch {
@@ -1173,7 +1185,7 @@ async function getMCPStatus() {
   }
 }
 
-function getMemoryStatus() {
+async function getMemoryStatus() {
   // Return cached data if available (10 second cache)
   type MemStatus = {
     postgresql: { online: boolean }
@@ -1183,45 +1195,30 @@ function getMemoryStatus() {
   const cached = dataCache.get<MemStatus>('memoryStatus')
   if (cached) return cached
 
-  // Check PostgreSQL
-  let postgresql = { online: false }
-  try {
-    execSync('pg_isready -h localhost -p 5433', { encoding: 'utf-8', timeout: 1000 })
-    postgresql = { online: true }
-  } catch {
-    // PostgreSQL offline
-  }
+  // Check all services in parallel using native clients (no shell commands)
+  const [pgOnline, mgOnline, qdrantOnline] = await Promise.all([
+    // PostgreSQL - use native pg driver
+    postgresService.isConnected().catch(() => false),
 
-  // Check Memgraph via direct TCP port check (port 7687 - Bolt protocol)
-  // Using network check instead of podman exec to avoid cgroup permission issues in Electron
-  let memgraph = { online: false }
-  try {
-    execSync('nc -z localhost 7687', { encoding: 'utf-8', timeout: 1000 })
-    memgraph = { online: true }
-  } catch {
-    // Memgraph offline
-  }
+    // Memgraph - use native neo4j driver
+    memgraphService.isConnected().catch(() => false),
 
-  // Check Qdrant
-  let qdrant = { online: false }
-  try {
-    const result = execSync('curl -s http://localhost:6333/collections', {
-      encoding: 'utf-8',
-      timeout: 2000,
-    })
-    if (result.includes('result')) {
-      qdrant = { online: true }
-    }
-  } catch {
-    // Qdrant offline
-  }
+    // Qdrant - use native client
+    QdrantService.getInstance()
+      .healthCheck()
+      .catch(() => false),
+  ])
 
-  const status = { postgresql, memgraph, qdrant }
+  const status = {
+    postgresql: { online: pgOnline },
+    memgraph: { online: mgOnline },
+    qdrant: { online: qdrantOnline },
+  }
   dataCache.set('memoryStatus', status, 10000) // 10s cache
   return status
 }
 
-function getOllamaServiceStatus() {
+async function getOllamaServiceStatus() {
   // Return cached data if available (10 second cache)
   const cached = dataCache.get<{ online: boolean; modelCount: number; runningModels: number }>(
     'ollamaStatus'
@@ -1229,29 +1226,33 @@ function getOllamaServiceStatus() {
   if (cached) return cached
 
   try {
-    const result = execSync('curl -s http://localhost:11434/api/tags', {
-      encoding: 'utf-8',
-      timeout: 2000,
-    })
-    const data = JSON.parse(result)
-    const models = data.models || []
+    // Use native fetch instead of curl (no shell)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 2000)
 
-    // Check for running models
+    const [tagsResponse, psResponse] = await Promise.all([
+      fetch('http://localhost:11434/api/tags', { signal: controller.signal }),
+      fetch('http://localhost:11434/api/ps', { signal: controller.signal }).catch(() => null),
+    ])
+
+    clearTimeout(timeout)
+
+    if (!tagsResponse.ok) {
+      throw new Error('Ollama not responding')
+    }
+
+    const tagsData = (await tagsResponse.json()) as { models?: unknown[] }
+    const modelCount = tagsData.models?.length || 0
+
     let runningModels = 0
-    try {
-      const psResult = execSync('curl -s http://localhost:11434/api/ps', {
-        encoding: 'utf-8',
-        timeout: 2000,
-      })
-      const psData = JSON.parse(psResult)
+    if (psResponse?.ok) {
+      const psData = (await psResponse.json()) as { models?: unknown[] }
       runningModels = psData.models?.length || 0
-    } catch {
-      // Ignore - just means no models running
     }
 
     const status = {
       online: true,
-      modelCount: models.length,
+      modelCount,
       runningModels,
     }
     dataCache.set('ollamaStatus', status, 10000) // 10s cache
@@ -1267,64 +1268,60 @@ function getOllamaServiceStatus() {
   }
 }
 
-function getResourceUsage(): ResourceUsage {
+async function getResourceUsage(): Promise<ResourceUsage> {
   // Return cached data if available (5 second cache)
   const cached = dataCache.get<ResourceUsage>('resourceUsage')
   if (cached) return cached
 
-  // Get CPU usage
+  // Get CPU usage from Node.js os module (no shell command needed)
   let cpu = 0
-  try {
-    const result = execSync("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'", {
-      encoding: 'utf-8',
-      timeout: 2000,
-    })
-    cpu = parseFloat(result) || 0
-  } catch {
-    // Ignore
+  const cpuInfo = cpus()
+  if (cpuInfo.length > 0) {
+    const totalIdle = cpuInfo.reduce((acc, c) => acc + c.times.idle, 0)
+    const totalTick = cpuInfo.reduce(
+      (acc, c) => acc + c.times.user + c.times.nice + c.times.sys + c.times.idle + c.times.irq,
+      0
+    )
+    cpu = totalTick > 0 ? ((totalTick - totalIdle) / totalTick) * 100 : 0
   }
 
-  // Get memory usage
-  let memory = 0
-  try {
-    const result = execSync("free | grep Mem | awk '{print $3/$2 * 100}'", {
-      encoding: 'utf-8',
-      timeout: 1000,
-    })
-    memory = parseFloat(result) || 0
-  } catch {
-    // Ignore
-  }
+  // Get memory usage from Node.js os module (no shell command needed)
+  const totalMem = totalmem()
+  const freeMem = freemem()
+  const memory = ((totalMem - freeMem) / totalMem) * 100
 
-  // Get disk usage
+  // Get disk usage using spawnAsync (no shell pipes)
   const disk = { used: 0, total: 0, claudeData: 0 }
   try {
-    const dfResult = execSync("df -B1 / | tail -1 | awk '{print $3, $2}'", {
-      encoding: 'utf-8',
-      timeout: 1000,
-    })
-    const [used, total] = dfResult.trim().split(' ').map(Number)
-    disk.used = used
-    disk.total = total
+    const dfOutput = await spawnAsync('df', ['-B1', '/'], { timeout: 1000 })
+    const lines = dfOutput.trim().split('\n')
+    if (lines.length >= 2) {
+      const parts = lines[1].split(/\s+/)
+      if (parts.length >= 4) {
+        disk.total = parseInt(parts[1]) || 0
+        disk.used = parseInt(parts[2]) || 0
+      }
+    }
 
     // Get Claude data size (cache for 30 seconds - expensive operation)
     const cachedClaudeData = dataCache.get<number>('claudeDataSize')
     if (cachedClaudeData !== null) {
       disk.claudeData = cachedClaudeData
     } else if (existsSync(CLAUDE_DIR)) {
-      const duResult = execSync(`du -sb ${CLAUDE_DIR} 2>/dev/null | cut -f1`, {
-        encoding: 'utf-8',
-        timeout: 5000,
-      })
-      disk.claudeData = parseInt(duResult.trim()) || 0
-      dataCache.set('claudeDataSize', disk.claudeData, 30000) // 30s cache
+      try {
+        const duOutput = await spawnAsync('du', ['-sb', CLAUDE_DIR], { timeout: 5000 })
+        disk.claudeData = parseInt(duOutput.split('\t')[0]) || 0
+        dataCache.set('claudeDataSize', disk.claudeData, 30000) // 30s cache
+      } catch {
+        // Ignore du errors
+      }
     }
   } catch {
-    // Ignore
+    // Ignore disk errors
   }
 
   // Get GPU usage
-  const gpu = getGPUUsage()
+  const gpu = await getGPUUsage()
 
   const result = { cpu, memory, disk, gpu }
   dataCache.set('resourceUsage', result, 5000) // 5s cache
@@ -1332,18 +1329,22 @@ function getResourceUsage(): ResourceUsage {
 }
 
 // Get GPU usage with fallback for when nvidia-smi fails
-function getGPUUsage(): GPUUsage {
+async function getGPUUsage(): Promise<GPUUsage> {
   // Return cached data if available (5 second cache)
   const cached = dataCache.get<GPUUsage>('gpuUsage')
   if (cached) return cached
 
   const gpuInfo: GPUUsage = { available: false }
 
-  // First try nvidia-smi (most reliable when working)
+  // First try nvidia-smi using spawnAsync (no shell)
   try {
-    const nvidiaSmi = execSync(
-      'nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu,driver_version --format=csv,noheader,nounits',
-      { encoding: 'utf-8', timeout: 3000 }
+    const nvidiaSmi = await spawnAsync(
+      'nvidia-smi',
+      [
+        '--query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu,driver_version',
+        '--format=csv,noheader,nounits',
+      ],
+      { timeout: 3000 }
     )
     const parts = nvidiaSmi.trim().split(', ')
     if (parts.length >= 6) {
@@ -1367,7 +1368,7 @@ function getGPUUsage(): GPUUsage {
     }
   }
 
-  // Fallback: Try /proc/driver/nvidia/gpus for basic GPU info
+  // Fallback: Try /proc/driver/nvidia/gpus for basic GPU info (sync file read is fine)
   try {
     const nvidiaGpusDir = '/proc/driver/nvidia/gpus'
     if (existsSync(nvidiaGpusDir)) {
@@ -1389,24 +1390,24 @@ function getGPUUsage(): GPUUsage {
     // Ignore fallback errors
   }
 
-  // Fallback: Try lspci for GPU detection
+  // Fallback: Try lspci for GPU detection using spawnAsync (no shell)
   if (!gpuInfo.name) {
     try {
-      const lspciResult = execSync("lspci | grep -i 'vga\\|3d\\|nvidia' | head -1", {
-        encoding: 'utf-8',
-        timeout: 2000,
-      })
-      if (lspciResult.includes('NVIDIA')) {
+      const lspciOutput = await spawnAsync('lspci', [], { timeout: 2000 })
+      const nvidiaLine = lspciOutput
+        .split('\n')
+        .find((line) => /vga|3d|display/i.test(line) && /nvidia/i.test(line))
+      if (nvidiaLine) {
         gpuInfo.available = true
-        const match = lspciResult.match(/NVIDIA\s+Corporation\s+(.+?)(?:\s+\[|$)/i)
-        gpuInfo.name = match ? match[1].trim() : 'NVIDIA GPU (detected via lspci)'
+        const match = nvidiaLine.match(/NVIDIA[^[]+/i)
+        gpuInfo.name = match ? match[0].trim() : 'NVIDIA GPU (detected via lspci)'
       }
     } catch {
       // lspci failed
     }
   }
 
-  // Fallback: Get driver version from /sys
+  // Fallback: Get driver version from /sys (sync file read is fine)
   if (!gpuInfo.driverVersion) {
     try {
       if (existsSync('/sys/module/nvidia/version')) {
@@ -1676,23 +1677,18 @@ async function getMemoryStats(): Promise<{
     console.error('Failed to get Memgraph stats:', error)
   }
 
-  // Qdrant count - sum across all collections
+  // Qdrant count - sum across all collections using native client
   try {
-    const collectionsResult = execSync('curl -s http://localhost:6333/collections', {
-      encoding: 'utf-8',
-      timeout: 3000,
-    })
-    const collections = JSON.parse(collectionsResult)
+    const qdrantService = QdrantService.getInstance()
+    const collections = await qdrantService.listCollections()
     let totalVectors = 0
 
-    for (const col of collections.result?.collections || []) {
+    for (const colName of collections) {
       try {
-        const colResult = execSync(`curl -s http://localhost:6333/collections/${col.name}`, {
-          encoding: 'utf-8',
-          timeout: 2000,
-        })
-        const colData = JSON.parse(colResult)
-        totalVectors += colData.result?.points_count || 0
+        const colStats = await qdrantService.getCollectionStats(
+          colName as 'claude_memories' | 'mem0_memories'
+        )
+        totalVectors += colStats.pointsCount
       } catch {
         // Skip failed collection
       }
@@ -2372,22 +2368,27 @@ async function executeRawQuery(
         }
 
         const [, method, path, bodyStr] = match
-        const cmdParts = [`curl -s -X ${method.toUpperCase()}`]
 
-        if (bodyStr) {
-          cmdParts.push(`-H "Content-Type: application/json"`)
-          cmdParts.push(`-d '${bodyStr}'`)
+        // Use native fetch instead of curl (no shell)
+        const fetchOptions: RequestInit = {
+          method: method.toUpperCase(),
+          headers: bodyStr ? { 'Content-Type': 'application/json' } : undefined,
+          body: bodyStr || undefined,
         }
-        cmdParts.push(`http://localhost:6333${path}`)
 
-        const cmdResult = execSync(cmdParts.join(' '), {
-          encoding: 'utf-8',
-          timeout: 30000,
-          shell: '/bin/bash',
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 30000)
+
+        const response = await fetch(`http://localhost:6333${path}`, {
+          ...fetchOptions,
+          signal: controller.signal,
         })
+        clearTimeout(timeout)
+
+        const responseText = await response.text()
 
         try {
-          const parsed = JSON.parse(cmdResult)
+          const parsed = JSON.parse(responseText)
           return {
             success: true,
             data: parsed,
@@ -2396,7 +2397,7 @@ async function executeRawQuery(
         } catch {
           return {
             success: true,
-            data: cmdResult.trim(),
+            data: responseText.trim(),
             executionTime: Date.now() - startTime,
           }
         }
@@ -2939,14 +2940,12 @@ function launchProfile(id: string, projectPath?: string): { success: boolean; er
       'xterm',
     ]
 
+    // Use commandExists from spawn-async (no shell)
     let terminalCmd: string | null = null
     for (const term of terminals) {
-      try {
-        execSync(`which ${term}`, { stdio: 'ignore' })
+      if (await commandExists(term)) {
         terminalCmd = term
         break
-      } catch {
-        // Terminal not found, try next
       }
     }
 
@@ -3219,18 +3218,19 @@ function getRecentSessions(): SessionSummary[] {
 }
 
 // Services functions
-function getSystemdServices(): SystemdService[] {
+async function getSystemdServices(): Promise<SystemdService[]> {
   const services: SystemdService[] = []
   const importantServices = ['postgresql', 'docker', 'ssh', 'nginx', 'redis', 'memcached', 'cron']
 
   try {
-    // Get list of services
-    const result = execSync(
-      'systemctl list-units --type=service --all --no-pager --plain | head -50',
-      { encoding: 'utf-8', timeout: 5000 }
+    // Use spawnAsync with args array (no shell pipes)
+    const result = await spawnAsync(
+      'systemctl',
+      ['list-units', '--type=service', '--all', '--no-pager', '--plain'],
+      { timeout: 5000 }
     )
 
-    const lines = result.trim().split('\n').slice(1) // Skip header
+    const lines = result.trim().split('\n').slice(1, 51) // Skip header, limit to 50
 
     for (const line of lines) {
       const parts = line.trim().split(/\s+/)
@@ -3268,14 +3268,11 @@ function getSystemdServices(): SystemdService[] {
   return services.slice(0, 20)
 }
 
-function getPodmanContainers(): PodmanContainer[] {
+async function getPodmanContainers(): Promise<PodmanContainer[]> {
   const containers: PodmanContainer[] = []
 
   try {
-    const result = execSync('podman ps -a --format json 2>/dev/null', {
-      encoding: 'utf-8',
-      timeout: 10000,
-    })
+    const result = await spawnAsync('podman', ['ps', '-a', '--format', 'json'], { timeout: 10000 })
 
     if (!result.trim()) return containers
 
@@ -3315,14 +3312,15 @@ function getPodmanContainers(): PodmanContainer[] {
   return containers
 }
 
-function systemdAction(name: string, action: 'start' | 'stop' | 'restart'): boolean {
+async function systemdAction(name: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> {
   try {
     const safeName = sanitizeServiceName(name)
     if (!safeName) {
       console.error('Invalid service name:', name)
       return false
     }
-    execSync(`sudo systemctl ${action} ${safeName}`, { encoding: 'utf-8', timeout: 30000 })
+    // Use spawnAsync with args array (SECURITY: no shell, arguments are literals)
+    await spawnAsync('systemctl', ['--user', action, safeName], { timeout: 30000 })
     return true
   } catch (error) {
     console.error(`Failed to ${action} service ${name}:`, error)
@@ -3330,14 +3328,15 @@ function systemdAction(name: string, action: 'start' | 'stop' | 'restart'): bool
   }
 }
 
-function podmanAction(id: string, action: 'start' | 'stop' | 'restart'): boolean {
+async function podmanAction(id: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> {
   try {
     const safeId = sanitizeContainerId(id)
     if (!safeId) {
       console.error('Invalid container ID:', id)
       return false
     }
-    execSync(`podman ${action} ${safeId}`, { encoding: 'utf-8', timeout: 30000 })
+    // Use spawnAsync with args array (SECURITY: no shell, arguments are literals)
+    await spawnAsync('podman', [action, safeId], { timeout: 30000 })
     return true
   } catch (error) {
     console.error(`Failed to ${action} container ${id}:`, error)
@@ -3363,20 +3362,19 @@ function parseLogLevel(line: string): LogLevel {
   return 'info'
 }
 
-function getRecentLogs(limit = 200): LogEntry[] {
+async function getRecentLogs(limit = 200): Promise<LogEntry[]> {
   const logs: LogEntry[] = []
+  const logCount = Math.floor(limit / 4)
 
-  // Read from journalctl for system logs
+  // Read from journalctl for system logs using spawnAsync
   try {
-    const sysLogs = execSync(
-      `journalctl --no-pager -n ${Math.floor(limit / 4)} -o short-iso 2>/dev/null | tail -${Math.floor(limit / 4)}`,
-      { encoding: 'utf-8', timeout: 5000 }
+    const sysLogs = await spawnAsync(
+      'journalctl',
+      ['--no-pager', '-n', String(logCount), '-o', 'short-iso'],
+      { timeout: 5000 }
     )
 
-    for (const line of sysLogs
-      .trim()
-      .split('\n')
-      .slice(-Math.floor(limit / 4))) {
+    for (const line of sysLogs.trim().split('\n').slice(-logCount)) {
       if (!line.trim()) continue
       // Parse journalctl format: 2024-01-15T12:34:56+00:00 hostname process[pid]: message
       const match = line.match(/^(\S+)\s+\S+\s+(\S+)\[\d+\]:\s*(.*)$/)
@@ -3395,7 +3393,7 @@ function getRecentLogs(limit = 200): LogEntry[] {
     // Ignore journalctl errors
   }
 
-  // Read Claude Code logs from recent session transcripts
+  // Read Claude Code logs from recent session transcripts (sync file reads are fine)
   const projectsDir = join(CLAUDE_DIR, 'projects')
   if (existsSync(projectsDir)) {
     try {
@@ -3450,11 +3448,12 @@ function getRecentLogs(limit = 200): LogEntry[] {
     }
   }
 
-  // Read MCP server logs
+  // Read MCP server logs using spawnAsync
   try {
-    const mcpLogs = execSync(
-      'journalctl --user -u "mcp-*" --no-pager -n 20 -o short-iso 2>/dev/null',
-      { encoding: 'utf-8', timeout: 3000 }
+    const mcpLogs = await spawnAsync(
+      'journalctl',
+      ['--user', '-u', 'mcp-*', '--no-pager', '-n', '20', '-o', 'short-iso'],
+      { timeout: 3000 }
     )
 
     for (const line of mcpLogs.trim().split('\n').slice(-20)) {
@@ -3487,33 +3486,32 @@ function stopLogStream(): boolean {
   return logStreamManager.stop()
 }
 
-// Ollama functions
+// Ollama functions - All using native fetch (no curl execSync)
 const OLLAMA_API = 'http://localhost:11434'
 
-function getOllamaStatus(): OllamaStatus {
+async function getOllamaStatus(): Promise<OllamaStatus> {
   try {
-    const result = execSync(`curl -s ${OLLAMA_API}/api/version`, {
-      encoding: 'utf-8',
-      timeout: 3000,
-    })
-    const data = JSON.parse(result)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000)
+    const response = await fetch(`${OLLAMA_API}/api/version`, { signal: controller.signal })
+    clearTimeout(timeout)
+    if (!response.ok) return { online: false }
+    const data = (await response.json()) as { version: string }
     return { online: true, version: data.version }
   } catch {
     return { online: false }
   }
 }
 
-function getOllamaModels(): OllamaModel[] {
+async function getOllamaModels(): Promise<OllamaModel[]> {
   try {
-    const result = execSync(`curl -s ${OLLAMA_API}/api/tags`, {
-      encoding: 'utf-8',
-      timeout: 10000,
-    })
-    const data = JSON.parse(result)
-    if (!data.models) return []
-
-    return data.models.map(
-      (m: {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+    const response = await fetch(`${OLLAMA_API}/api/tags`, { signal: controller.signal })
+    clearTimeout(timeout)
+    if (!response.ok) return []
+    const data = (await response.json()) as {
+      models?: Array<{
         name: string
         size: number
         digest: string
@@ -3524,62 +3522,68 @@ function getOllamaModels(): OllamaModel[] {
           parameter_size?: string
           quantization_level?: string
         }
-      }) => ({
-        name: m.name,
-        size: m.size,
-        digest: m.digest,
-        modifiedAt: m.modified_at,
-        details: m.details
-          ? {
-              format: m.details.format,
-              family: m.details.family,
-              parameterSize: m.details.parameter_size,
-              quantizationLevel: m.details.quantization_level,
-            }
-          : undefined,
-      })
-    )
-  } catch {
-    return []
-  }
-}
-
-function getRunningModels(): OllamaRunningModel[] {
-  try {
-    const result = execSync(`curl -s ${OLLAMA_API}/api/ps`, {
-      encoding: 'utf-8',
-      timeout: 5000,
-    })
-    const data = JSON.parse(result)
+      }>
+    }
     if (!data.models) return []
 
-    return data.models.map(
-      (m: { name: string; model: string; size: number; digest: string; expires_at: string }) => ({
-        name: m.name,
-        model: m.model,
-        size: m.size,
-        digest: m.digest,
-        expiresAt: m.expires_at,
-      })
-    )
+    return data.models.map((m) => ({
+      name: m.name,
+      size: m.size,
+      digest: m.digest,
+      modifiedAt: m.modified_at,
+      details: m.details
+        ? {
+            format: m.details.format,
+            family: m.details.family,
+            parameterSize: m.details.parameter_size,
+            quantizationLevel: m.details.quantization_level,
+          }
+        : undefined,
+    }))
   } catch {
     return []
   }
 }
 
-function pullOllamaModel(model: string): boolean {
+async function getRunningModels(): Promise<OllamaRunningModel[]> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 5000)
+    const response = await fetch(`${OLLAMA_API}/api/ps`, { signal: controller.signal })
+    clearTimeout(timeout)
+    if (!response.ok) return []
+    const data = (await response.json()) as {
+      models?: Array<{
+        name: string
+        model: string
+        size: number
+        digest: string
+        expires_at: string
+      }>
+    }
+    if (!data.models) return []
+
+    return data.models.map((m) => ({
+      name: m.name,
+      model: m.model,
+      size: m.size,
+      digest: m.digest,
+      expiresAt: m.expires_at,
+    }))
+  } catch {
+    return []
+  }
+}
+
+async function pullOllamaModel(model: string): Promise<boolean> {
   try {
     const safeModel = sanitizeModelName(model)
     if (!safeModel) {
       console.error('Invalid model name:', model)
       return false
     }
-    // Start pull in background (will stream progress)
-    execSync(`ollama pull ${safeModel}`, {
-      encoding: 'utf-8',
-      timeout: 600000, // 10 minutes max
-      stdio: 'pipe',
-    })
+    // Use spawnAsync with args array (SECURITY: no shell, 10 minute timeout)
+    await spawnAsync('ollama', ['pull', safeModel], { timeout: 600000 })
     return true
   } catch (error) {
     console.error('Failed to pull model:', error)
@@ -3587,17 +3591,15 @@ function pullOllamaModel(model: string): boolean {
   }
 }
 
-function deleteOllamaModel(model: string): boolean {
+async function deleteOllamaModel(model: string): Promise<boolean> {
   try {
     const safeModel = sanitizeModelName(model)
     if (!safeModel) {
       console.error('Invalid model name:', model)
       return false
     }
-    execSync(`ollama rm ${safeModel}`, {
-      encoding: 'utf-8',
-      timeout: 30000,
-    })
+    // Use spawnAsync with args array (SECURITY: no shell)
+    await spawnAsync('ollama', ['rm', safeModel], { timeout: 30000 })
     return true
   } catch (error) {
     console.error('Failed to delete model:', error)
@@ -3605,40 +3607,48 @@ function deleteOllamaModel(model: string): boolean {
   }
 }
 
-function runOllamaModel(model: string): boolean {
+async function runOllamaModel(model: string): Promise<boolean> {
   try {
     const safeModel = sanitizeModelName(model)
     if (!safeModel) {
       console.error('Invalid model name:', model)
       return false
     }
-    // Run model in background (just loads it into memory)
-    const body = JSON.stringify({ model: safeModel, keep_alive: '10m' })
-    execSync(`curl -s -X POST ${OLLAMA_API}/api/generate -d '${body}'`, {
-      encoding: 'utf-8',
-      timeout: 60000,
+    // Use native fetch instead of curl (no shell)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 60000)
+    const response = await fetch(`${OLLAMA_API}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: safeModel, keep_alive: '10m' }),
+      signal: controller.signal,
     })
-    return true
+    clearTimeout(timeout)
+    return response.ok
   } catch (error) {
     console.error('Failed to run model:', error)
     return false
   }
 }
 
-function stopOllamaModel(model: string): boolean {
+async function stopOllamaModel(model: string): Promise<boolean> {
   try {
     const safeModel = sanitizeModelName(model)
     if (!safeModel) {
       console.error('Invalid model name:', model)
       return false
     }
-    // Stop model by setting keep_alive to 0
-    const body = JSON.stringify({ model: safeModel, keep_alive: 0 })
-    execSync(`curl -s -X POST ${OLLAMA_API}/api/generate -d '${body}'`, {
-      encoding: 'utf-8',
-      timeout: 30000,
+    // Use native fetch instead of curl (no shell)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 30000)
+    const response = await fetch(`${OLLAMA_API}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: safeModel, keep_alive: 0 }),
+      signal: controller.signal,
     })
-    return true
+    clearTimeout(timeout)
+    return response.ok
   } catch (error) {
     console.error('Failed to stop model:', error)
     return false
@@ -4060,19 +4070,18 @@ async function discoverExternalSessions(): Promise<ExternalSession[]> {
   if (!existsSync(projectsDir)) return sessions
 
   try {
-    // Find all JSONL files (excluding subagents)
-    const findResult = execSync(
-      `find "${projectsDir}" -name "*.jsonl" -type f -not -path "*/subagents/*" 2>/dev/null | head -100`,
-      { encoding: 'utf-8', timeout: 10000 }
-    )
+    // Use glob instead of find (pure JavaScript, no shell)
+    const files = await glob('**/*.jsonl', {
+      cwd: projectsDir,
+      ignore: '**/subagents/**',
+      absolute: true,
+    })
 
-    const files = findResult
-      .trim()
-      .split('\n')
-      .filter((f) => f.trim())
+    // Limit to 100 files
+    const limitedFiles = files.slice(0, 100)
 
     // Parse each session file
-    for (const filePath of files) {
+    for (const filePath of limitedFiles) {
       const session = await parseSessionFile(filePath)
       if (session) {
         sessions.push(session)
@@ -4090,18 +4099,18 @@ async function discoverExternalSessions(): Promise<ExternalSession[]> {
 }
 
 // Get messages from a session
-function getSessionMessages(sessionId: string, limit = 100): SessionMessage[] {
+async function getSessionMessages(sessionId: string, limit = 100): Promise<SessionMessage[]> {
   const projectsDir = join(CLAUDE_DIR, 'projects')
   const messages: SessionMessage[] = []
 
   try {
-    // Find the session file
-    const findResult = execSync(
-      `find "${projectsDir}" -name "${sessionId}.jsonl" -type f 2>/dev/null | head -1`,
-      { encoding: 'utf-8', timeout: 5000 }
-    )
+    // Use glob instead of find (pure JavaScript, no shell)
+    const files = await glob(`**/${sessionId}.jsonl`, {
+      cwd: projectsDir,
+      absolute: true,
+    })
 
-    const filePath = findResult.trim()
+    const filePath = files[0]
     if (!filePath || !existsSync(filePath)) return messages
 
     const content = readFileSync(filePath, 'utf-8')
@@ -4202,26 +4211,15 @@ function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
   const processes: ClaudeProcessInfo[] = []
 
   try {
-    // Get detailed process info for claude processes
-    const psOutput = execSync(
-      `ps -eo pid,ppid,tty,args --no-headers 2>/dev/null | grep -E "claude\\s|claude-eng\\s|claude-sec\\s|claude\\+\\s" | grep -v grep`,
-      { encoding: 'utf-8', timeout: 5000 }
-    ).trim()
+    // Use findClaudeProcesses from process-utils (reads /proc, no shell)
+    const claudeProcs = findClaudeProcesses()
 
-    if (!psOutput) return processes
-
-    const lines = psOutput.split('\n').filter((l) => l.trim())
-
-    for (const line of lines) {
-      const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/)
-      if (!match) continue
-
-      const [, pidStr, , tty, cmdLine] = match
-      const pid = parseInt(pidStr, 10)
+    for (const proc of claudeProcs) {
+      const cmdLine = proc.cmdline
       const args = cmdLine.split(/\s+/)
 
       // Skip if not a main claude process (filter out wrappers and subprocesses)
-      const mainCmd = args[0]
+      const mainCmd = args[0] || ''
       if (!mainCmd.includes('claude') || mainCmd.includes('conmon') || mainCmd.includes('podman'))
         continue
 
@@ -4249,31 +4247,23 @@ function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
       const permIdx = args.indexOf('--permission-mode')
       const permissionMode = permIdx >= 0 ? args[permIdx + 1] : undefined
 
-      // Detect active MCP servers by looking at child processes
+      // Detect active MCP servers by looking at child processes using process-utils
       const mcpServers: string[] = []
-      try {
-        const childOutput = execSync(`ps --ppid ${pid} -o args --no-headers 2>/dev/null`, {
-          encoding: 'utf-8',
-          timeout: 2000,
-        }).trim()
-
-        const childLines = childOutput.split('\n')
-        for (const childLine of childLines) {
-          // Extract MCP server names from process commands
-          if (childLine.includes('claude-flow')) mcpServers.push('claude-flow')
-          if (childLine.includes('mcp-server-postgres')) mcpServers.push('postgres')
-          if (childLine.includes('mcp-server-filesystem')) mcpServers.push('filesystem')
-          if (childLine.includes('context7')) mcpServers.push('context7')
-          if (childLine.includes('playwright')) mcpServers.push('playwright')
-          if (childLine.includes('--claude-in-chrome-mcp')) mcpServers.push('chrome')
-        }
-      } catch {
-        // Child process detection failed, continue without MCP info
+      const childProcs = getChildren(proc.pid)
+      for (const child of childProcs) {
+        const childCmd = child.cmdline
+        // Extract MCP server names from process commands
+        if (childCmd.includes('claude-flow')) mcpServers.push('claude-flow')
+        if (childCmd.includes('mcp-server-postgres')) mcpServers.push('postgres')
+        if (childCmd.includes('mcp-server-filesystem')) mcpServers.push('filesystem')
+        if (childCmd.includes('context7')) mcpServers.push('context7')
+        if (childCmd.includes('playwright')) mcpServers.push('playwright')
+        if (childCmd.includes('--claude-in-chrome-mcp')) mcpServers.push('chrome')
       }
 
       processes.push({
-        pid,
-        tty: tty === '?' ? 'background' : tty,
+        pid: proc.pid,
+        tty: proc.tty || 'background',
         args,
         profile,
         launchMode,
