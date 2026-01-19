@@ -3,6 +3,8 @@ import 'dotenv/config'
 
 import { app, BrowserWindow, shell, ipcMain, session } from 'electron'
 import { join } from 'path'
+import { hostname } from 'os'
+import { createHash } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import electronUpdater from 'electron-updater'
 const { autoUpdater } = electronUpdater
@@ -18,19 +20,29 @@ import { postgresService } from './services/postgresql'
 import { memgraphService } from './services/memgraph'
 import QdrantService from './services/memory/qdrant.service'
 
-// Initialize Sentry for crash reporting (deploy-b4go)
+// Initialize Sentry for crash reporting and performance monitoring
 // DSN should be set via environment variable SENTRY_DSN
 if (process.env.SENTRY_DSN) {
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
-    release: app.getVersion(),
+    // Release tracking - enables "Number of Releases" metric
+    release: `claude-pilot@${app.getVersion()}`,
     environment: is.dev ? 'development' : 'production',
-    // Only send errors, not performance data
-    tracesSampleRate: 0,
+
+    // Session tracking - enables "Crash Free Sessions/Users" metrics
+    autoSessionTracking: true,
+
+    // Performance monitoring - enables "Apdex" metric
+    // Sample 10% of transactions in production, 100% in dev
+    tracesSampleRate: is.dev ? 1.0 : 0.1,
+    // Profile 10% of sampled transactions for performance insights
+    profilesSampleRate: is.dev ? 1.0 : 0.1,
+
     // Don't send PII
     sendDefaultPii: false,
+
+    // Scrub sensitive data from error reports
     beforeSend(event) {
-      // Scrub sensitive data from error reports
       if (event.request?.headers) {
         delete event.request.headers['authorization']
         delete event.request.headers['cookie']
@@ -38,6 +50,14 @@ if (process.env.SENTRY_DSN) {
       return event
     },
   })
+
+  // Set user context for "Crash Free Users" metric
+  // Using machine ID (hashed) as anonymous user identifier
+  const machineId = hostname()
+  const anonymousUserId = createHash('sha256').update(machineId).digest('hex').slice(0, 16)
+  Sentry.setUser({ id: anonymousUserId })
+
+  console.info('[Sentry] Initialized with release:', `claude-pilot@${app.getVersion()}`)
 }
 
 // Configure auto-updater (deploy-9xfr)
