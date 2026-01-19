@@ -1,66 +1,27 @@
-import '@testing-library/jest-dom'
+/**
+ * Global Test Setup
+ *
+ * This setup file runs for all test environments.
+ * Browser-specific mocks are conditionally applied when window exists.
+ *
+ * @module setup
+ */
+
 import { vi, beforeEach, beforeAll, afterAll } from 'vitest'
 
-// Mock window.electron API for renderer tests
-const mockElectronAPI = {
-  invoke: vi.fn().mockResolvedValue(null),
-  on: vi.fn().mockReturnValue(() => {}),
-  send: vi.fn(),
-}
-
-Object.defineProperty(window, 'electron', {
-  value: mockElectronAPI,
-  writable: true,
-})
+// ===========================================================================
+// COMMON SETUP (ALL ENVIRONMENTS)
+// ===========================================================================
 
 // Reset mocks between tests
 beforeEach(() => {
   vi.clearAllMocks()
 })
 
-// Mock matchMedia for responsive tests
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: vi.fn().mockImplementation((query) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })),
-})
-
-// Mock ResizeObserver
-global.ResizeObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-}))
-
-// Mock IntersectionObserver
-global.IntersectionObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-}))
-
-// Mock clipboard API
-Object.defineProperty(navigator, 'clipboard', {
-  value: {
-    writeText: vi.fn().mockResolvedValue(undefined),
-    readText: vi.fn().mockResolvedValue(''),
-  },
-  writable: true,
-})
-
 // Suppress console.error for expected errors in tests
 const originalConsoleError = console.error
 beforeAll(() => {
   console.error = (...args: unknown[]) => {
-    // Suppress React-related expected errors
     const message = args[0]
     if (
       typeof message === 'string' &&
@@ -76,68 +37,140 @@ afterAll(() => {
   console.error = originalConsoleError
 })
 
-// Mock WebGL2RenderingContext for sigma.js / react-force-graph
-class MockWebGL2RenderingContext {
-  canvas: HTMLCanvasElement
+// ===========================================================================
+// BROWSER-SPECIFIC SETUP (RENDERER TESTS ONLY)
+// ===========================================================================
 
-  constructor(canvas: HTMLCanvasElement) {
-    this.canvas = canvas
+// Only apply browser mocks when running in browser-like environment
+if (typeof window !== 'undefined') {
+  // Import jest-dom matchers for React testing
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('@testing-library/jest-dom')
+
+  // Mock window.electron API for renderer tests
+  const mockElectronAPI = {
+    invoke: vi.fn().mockResolvedValue(null),
+    on: vi.fn().mockReturnValue(() => {}),
+    send: vi.fn(),
   }
 
-  getExtension() {
-    return null
+  Object.defineProperty(window, 'electron', {
+    value: mockElectronAPI,
+    writable: true,
+  })
+
+  // Mock matchMedia for responsive tests
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  })
+
+  // Mock clipboard API
+  if (typeof navigator !== 'undefined') {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+        readText: vi.fn().mockResolvedValue(''),
+      },
+      writable: true,
+    })
   }
-  getParameter() {
-    return 0
+
+  // Mock WebGL2RenderingContext for sigma.js / react-force-graph
+  class MockWebGL2RenderingContext {
+    canvas: HTMLCanvasElement
+
+    constructor(canvas: HTMLCanvasElement) {
+      this.canvas = canvas
+    }
+
+    getExtension() {
+      return null
+    }
+    getParameter() {
+      return 0
+    }
+    createTexture() {
+      return {}
+    }
+    bindTexture() {}
+    texImage2D() {}
+    texParameteri() {}
+    generateMipmap() {}
+    createBuffer() {
+      return {}
+    }
+    bindBuffer() {}
+    bufferData() {}
+    enable() {}
+    disable() {}
+    blendFunc() {}
+    createProgram() {
+      return {}
+    }
+    createShader() {
+      return {}
+    }
+    shaderSource() {}
+    compileShader() {}
+    attachShader() {}
+    linkProgram() {}
+    getProgramParameter() {
+      return true
+    }
+    getShaderParameter() {
+      return true
+    }
+    useProgram() {}
+    getUniformLocation() {
+      return {}
+    }
+    getAttribLocation() {
+      return 0
+    }
+    enableVertexAttribArray() {}
+    vertexAttribPointer() {}
+    clearColor() {}
+    clear() {}
+    drawArrays() {}
+    viewport() {}
   }
-  createTexture() {
-    return {}
-  }
-  bindTexture() {}
-  texImage2D() {}
-  texParameteri() {}
-  generateMipmap() {}
-  createBuffer() {
-    return {}
-  }
-  bindBuffer() {}
-  bufferData() {}
-  enable() {}
-  disable() {}
-  blendFunc() {}
-  createProgram() {
-    return {}
-  }
-  createShader() {
-    return {}
-  }
-  shaderSource() {}
-  compileShader() {}
-  attachShader() {}
-  linkProgram() {}
-  getProgramParameter() {
-    return true
-  }
-  getShaderParameter() {
-    return true
-  }
-  useProgram() {}
-  getUniformLocation() {
-    return {}
-  }
-  getAttribLocation() {
-    return 0
-  }
-  enableVertexAttribArray() {}
-  vertexAttribPointer() {}
-  clearColor() {}
-  clear() {}
-  drawArrays() {}
-  viewport() {}
+
+  // @ts-expect-error - Mocking global WebGL context for sigma.js tests
+  global.WebGL2RenderingContext =
+    MockWebGL2RenderingContext as unknown as typeof WebGL2RenderingContext
+  // @ts-expect-error - Mocking global WebGL context for sigma.js tests
+  global.WebGLRenderingContext =
+    MockWebGL2RenderingContext as unknown as typeof WebGLRenderingContext
 }
 
-// @ts-expect-error - Mocking global WebGL context for sigma.js tests
-global.WebGL2RenderingContext =
-  MockWebGL2RenderingContext as unknown as typeof WebGL2RenderingContext
-// @ts-expect-error - Mocking global WebGL context for sigma.js tests
-global.WebGLRenderingContext = MockWebGL2RenderingContext as unknown as typeof WebGLRenderingContext
+// ===========================================================================
+// NODE-SPECIFIC GLOBALS (MAIN PROCESS TESTS)
+// ===========================================================================
+
+// Mock ResizeObserver (needed even in Node for some imports)
+if (typeof global.ResizeObserver === 'undefined') {
+  global.ResizeObserver = vi.fn().mockImplementation(() => ({
+    observe: vi.fn(),
+    unobserve: vi.fn(),
+    disconnect: vi.fn(),
+  }))
+}
+
+// Mock IntersectionObserver
+if (typeof global.IntersectionObserver === 'undefined') {
+  global.IntersectionObserver = vi.fn().mockImplementation(() => ({
+    observe: vi.fn(),
+    unobserve: vi.fn(),
+    disconnect: vi.fn(),
+  }))
+}

@@ -6,8 +6,26 @@ export default defineConfig({
   plugins: [react()],
   test: {
     globals: true,
+    // Default environment for renderer tests
     environment: 'jsdom',
+    // Match environments to test file locations
+    environmentMatchGlobs: [
+      // Main process tests use Node environment
+      ['src/main/**/*.{test,spec}.ts', 'node'],
+      ['src/__tests__/main/**/*.{test,spec}.ts', 'node'],
+      // Preload tests use Node environment
+      ['src/preload/**/*.{test,spec}.ts', 'node'],
+      // Shared tests use Node environment
+      ['src/shared/**/*.{test,spec}.ts', 'node'],
+      ['src/__tests__/shared/**/*.{test,spec}.ts', 'node'],
+      // Renderer tests use happy-dom (faster than jsdom)
+      ['src/renderer/**/*.{test,spec}.{ts,tsx}', 'happy-dom'],
+      ['src/__tests__/renderer/**/*.{test,spec}.{ts,tsx}', 'happy-dom'],
+    ],
+    // Setup files for different environments
     setupFiles: ['./src/__tests__/setup.ts'],
+    // Additional setup for main process tests
+    globalSetup: undefined,
     include: ['src/**/*.{test,spec}.{js,ts,jsx,tsx}'],
     exclude: ['node_modules', 'dist', 'out', 'e2e'],
     coverage: {
@@ -31,8 +49,9 @@ export default defineConfig({
         },
       },
     },
-    testTimeout: 10000,
-    hookTimeout: 10000,
+    // Increased timeouts for session discovery tests (filesystem operations)
+    testTimeout: 30000,
+    hookTimeout: 15000,
   },
   resolve: {
     alias: {
