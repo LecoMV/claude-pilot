@@ -188,4 +188,134 @@
   .glass {
     @apply bg-surface/80 backdrop-blur-sm;
   }
+
+  /* Skeleton wave animation */
+  .skeleton-wave {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .skeleton-wave::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    animation: wave 1.5s infinite;
+  }
+
+  @keyframes wave {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}
+
+/* ============================================================================
+   Responsive Design for Desktop Electron App
+   ============================================================================ */
+
+/* Compact mode for narrow windows (<900px) */
+@media (max-width: 900px) {
+  .sidebar-collapsible {
+    @apply w-16;
+  }
+
+  .sidebar-collapsible .nav-label {
+    @apply hidden;
+  }
+
+  .sidebar-collapsible .nav-item {
+    @apply justify-center px-2;
+  }
+
+  .main-content {
+    @apply ml-16;
+  }
+
+  /* Stack panels vertically in narrow windows */
+  .panel-grid {
+    @apply grid-cols-1;
+  }
+
+  /* Reduce padding in compact mode */
+  .compact-padding {
+    @apply px-3 py-2;
+  }
+}
+
+/* Wide mode for large windows (>1400px) */
+@media (min-width: 1400px) {
+  .wide-layout {
+    @apply grid-cols-3;
+  }
+
+  .sidebar-wide {
+    @apply w-64;
+  }
+}
+
+/* Ultra-wide mode (>1800px) */
+@media (min-width: 1800px) {
+  .ultra-wide-layout {
+    @apply grid-cols-4;
+  }
+
+  .max-content-width {
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+}
+
+/* Height-responsive: adjust for short windows */
+@media (max-height: 700px) {
+  .height-responsive-padding {
+    @apply py-2;
+  }
+
+  .height-responsive-gap {
+    @apply gap-2;
+  }
+
+  /* Reduce card spacing in short windows */
+  .card-body {
+    @apply p-3;
+  }
+
+  .metric-value {
+    @apply text-xl;
+  }
+}
+
+/* Focus and keyboard navigation styles */
+@layer utilities {
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-accent-purple/50 focus:ring-offset-2 focus:ring-offset-background;
+  }
+
+  .focus-visible-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-purple/50;
+  }
+}
+
+/* Reduced motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-pulse,
+  .animate-spin,
+  .animate-in,
+  .skeleton-wave::after {
+    animation: none !important;
+  }
 }

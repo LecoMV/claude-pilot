@@ -102,13 +102,13 @@ export default defineConfig({
         'node_modules/**',
         'dist/**',
       ],
-      // Target: 90% coverage
+      // Target: 90% coverage (increased from 70% -> 75% for v0.2.0)
       thresholds: {
         global: {
-          branches: 70,
-          functions: 70,
-          lines: 70,
-          statements: 70,
+          branches: 75,
+          functions: 75,
+          lines: 75,
+          statements: 75,
         },
       },
       // Clean previous coverage

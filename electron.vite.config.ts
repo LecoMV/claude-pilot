@@ -36,9 +36,34 @@ export default defineConfig({
     build: {
       sourcemap: false,
       minify: true,
+      // Target modern browsers for smaller bundle
+      target: 'esnext',
+      // Increase chunk size warning limit (Monaco is large)
+      chunkSizeWarningLimit: 1500,
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
+        },
+        output: {
+          // Code splitting for large dependencies
+          manualChunks: {
+            // Monaco editor (~2MB) - lazy loaded
+            monaco: ['monaco-editor', '@monaco-editor/react'],
+            // Graph visualization libraries (~500KB)
+            graphs: ['cytoscape', 'graphology', 'graphology-layout-forceatlas2', 'sigma'],
+            // Terminal emulator (~300KB)
+            terminal: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-webgl'],
+            // Charts and visualization (~200KB)
+            charts: ['recharts'],
+            // React Flow for workflows
+            flow: ['reactflow'],
+            // Core React ecosystem
+            react: ['react', 'react-dom'],
+            // State and data management
+            state: ['zustand', '@tanstack/react-query', 'superjson'],
+            // tRPC client
+            trpc: ['@trpc/client', '@trpc/react-query'],
+          },
         },
       },
     },
