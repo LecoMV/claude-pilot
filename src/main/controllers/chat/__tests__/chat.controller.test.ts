@@ -128,13 +128,9 @@ describe('chat.controller', () => {
 
       expect(spawn).toHaveBeenCalledWith(
         expect.any(String),
-        ['--print', 'hello world'],
+        ['--print', '--output-format', 'stream-json', 'hello world'],
         expect.objectContaining({
           cwd: '/home/user/project',
-          env: expect.objectContaining({
-            CI: '1',
-            TERM: 'dumb',
-          }),
         })
       )
       expect(result.success).toBe(true)
@@ -200,13 +196,15 @@ describe('chat.controller', () => {
       })
 
       setImmediate(() => {
-        mockProcess._emitStdout('data', Buffer.from('Hello'))
-        mockProcess._emitStdout('data', Buffer.from(' World'))
+        // Send lines with newlines to trigger parsing - raw text is treated as plain text
+        mockProcess._emitStdout('data', Buffer.from('Hello\n'))
+        mockProcess._emitStdout('data', Buffer.from(' World\n'))
         mockProcess._emit('close', 0)
       })
 
       await promise
 
+      // Implementation accumulates text and sends chunk events for each parsed line
       expect(mockWebContentsSend).toHaveBeenCalledWith(
         'chat:response',
         expect.objectContaining({
@@ -296,7 +294,12 @@ describe('chat.controller', () => {
       expect(result.success).toBe(true)
       expect(spawn).toHaveBeenCalledWith(
         expect.any(String),
-        ['--print', 'Hello "world" with \'quotes\' and $variables'],
+        [
+          '--print',
+          '--output-format',
+          'stream-json',
+          'Hello "world" with \'quotes\' and $variables',
+        ],
         expect.any(Object)
       )
     })
