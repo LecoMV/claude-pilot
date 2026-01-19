@@ -6,7 +6,7 @@ import {
   Trash2,
   User,
   Bot,
-  Terminal,
+  Terminal as TerminalIcon,
   FolderOpen,
   Code,
   Wrench,
@@ -14,6 +14,8 @@ import {
   Minimize2,
   Copy,
   Check,
+  Zap,
+  ExternalLink,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/react'
@@ -23,6 +25,7 @@ export function ChatInterface() {
   // tRPC hooks
   const utils = trpc.useUtils()
   const chatSendMutation = trpc.chat.send.useMutation()
+  const terminalMutation = trpc.terminal.launchClaudeInProject.useMutation()
 
   const {
     currentSession,
@@ -39,6 +42,7 @@ export function ChatInterface() {
   const [projects, setProjects] = useState<{ path: string; name: string }[]>([])
   const [showProjectSelector, setShowProjectSelector] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [chatMode, setChatMode] = useState<'quick' | 'continue'>('continue') // 'quick' for single-shot, 'continue' for multi-turn
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -133,6 +137,8 @@ export function ChatInterface() {
         projectPath: currentSession.projectPath,
         message: inputValue.trim(),
         messageId: assistantMessageId,
+        sessionKey: currentSession.id,
+        continueSession: chatMode === 'continue' && currentSession.messages.length > 0,
       })
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -143,6 +149,7 @@ export function ChatInterface() {
     inputValue,
     currentSession,
     isStreaming,
+    chatMode,
     addMessage,
     setInputValue,
     setIsStreaming,
@@ -156,6 +163,18 @@ export function ChatInterface() {
       handleSend()
     }
   }
+
+  // Open project in full interactive terminal
+  const openInTerminal = useCallback(async () => {
+    if (!currentSession) return
+    try {
+      await terminalMutation.mutateAsync({
+        projectPath: currentSession.projectPath,
+      })
+    } catch (error) {
+      console.error('Failed to open terminal:', error)
+    }
+  }, [currentSession, terminalMutation])
 
   if (!currentSession) {
     return (
@@ -213,7 +232,7 @@ export function ChatInterface() {
       {/* Header */}
       <div className="flex items-center gap-4 pb-4 border-b border-border">
         <div className="flex items-center gap-2">
-          <Terminal className="w-5 h-5 text-accent-purple" />
+          <TerminalIcon className="w-5 h-5 text-accent-purple" />
           <div>
             <p className="font-medium text-text-primary">{currentSession.projectName}</p>
             <p className="text-xs text-text-muted truncate max-w-xs">
@@ -222,7 +241,47 @@ export function ChatInterface() {
           </div>
         </div>
 
+        {/* Chat Mode Toggle */}
+        <div className="flex items-center gap-1 bg-surface rounded-lg p-1">
+          <button
+            onClick={() => setChatMode('quick')}
+            className={cn(
+              'px-2 py-1 text-xs rounded-md transition-colors',
+              chatMode === 'quick'
+                ? 'bg-accent-purple text-white'
+                : 'text-text-muted hover:text-text-primary'
+            )}
+            title="Single-shot mode - each message is independent"
+          >
+            <Zap className="w-3 h-3 inline mr-1" />
+            Quick
+          </button>
+          <button
+            onClick={() => setChatMode('continue')}
+            className={cn(
+              'px-2 py-1 text-xs rounded-md transition-colors',
+              chatMode === 'continue'
+                ? 'bg-accent-purple text-white'
+                : 'text-text-muted hover:text-text-primary'
+            )}
+            title="Continue mode - maintains conversation context"
+          >
+            <Bot className="w-3 h-3 inline mr-1" />
+            Continue
+          </button>
+        </div>
+
         <div className="flex-1" />
+
+        {/* Open in Full Terminal */}
+        <button
+          onClick={openInTerminal}
+          className="btn btn-primary btn-sm"
+          title="Open in full interactive terminal for tools and permissions"
+        >
+          <ExternalLink className="w-4 h-4 mr-1" />
+          Full Terminal
+        </button>
 
         <button onClick={clearMessages} className="btn btn-secondary btn-sm" title="Clear messages">
           <Trash2 className="w-4 h-4" />

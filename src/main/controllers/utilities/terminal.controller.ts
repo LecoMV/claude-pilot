@@ -37,6 +37,10 @@ const CloseSchema = z.object({
   sessionId: z.string().min(1),
 })
 
+const LaunchClaudeSchema = z.object({
+  projectPath: z.string().min(1),
+})
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -101,4 +105,35 @@ export const terminalRouter = router({
   list: publicProcedure.query((): string[] => {
     return terminalManager.listSessions()
   }),
+
+  /**
+   * Launch Claude Code in a project directory with full interactivity
+   * Creates a new terminal and runs Claude in it
+   */
+  launchClaudeInProject: auditedProcedure
+    .input(LaunchClaudeSchema)
+    .mutation(({ input }): { sessionId: string; success: boolean } => {
+      try {
+        // Create terminal in the project directory
+        const sessionId = terminalManager.create(input.projectPath)
+
+        // Send Claude command to the terminal
+        // Small delay to let the shell initialize
+        setTimeout(() => {
+          terminalManager.write(sessionId, 'claude\n')
+        }, 100)
+
+        // Navigate to terminal view
+        const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('navigate', 'terminal')
+          win.webContents.send('terminal:focus', sessionId)
+        }
+
+        return { sessionId, success: true }
+      } catch (error) {
+        console.error('[Terminal] Failed to launch Claude:', error)
+        return { sessionId: '', success: false }
+      }
+    }),
 })
