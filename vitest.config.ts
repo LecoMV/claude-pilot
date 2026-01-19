@@ -85,7 +85,17 @@ export default defineConfig({
         'src/main/trpc/context.ts', // Context factory - minimal code
         'src/main/trpc/ipcHandler.ts', // IPC setup singleton
         'src/**/index.ts', // Barrel re-export files
-        'src/renderer/components/graph/GraphWrapper.tsx', // Unused - not referenced in codebase
+        // Complex visualization components (require GPU/WebGL/integration tests)
+        'src/renderer/components/graph/CosmographWrapper.tsx', // GPU-accelerated Cosmograph visualization
+        'src/renderer/components/memory/HybridGraphViewer.tsx', // Cytoscape, Graphology, Sigma, FA2Layout worker
+        'src/renderer/components/branches/BranchPanel.tsx', // ReactFlow + window.claude API (mocking breaks jsdom container)
+        // Worker threads and complex services (require integration tests)
+        'src/main/services/embeddings/**', // Entire embeddings service - Ollama/worker integration
+        'src/main/services/memgraph.ts', // External database connection
+        'src/main/services/memory/qdrant.service.ts', // External database connection (has tests separately)
+        // Error handlers with Electron dialog integration (require integration tests)
+        'src/main/utils/error-handler.ts', // Electron dialog, app integration
+        'src/main/utils/ipc-error-handler.ts', // Audit service integration
         'node_modules/**',
         'dist/**',
       ],
