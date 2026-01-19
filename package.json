@@ -91,7 +91,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@types/better-sqlite3": "^7.6.12",
-    "@types/cytoscape": "^3.21.8",
+    "@types/cytoscape": "^3.31.0",
     "@types/node": "^22.10.5",
     "@types/pg": "^8.16.0",
     "@types/react": "^19.0.2",
