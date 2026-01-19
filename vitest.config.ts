@@ -85,6 +85,8 @@ export default defineConfig({
         'src/main/trpc/context.ts', // Context factory - minimal code
         'src/main/trpc/ipcHandler.ts', // IPC setup singleton
         'src/**/index.ts', // Barrel re-export files
+        'src/renderer/components/graph/GraphWrapper.tsx', // Unused - not referenced in codebase
+        'src/renderer/components/memory/MemgraphViewer.tsx', // Unused - not referenced in codebase
         'node_modules/**',
         'dist/**',
       ],
