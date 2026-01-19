@@ -15,16 +15,8 @@
 
 import { z } from 'zod'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
-import {
-  existsSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  unlinkSync,
-  statSync,
-} from 'fs'
-import { readFile, writeFile, readdir } from 'fs/promises'
+import { existsSync } from 'fs'
+import { readFile, writeFile, readdir, mkdir, unlink, stat, access } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { spawn } from 'child_process'
@@ -97,19 +89,31 @@ const LaunchProfileSchema = z.object({
 // Helper Functions
 // ============================================================================
 
-function ensureProfilesDir(): void {
-  if (!existsSync(PROFILES_DIR)) {
-    mkdirSync(PROFILES_DIR, { recursive: true })
+async function ensureProfilesDir(): Promise<void> {
+  try {
+    await access(PROFILES_DIR)
+  } catch {
+    await mkdir(PROFILES_DIR, { recursive: true })
   }
 }
 
-function getProfileSettings(): ProfileSettings {
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function getProfileSettings(): Promise<ProfileSettings> {
   const settingsPath = join(CLAUDE_DIR, 'settings.json')
   try {
-    if (!existsSync(settingsPath)) {
+    if (!(await fileExists(settingsPath))) {
       return {}
     }
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    const content = await readFile(settingsPath, 'utf-8')
+    const settings = JSON.parse(content)
     return {
       model: settings.model,
       maxTokens: settings.max_tokens,
@@ -122,12 +126,13 @@ function getProfileSettings(): ProfileSettings {
   }
 }
 
-function saveProfileSettings(newSettings: ProfileSettings): boolean {
+async function saveProfileSettings(newSettings: ProfileSettings): Promise<boolean> {
   const settingsPath = join(CLAUDE_DIR, 'settings.json')
   try {
     let settings: Record<string, unknown> = {}
-    if (existsSync(settingsPath)) {
-      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    if (await fileExists(settingsPath)) {
+      const content = await readFile(settingsPath, 'utf-8')
+      settings = JSON.parse(content)
     }
 
     if (newSettings.model) {
@@ -143,7 +148,7 @@ function saveProfileSettings(newSettings: ProfileSettings): boolean {
       }
     }
 
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+    await writeFile(settingsPath, JSON.stringify(settings, null, 2))
     return true
   } catch (error) {
     console.error('Failed to save profile settings:', error)
@@ -227,22 +232,23 @@ async function getRules(): Promise<ClaudeRule[]> {
   return rules
 }
 
-function toggleRule(name: string, enabled: boolean): boolean {
+async function toggleRule(name: string, enabled: boolean): Promise<boolean> {
   const settingsPath = join(CLAUDE_DIR, 'settings.json')
   const rulesDir = join(CLAUDE_DIR, 'rules')
   const rulePath = join(rulesDir, `${name}.md`)
 
   try {
     // Check if rule file exists
-    if (!existsSync(rulePath)) {
+    if (!(await fileExists(rulePath))) {
       console.error(`Rule file not found: ${rulePath}`)
       return false
     }
 
     // Read or create settings
     let settings: Record<string, unknown> = {}
-    if (existsSync(settingsPath)) {
-      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    if (await fileExists(settingsPath)) {
+      const content = await readFile(settingsPath, 'utf-8')
+      settings = JSON.parse(content)
     }
 
     // Initialize disabledRules array if it doesn't exist
@@ -265,7 +271,7 @@ function toggleRule(name: string, enabled: boolean): boolean {
     }
 
     settings.disabledRules = disabledRules
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+    await writeFile(settingsPath, JSON.stringify(settings, null, 2))
     return true
   } catch (error) {
     console.error('Failed to toggle rule:', error)
@@ -273,15 +279,15 @@ function toggleRule(name: string, enabled: boolean): boolean {
   }
 }
 
-function listProfiles(): ClaudeCodeProfile[] {
+async function listProfiles(): Promise<ClaudeCodeProfile[]> {
   const profiles: ClaudeCodeProfile[] = []
 
   try {
-    if (!existsSync(PROFILES_DIR)) {
+    if (!(await fileExists(PROFILES_DIR))) {
       return profiles
     }
 
-    const entries = readdirSync(PROFILES_DIR, { withFileTypes: true })
+    const entries = await readdir(PROFILES_DIR, { withFileTypes: true })
     const profileDirs = entries.filter((e) => e.isDirectory())
 
     for (const dir of profileDirs) {
@@ -292,8 +298,9 @@ function listProfiles(): ClaudeCodeProfile[] {
         const claudeMdPath = join(profilePath, 'CLAUDE.md')
 
         let settings: ClaudeCodeProfile['settings'] = {}
-        if (existsSync(settingsPath)) {
-          const settingsContent = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+        if (await fileExists(settingsPath)) {
+          const content = await readFile(settingsPath, 'utf-8')
+          const settingsContent = JSON.parse(content)
           settings = {
             model: settingsContent.model,
             maxTokens: settingsContent.max_tokens,
@@ -303,12 +310,12 @@ function listProfiles(): ClaudeCodeProfile[] {
         }
 
         let claudeMd: string | undefined
-        if (existsSync(claudeMdPath)) {
-          claudeMd = readFileSync(claudeMdPath, 'utf-8')
+        if (await fileExists(claudeMdPath)) {
+          claudeMd = await readFile(claudeMdPath, 'utf-8')
         }
 
-        const hasMcp = existsSync(mcpPath)
-        const stats = statSync(profilePath)
+        const hasMcp = await fileExists(mcpPath)
+        const stats = await stat(profilePath)
 
         profiles.push({
           id: dir.name,
@@ -332,18 +339,19 @@ function listProfiles(): ClaudeCodeProfile[] {
   return profiles.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-function getProfile(id: string): ClaudeCodeProfile | null {
+async function getProfile(id: string): Promise<ClaudeCodeProfile | null> {
   const profilePath = join(PROFILES_DIR, id)
   try {
-    if (!existsSync(profilePath)) return null
+    if (!(await fileExists(profilePath))) return null
 
     const settingsPath = join(profilePath, 'settings.json')
     const mcpPath = join(profilePath, 'mcp.json')
     const claudeMdPath = join(profilePath, 'CLAUDE.md')
 
     let settings: ClaudeCodeProfile['settings'] = {}
-    if (existsSync(settingsPath)) {
-      const settingsContent = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    if (await fileExists(settingsPath)) {
+      const content = await readFile(settingsPath, 'utf-8')
+      const settingsContent = JSON.parse(content)
       settings = {
         model: settingsContent.model,
         maxTokens: settingsContent.max_tokens,
@@ -353,12 +361,12 @@ function getProfile(id: string): ClaudeCodeProfile | null {
     }
 
     let claudeMd: string | undefined
-    if (existsSync(claudeMdPath)) {
-      claudeMd = readFileSync(claudeMdPath, 'utf-8')
+    if (await fileExists(claudeMdPath)) {
+      claudeMd = await readFile(claudeMdPath, 'utf-8')
     }
 
-    const hasMcp = existsSync(mcpPath)
-    const stats = statSync(profilePath)
+    const hasMcp = await fileExists(mcpPath)
+    const stats = await stat(profilePath)
 
     return {
       id,
@@ -377,10 +385,10 @@ function getProfile(id: string): ClaudeCodeProfile | null {
   }
 }
 
-function createProfile(
+async function createProfile(
   profile: Omit<ClaudeCodeProfile, 'id' | 'createdAt' | 'updatedAt'>
-): ClaudeCodeProfile | null {
-  ensureProfilesDir()
+): Promise<ClaudeCodeProfile | null> {
+  await ensureProfilesDir()
 
   const id = profile.name
     .toLowerCase()
@@ -397,11 +405,11 @@ function createProfile(
 
   const profilePath = join(PROFILES_DIR, `${id}.json`)
   try {
-    if (existsSync(profilePath)) {
+    if (await fileExists(profilePath)) {
       console.error('Profile with this name already exists')
       return null
     }
-    writeFileSync(profilePath, JSON.stringify(newProfile, null, 2))
+    await writeFile(profilePath, JSON.stringify(newProfile, null, 2))
     return newProfile
   } catch (error) {
     console.error('Failed to create profile:', error)
@@ -409,12 +417,13 @@ function createProfile(
   }
 }
 
-function updateProfile(id: string, updates: Partial<ClaudeCodeProfile>): boolean {
+async function updateProfile(id: string, updates: Partial<ClaudeCodeProfile>): Promise<boolean> {
   const profilePath = join(PROFILES_DIR, `${id}.json`)
   try {
-    if (!existsSync(profilePath)) return false
+    if (!(await fileExists(profilePath))) return false
 
-    const existing = JSON.parse(readFileSync(profilePath, 'utf-8')) as ClaudeCodeProfile
+    const content = await readFile(profilePath, 'utf-8')
+    const existing = JSON.parse(content) as ClaudeCodeProfile
     const updated: ClaudeCodeProfile = {
       ...existing,
       ...updates,
@@ -423,7 +432,7 @@ function updateProfile(id: string, updates: Partial<ClaudeCodeProfile>): boolean
       updatedAt: Date.now(),
     }
 
-    writeFileSync(profilePath, JSON.stringify(updated, null, 2))
+    await writeFile(profilePath, JSON.stringify(updated, null, 2))
     return true
   } catch (error) {
     console.error('Failed to update profile:', error)
@@ -431,15 +440,15 @@ function updateProfile(id: string, updates: Partial<ClaudeCodeProfile>): boolean
   }
 }
 
-function deleteProfile(id: string): boolean {
+async function deleteProfile(id: string): Promise<boolean> {
   const profilePath = join(PROFILES_DIR, `${id}.json`)
   try {
-    if (!existsSync(profilePath)) return false
-    unlinkSync(profilePath)
+    if (!(await fileExists(profilePath))) return false
+    await unlink(profilePath)
 
-    if (getActiveProfileId() === id) {
-      if (existsSync(ACTIVE_PROFILE_FILE)) {
-        unlinkSync(ACTIVE_PROFILE_FILE)
+    if ((await getActiveProfileId()) === id) {
+      if (await fileExists(ACTIVE_PROFILE_FILE)) {
+        await unlink(ACTIVE_PROFILE_FILE)
       }
     }
     return true
@@ -449,28 +458,29 @@ function deleteProfile(id: string): boolean {
   }
 }
 
-function activateProfile(id: string): boolean {
-  const profile = getProfile(id)
+async function activateProfile(id: string): Promise<boolean> {
+  const profile = await getProfile(id)
   if (!profile) return false
 
   try {
-    writeFileSync(ACTIVE_PROFILE_FILE, id)
+    await writeFile(ACTIVE_PROFILE_FILE, id)
 
     if (profile.settings) {
-      saveProfileSettings(profile.settings)
+      await saveProfileSettings(profile.settings)
     }
 
     if (profile.claudeMd) {
-      saveClaudeMd(profile.claudeMd)
+      await saveClaudeMd(profile.claudeMd)
     }
 
     if (profile.enabledRules) {
-      const allRules = getRules()
+      const allRules = await getRules()
       const settingsPath = join(CLAUDE_DIR, 'settings.json')
       let settings: Record<string, unknown> = {}
 
-      if (existsSync(settingsPath)) {
-        settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+      if (await fileExists(settingsPath)) {
+        const content = await readFile(settingsPath, 'utf-8')
+        settings = JSON.parse(content)
       }
 
       const enabledRules = profile.enabledRules ?? []
@@ -479,7 +489,7 @@ function activateProfile(id: string): boolean {
         .map((r) => r.name)
 
       settings.disabledRules = disabledRules
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+      await writeFile(settingsPath, JSON.stringify(settings, null, 2))
     }
 
     return true
@@ -489,17 +499,21 @@ function activateProfile(id: string): boolean {
   }
 }
 
-function getActiveProfileId(): string | null {
+async function getActiveProfileId(): Promise<string | null> {
   try {
-    if (!existsSync(ACTIVE_PROFILE_FILE)) return null
-    return readFileSync(ACTIVE_PROFILE_FILE, 'utf-8').trim()
+    if (!(await fileExists(ACTIVE_PROFILE_FILE))) return null
+    const content = await readFile(ACTIVE_PROFILE_FILE, 'utf-8')
+    return content.trim()
   } catch {
     return null
   }
 }
 
-function launchProfile(id: string, projectPath?: string): { success: boolean; error?: string } {
-  const profile = getProfile(id)
+async function launchProfile(
+  id: string,
+  projectPath?: string
+): Promise<{ success: boolean; error?: string }> {
+  const profile = await getProfile(id)
   if (!profile) {
     return { success: false, error: 'Profile not found' }
   }
@@ -507,7 +521,7 @@ function launchProfile(id: string, projectPath?: string): { success: boolean; er
   try {
     const binDir = join(HOME, 'bin')
     const launcherScript = join(binDir, `claude-${id}`)
-    const hasLauncher = existsSync(launcherScript)
+    const hasLauncher = await fileExists(launcherScript)
 
     let command: string
     const args: string[] = []
@@ -524,15 +538,15 @@ function launchProfile(id: string, projectPath?: string): { success: boolean; er
 
       command = 'claude'
 
-      if (existsSync(mcpConfig)) {
+      if (await fileExists(mcpConfig)) {
         args.push('--mcp-config', mcpConfig)
       }
 
-      if (existsSync(settingsJson)) {
+      if (await fileExists(settingsJson)) {
         args.push('--settings', settingsJson)
       }
 
-      if (existsSync(claudeMd)) {
+      if (await fileExists(claudeMd)) {
         args.push('--append-system-prompt', claudeMd)
       }
 
@@ -572,13 +586,15 @@ function launchProfile(id: string, projectPath?: string): { success: boolean; er
 
 export const profilesRouter = router({
   // Profile settings (current Claude session)
-  settings: publicProcedure.query((): ProfileSettings => {
+  settings: publicProcedure.query((): Promise<ProfileSettings> => {
     return getProfileSettings()
   }),
 
-  saveSettings: auditedProcedure.input(ProfileSettingsSchema).mutation(({ input }): boolean => {
-    return saveProfileSettings(input)
-  }),
+  saveSettings: auditedProcedure
+    .input(ProfileSettingsSchema)
+    .mutation(({ input }): Promise<boolean> => {
+      return saveProfileSettings(input)
+    }),
 
   // CLAUDE.md management
   claudemd: publicProcedure.query((): Promise<string> => {
@@ -596,7 +612,7 @@ export const profilesRouter = router({
     return getRules()
   }),
 
-  toggleRule: auditedProcedure.input(ToggleRuleSchema).mutation(({ input }): boolean => {
+  toggleRule: auditedProcedure.input(ToggleRuleSchema).mutation(({ input }): Promise<boolean> => {
     return toggleRule(input.name, input.enabled)
   }),
 
@@ -611,17 +627,19 @@ export const profilesRouter = router({
   }),
 
   // Custom profiles (claude-eng, claude-sec, etc.)
-  list: publicProcedure.query((): ClaudeCodeProfile[] => {
+  list: publicProcedure.query((): Promise<ClaudeCodeProfile[]> => {
     return listProfiles()
   }),
 
-  get: publicProcedure.input(ProfileIdSchema).query(({ input }): ClaudeCodeProfile | null => {
-    return getProfile(input.id)
-  }),
+  get: publicProcedure
+    .input(ProfileIdSchema)
+    .query(({ input }): Promise<ClaudeCodeProfile | null> => {
+      return getProfile(input.id)
+    }),
 
   create: auditedProcedure
     .input(CreateProfileSchema)
-    .mutation(({ input }): ClaudeCodeProfile | null => {
+    .mutation(({ input }): Promise<ClaudeCodeProfile | null> => {
       return createProfile({
         name: input.name,
         description: input.description,
@@ -631,25 +649,25 @@ export const profilesRouter = router({
       })
     }),
 
-  update: auditedProcedure.input(UpdateProfileSchema).mutation(({ input }): boolean => {
+  update: auditedProcedure.input(UpdateProfileSchema).mutation(({ input }): Promise<boolean> => {
     return updateProfile(input.id, input.updates)
   }),
 
-  delete: auditedProcedure.input(ProfileIdSchema).mutation(({ input }): boolean => {
+  delete: auditedProcedure.input(ProfileIdSchema).mutation(({ input }): Promise<boolean> => {
     return deleteProfile(input.id)
   }),
 
-  activate: auditedProcedure.input(ProfileIdSchema).mutation(({ input }): boolean => {
+  activate: auditedProcedure.input(ProfileIdSchema).mutation(({ input }): Promise<boolean> => {
     return activateProfile(input.id)
   }),
 
-  getActive: publicProcedure.query((): string | null => {
+  getActive: publicProcedure.query((): Promise<string | null> => {
     return getActiveProfileId()
   }),
 
   launch: auditedProcedure
     .input(LaunchProfileSchema)
-    .mutation(({ input }): { success: boolean; error?: string } => {
+    .mutation(({ input }): Promise<{ success: boolean; error?: string }> => {
       return launchProfile(input.id, input.projectPath)
     }),
 })
