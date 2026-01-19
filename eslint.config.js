@@ -96,6 +96,7 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
       'no-console': 'off',
+      'require-await': 'off', // Mock functions often don't need await
     },
   },
   prettierConfig

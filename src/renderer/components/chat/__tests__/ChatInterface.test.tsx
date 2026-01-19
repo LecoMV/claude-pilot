@@ -26,6 +26,7 @@ import { useChatStore, type ChatSession, type ChatMessage } from '@/stores/chat'
 // Mock tRPC hooks
 const mockChatSendMutate = vi.fn()
 const mockProjectsFetch = vi.fn()
+const mockLaunchClaudeInProject = vi.fn()
 
 vi.mock('@/lib/trpc/react', () => ({
   trpc: {
@@ -40,6 +41,13 @@ vi.mock('@/lib/trpc/react', () => ({
       send: {
         useMutation: () => ({
           mutateAsync: mockChatSendMutate,
+        }),
+      },
+    },
+    terminal: {
+      launchClaudeInProject: {
+        useMutation: () => ({
+          mutateAsync: mockLaunchClaudeInProject,
         }),
       },
     },
@@ -64,6 +72,15 @@ vi.mock('lucide-react', () => ({
   Minimize2: () => <span data-testid="icon-minimize" />,
   Copy: () => <span data-testid="icon-copy" />,
   Check: () => <span data-testid="icon-check" />,
+  Zap: ({ className }: { className?: string }) => (
+    <span data-testid="icon-zap" className={className} />
+  ),
+  X: () => <span data-testid="icon-x" />,
+  Loader2: ({ className }: { className?: string }) => (
+    <span data-testid="icon-loader2" className={className} />
+  ),
+  MessageSquare: () => <span data-testid="icon-message" />,
+  ExternalLink: () => <span data-testid="icon-external" />,
 }))
 
 // Mock cn utility
@@ -447,9 +464,7 @@ describe('ChatInterface', () => {
   describe('Message Rendering', () => {
     it('renders user messages', () => {
       const session = createMockSession({
-        messages: [
-          createMockMessage({ role: 'user', content: 'Hello from user' }),
-        ],
+        messages: [createMockMessage({ role: 'user', content: 'Hello from user' })],
       })
       useChatStore.setState({ currentSession: session })
 
@@ -460,9 +475,7 @@ describe('ChatInterface', () => {
 
     it('renders assistant messages', () => {
       const session = createMockSession({
-        messages: [
-          createMockMessage({ role: 'assistant', content: 'Hello from assistant' }),
-        ],
+        messages: [createMockMessage({ role: 'assistant', content: 'Hello from assistant' })],
       })
       useChatStore.setState({ currentSession: session })
 
@@ -508,9 +521,7 @@ describe('ChatInterface', () => {
     it('shows timestamp for messages', () => {
       const timestamp = Date.now()
       const session = createMockSession({
-        messages: [
-          createMockMessage({ timestamp }),
-        ],
+        messages: [createMockMessage({ timestamp })],
       })
       useChatStore.setState({ currentSession: session })
 
@@ -602,9 +613,7 @@ describe('ChatInterface', () => {
 
     it('does not show copy button for user messages', () => {
       const session = createMockSession({
-        messages: [
-          createMockMessage({ role: 'user', content: 'User message' }),
-        ],
+        messages: [createMockMessage({ role: 'user', content: 'User message' })],
       })
       useChatStore.setState({ currentSession: session })
 
@@ -623,9 +632,7 @@ describe('ChatInterface', () => {
     beforeEach(() => {
       useChatStore.setState({
         currentSession: createMockSession({
-          messages: [
-            createMockMessage({ content: 'Test message' }),
-          ],
+          messages: [createMockMessage({ content: 'Test message' })],
         }),
       })
     })
@@ -686,7 +693,9 @@ describe('ChatInterface', () => {
 
       // Simulate the error by updating the message content
       act(() => {
-        useChatStore.getState().updateMessage('msg-error', 'Error: Failed to get response from Claude Code.')
+        useChatStore
+          .getState()
+          .updateMessage('msg-error', 'Error: Failed to get response from Claude Code.')
         useChatStore.getState().setIsStreaming(false)
       })
 
