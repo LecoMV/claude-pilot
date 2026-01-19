@@ -1,3 +1,11 @@
+/**
+ * BranchPanel Component Tests
+ *
+ * Tests for the conversation branch visualization and management panel.
+ *
+ * @module BranchPanel.test
+ */
+
 import { render, screen, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BranchPanel } from '../BranchPanel'
@@ -5,7 +13,9 @@ import type { ConversationBranch, BranchStats, ExternalSession } from '@shared/t
 
 // Mock ReactFlow and related components
 vi.mock('reactflow', () => ({
-  default: ({ children }: { children?: React.ReactNode }) => <div data-testid="react-flow">{children}</div>,
+  default: ({ children }: { children?: React.ReactNode }) => (
+    <div data-testid="react-flow">{children}</div>
+  ),
   Controls: () => <div data-testid="controls">Controls</div>,
   Background: () => <div data-testid="background">Background</div>,
   MiniMap: () => <div data-testid="minimap">MiniMap</div>,
@@ -164,5 +174,63 @@ describe('Branch utilities', () => {
     const stats = createMockStats({ totalBranches: 10 })
     expect(stats.totalBranches).toBe(10)
     expect(stats.activeBranches).toBe(2)
+  })
+
+  it('mock branch handles different status values', () => {
+    const activeBranch = createMockBranch({ status: 'active' })
+    const mergedBranch = createMockBranch({ status: 'merged' })
+    const abandonedBranch = createMockBranch({ status: 'abandoned' })
+
+    expect(activeBranch.status).toBe('active')
+    expect(mergedBranch.status).toBe('merged')
+    expect(abandonedBranch.status).toBe('abandoned')
+  })
+
+  it('mock branch handles parent-child relationships', () => {
+    const mainBranch = createMockBranch({ id: 'main', parentBranchId: null })
+    const childBranch = createMockBranch({ id: 'child', parentBranchId: 'main' })
+
+    expect(mainBranch.parentBranchId).toBeNull()
+    expect(childBranch.parentBranchId).toBe('main')
+  })
+
+  it('mock session handles stats variations', () => {
+    const sessionWithHighStats = createMockSession({
+      stats: {
+        messageCount: 100,
+        inputTokens: 50000,
+        outputTokens: 25000,
+        cachedTokens: 10000,
+        totalCost: 1.5,
+        toolCalls: 50,
+      },
+    })
+
+    expect(sessionWithHighStats.stats.messageCount).toBe(100)
+    expect(sessionWithHighStats.stats.totalCost).toBe(1.5)
+  })
+
+  it('mock stats handles zero values', () => {
+    const emptyStats = createMockStats({
+      totalBranches: 0,
+      activeBranches: 0,
+      mergedBranches: 0,
+      abandonedBranches: 0,
+      totalMessages: 0,
+      avgMessagesPerBranch: 0,
+    })
+
+    expect(emptyStats.totalBranches).toBe(0)
+    expect(emptyStats.avgMessagesPerBranch).toBe(0)
+  })
+
+  it('mock branch handles empty messages', () => {
+    const branchWithNoMessages = createMockBranch({ messages: [] })
+    expect(branchWithNoMessages.messages.length).toBe(0)
+  })
+
+  it('mock session handles inactive state', () => {
+    const inactiveSession = createMockSession({ isActive: false })
+    expect(inactiveSession.isActive).toBe(false)
   })
 })
