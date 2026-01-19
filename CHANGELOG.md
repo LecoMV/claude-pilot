@@ -93,6 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ChatInterface test mock missing terminal.launchClaudeInProject
 - ChatInterface test mock missing lucide-react icons (Zap, X, Loader2, etc.)
+- Chat controller test assertions updated to match stream-json implementation
 
 ## [0.1.0] - 2026-01-01
 
