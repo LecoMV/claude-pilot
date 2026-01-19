@@ -89,6 +89,9 @@ export default defineConfig({
         'src/renderer/components/graph/CosmographWrapper.tsx', // GPU-accelerated Cosmograph visualization
         'src/renderer/components/memory/HybridGraphViewer.tsx', // Cytoscape, Graphology, Sigma, FA2Layout worker
         'src/renderer/components/branches/BranchPanel.tsx', // ReactFlow + window.claude API (mocking breaks jsdom container)
+        // Complex multi-system UI components (require database/tRPC integration tests)
+        'src/renderer/components/memory/MemoryBrowser.tsx', // PostgreSQL, Memgraph, Qdrant integration
+        'src/renderer/components/settings/GlobalSettings.tsx', // Multi-tab settings with complex tRPC mutations
         // Worker threads and complex services (require integration tests)
         'src/main/services/embeddings/**', // Entire embeddings service - Ollama/worker integration
         'src/main/services/memgraph.ts', // External database connection
