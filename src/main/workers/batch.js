@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-unused-vars, no-undef */
 /**
  * Batch Worker - Background Task Processing
  *
@@ -54,7 +55,7 @@ const taskHandlers = {
    * Index codebase files
    */
   async indexCodebase(data) {
-    const { files, options = {} } = data
+    const { files, options: _options = {} } = data
     if (!Array.isArray(files)) {
       throw new Error('Expected array of files')
     }

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports, no-undef */
 /**
  * Interactive Worker - High-Priority Task Processing
  *

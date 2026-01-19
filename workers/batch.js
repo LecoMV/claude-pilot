@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports, no-undef */
 /**
  * Batch Worker - Background processing tasks
  *
