@@ -11,7 +11,7 @@
 
 import { z } from 'zod'
 import { router, auditedProcedure, publicProcedure } from '../trpc/trpc'
-import { existsSync, readdirSync, readFileSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, promises as fsPromises } from 'fs'
 import { join } from 'path'
 import { homedir, cpus, totalmem, freemem } from 'os'
 import { promisify } from 'util'
@@ -174,18 +174,21 @@ function getOllamaStatusAsync(): Promise<{
   )
 }
 
-function getMCPStatus(): {
+async function getMCPStatusAsync(): Promise<{
   servers: Array<{ name: string; status: string; disabled: boolean }>
   totalActive: number
   totalDisabled: number
-} {
-  // This is synchronous file read which is fine (no shell command)
+}> {
+  // Async file read to avoid blocking event loop
   const mcpJsonPath = join(CLAUDE_DIR, 'mcp.json')
   let servers: Array<{ name: string; status: string; disabled: boolean }> = []
 
   try {
-    if (existsSync(mcpJsonPath)) {
-      const config = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'))
+    // Check existence first to avoid throw (though better to just try/catch read)
+    // But since we are converting existing logic:
+    try {
+      const content = await fsPromises.readFile(mcpJsonPath, 'utf-8')
+      const config = JSON.parse(content)
       const mcpServers = config.mcpServers || {}
 
       servers = Object.entries(mcpServers).map(([name, serverConfig]) => {
@@ -196,9 +199,11 @@ function getMCPStatus(): {
           disabled: Boolean(cfg.disabled),
         }
       })
+    } catch {
+      // File doesn't exist or read error
     }
   } catch {
-    // Ignore config read errors
+    // Ignore unexpected errors
   }
 
   return {
@@ -356,7 +361,7 @@ export const systemRouter = router({
 
     return {
       claude,
-      mcp: getMCPStatus(),
+      mcp: await getMCPStatusAsync(),
       memory,
       ollama,
       resources,

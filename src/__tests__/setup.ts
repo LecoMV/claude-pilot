@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { vi } from 'vitest'
+import { vi, beforeEach, beforeAll, afterAll } from 'vitest'
 
 // Mock window.electron API for renderer tests
 const mockElectronAPI = {
@@ -75,3 +75,69 @@ beforeAll(() => {
 afterAll(() => {
   console.error = originalConsoleError
 })
+
+// Mock WebGL2RenderingContext for sigma.js / react-force-graph
+class MockWebGL2RenderingContext {
+  canvas: HTMLCanvasElement
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas
+  }
+
+  getExtension() {
+    return null
+  }
+  getParameter() {
+    return 0
+  }
+  createTexture() {
+    return {}
+  }
+  bindTexture() {}
+  texImage2D() {}
+  texParameteri() {}
+  generateMipmap() {}
+  createBuffer() {
+    return {}
+  }
+  bindBuffer() {}
+  bufferData() {}
+  enable() {}
+  disable() {}
+  blendFunc() {}
+  createProgram() {
+    return {}
+  }
+  createShader() {
+    return {}
+  }
+  shaderSource() {}
+  compileShader() {}
+  attachShader() {}
+  linkProgram() {}
+  getProgramParameter() {
+    return true
+  }
+  getShaderParameter() {
+    return true
+  }
+  useProgram() {}
+  getUniformLocation() {
+    return {}
+  }
+  getAttribLocation() {
+    return 0
+  }
+  enableVertexAttribArray() {}
+  vertexAttribPointer() {}
+  clearColor() {}
+  clear() {}
+  drawArrays() {}
+  viewport() {}
+}
+
+// @ts-expect-error - Mocking global WebGL context for sigma.js tests
+global.WebGL2RenderingContext =
+  MockWebGL2RenderingContext as unknown as typeof WebGL2RenderingContext
+// @ts-expect-error - Mocking global WebGL context for sigma.js tests
+global.WebGLRenderingContext = MockWebGL2RenderingContext as unknown as typeof WebGLRenderingContext
