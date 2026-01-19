@@ -151,9 +151,12 @@ function shutdownSwarm(): boolean {
 
 function submitTask(description: string, targetAgent?: string): boolean {
   // Assign task to target agent or first available agent
+  // Note: 'busy' agents can also accept tasks (they queue up)
   const agent = targetAgent
     ? agentState.agents.find((a) => a.id === targetAgent)
-    : agentState.agents.find((a) => a.status === 'active' || a.status === 'idle')
+    : agentState.agents.find(
+        (a) => a.status === 'active' || a.status === 'idle' || a.status === 'busy'
+      )
 
   if (agent) {
     agent.status = 'busy'

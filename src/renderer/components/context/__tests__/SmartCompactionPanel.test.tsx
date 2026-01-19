@@ -110,7 +110,8 @@ const mockMessages: SessionMessage[] = [
     uuid: 'msg-3',
     type: 'tool-result',
     toolName: 'Task',
-    toolOutput: 'Agent completed successfully with detailed output about the task execution results that spans more than 200 characters to trigger valuable data detection for agent outputs',
+    toolOutput:
+      'Agent completed successfully with detailed output about the task execution results. This is a comprehensive summary that spans more than 200 characters to properly trigger valuable data detection for agent outputs in the smart compaction panel test suite.',
     timestamp: Date.now() - 280000,
   }),
   createMockMessage({
@@ -124,7 +125,8 @@ const mockMessages: SessionMessage[] = [
     uuid: 'msg-5',
     type: 'tool-result',
     toolName: 'WebSearch',
-    toolOutput: 'Search results containing important research findings about software architecture patterns and best practices that spans more than 300 characters for research result detection',
+    toolOutput:
+      'Search results containing important research findings about software architecture patterns and best practices. This comprehensive search result includes detailed information about microservices, event-driven architecture, and domain-driven design principles. The research spans more than 300 characters to properly trigger research result detection in the smart compaction panel.',
     timestamp: Date.now() - 260000,
   }),
   createMockMessage({
@@ -159,7 +161,8 @@ describe('SmartCompactionPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.useFakeTimers()
+    // Note: Don't use fake timers - they block promise resolution in React components
+    // vi.useFakeTimers()
 
     // Setup default mock implementations
     mockFetchMessages.mockResolvedValue(mockMessages)
@@ -171,7 +174,6 @@ describe('SmartCompactionPanel', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
-    vi.useRealTimers()
   })
 
   // ==========================================================================
@@ -181,8 +183,9 @@ describe('SmartCompactionPanel', () => {
     it('renders loading spinner initially', () => {
       render(<SmartCompactionPanel session={mockSession} onClose={mockOnClose} />)
 
-      // Should show loading state with spinner
-      expect(screen.getByRole('status') || document.querySelector('.animate-spin')).toBeDefined()
+      // Should show loading state with spinner (SVG with animate-spin class)
+      const spinner = document.querySelector('.animate-spin')
+      expect(spinner).toBeTruthy()
     })
 
     it('transitions from loading to preview state', async () => {

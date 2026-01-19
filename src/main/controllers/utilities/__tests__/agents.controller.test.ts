@@ -192,9 +192,7 @@ describe('agents.controller', () => {
     it('should reject name exceeding 50 characters', async () => {
       const longName = 'a'.repeat(51)
 
-      await expect(
-        caller.spawn({ type: 'coder', name: longName })
-      ).rejects.toThrow()
+      await expect(caller.spawn({ type: 'coder', name: longName })).rejects.toThrow()
     })
 
     it('should accept name at maximum length (50 characters)', async () => {
@@ -515,17 +513,13 @@ describe('agents.controller', () => {
     })
 
     it('should reject empty description', async () => {
-      await expect(
-        caller.submitTask({ description: '' })
-      ).rejects.toThrow()
+      await expect(caller.submitTask({ description: '' })).rejects.toThrow()
     })
 
     it('should reject description exceeding 1000 characters', async () => {
       const longDescription = 'a'.repeat(1001)
 
-      await expect(
-        caller.submitTask({ description: longDescription })
-      ).rejects.toThrow()
+      await expect(caller.submitTask({ description: longDescription })).rejects.toThrow()
     })
 
     it('should accept description at maximum length (1000 characters)', async () => {
@@ -547,16 +541,14 @@ describe('agents.controller', () => {
       // Let only the second one become active
       vi.advanceTimersByTime(500)
 
-      // Manually get agents and check
-      const _agents = await caller.list()
-
       // Submit task
-      await caller.submitTask({ description: 'Work' })
+      const result = await caller.submitTask({ description: 'Work' })
+      expect(result).toBe(true)
 
-      // One of them should now be busy
+      // Check that one agent received the task (taskCount is not randomly mutated like status)
       const updatedAgents = await caller.list()
-      const busyAgent = updatedAgents.find((a) => a.status === 'busy')
-      expect(busyAgent).toBeDefined()
+      const agentWithTask = updatedAgents.find((a) => a.taskCount >= 1)
+      expect(agentWithTask).toBeDefined()
     })
 
     it('should assign idle agents if no active agents available', async () => {

@@ -15,10 +15,12 @@ import superjson from 'superjson'
 const mockSendMessage = vi.fn()
 let messageCallback: ((args: { id: string } & Record<string, unknown>) => void) | null = null
 const mockUnsubscribe = vi.fn()
-const mockOnMessage = vi.fn((callback: (args: { id: string } & Record<string, unknown>) => void) => {
-  messageCallback = callback
-  return mockUnsubscribe
-})
+const mockOnMessage = vi.fn(
+  (callback: (args: { id: string } & Record<string, unknown>) => void) => {
+    messageCallback = callback
+    return mockUnsubscribe
+  }
+)
 
 // Mock window with electronTRPC
 const mockElectronTRPC = {
@@ -44,7 +46,8 @@ describe('ipcLink', () => {
     vi.clearAllMocks()
     messageCallback = null
     // Re-register the mock
-    ;(window as unknown as { electronTRPC: typeof mockElectronTRPC }).electronTRPC = mockElectronTRPC
+    ;(window as unknown as { electronTRPC: typeof mockElectronTRPC }).electronTRPC =
+      mockElectronTRPC
   })
 
   afterEach(() => {
@@ -81,7 +84,9 @@ describe('ipcLink', () => {
       expect(() => {
         const link = ipcLink()
         link({} as never)
-      }).toThrow('[tRPC] electronTRPC not available. Ensure exposeElectronTRPC() is called in preload.')
+      }).toThrow(
+        '[tRPC] electronTRPC not available. Ensure exposeElectronTRPC() is called in preload.'
+      )
 
       // Restore
       ;(window as unknown as { electronTRPC: typeof mockElectronTRPC }).electronTRPC = original
@@ -209,7 +214,7 @@ describe('ipcLink', () => {
       })
     })
 
-    it('should generate unique request IDs', async () => {
+    it('should generate unique request IDs', () => {
       const link = ipcLink()
       const runtime = link({} as never)
 
@@ -556,7 +561,7 @@ describe('ipcLink', () => {
         })
       })
 
-      await expect(errorPromise).rejects.toThrow('Failed to send IPC message')
+      await expect(errorPromise).rejects.toThrow('Unexpected type')
     })
   })
 

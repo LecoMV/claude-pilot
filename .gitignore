@@ -42,3 +42,4 @@ playwright-results/
 # Temporary
 tmp/
 temp/
+.vitest-cache/
