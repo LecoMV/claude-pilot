@@ -110,10 +110,8 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       set({ sessions: [session, ...sessions] })
     }
 
-    // Update active sessions
-    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
-    const activeSessions = get().sessions.filter((s) => s.lastActivity > fiveMinutesAgo)
-    set({ activeSessions })
+    // Note: Active sessions are managed by fetchActiveSessions() which uses
+    // backend process detection. Don't override with client-side heuristics.
   },
 }))
 
