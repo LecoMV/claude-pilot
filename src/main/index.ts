@@ -1,3 +1,6 @@
+// Load environment variables from .env file (must be first)
+import 'dotenv/config'
+
 import { app, BrowserWindow, shell, ipcMain, session } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
