@@ -5,39 +5,79 @@ import { Dashboard } from './components/dashboard/Dashboard'
 import { Projects } from './components/projects/Projects'
 import { SessionManager } from './components/sessions/SessionManager'
 import { MCPManager } from './components/mcp/MCPManager'
-import { MemoryBrowser } from './components/memory/MemoryBrowser'
 import { ProfileManager } from './components/profiles/ProfileManager'
 import { ContextDashboard } from './components/context/ContextDashboard'
 import { ServicesManager } from './components/services/ServicesManager'
-import { Terminal } from './components/terminal/Terminal'
 import { Settings } from './components/settings/Settings'
-import { GlobalSettings } from './components/settings/GlobalSettings'
 import { LogsViewer } from './components/logs/LogsViewer'
 import { OllamaManager } from './components/ollama/OllamaManager'
-import { AgentCanvas } from './components/agents/AgentCanvas'
-import { ChatInterface } from './components/chat/ChatInterface'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { ErrorToast } from './components/common/ErrorNotifications'
 import { CommandPalette, useCommandPalette } from './components/common/CommandPalette'
 import { initializeErrorListener } from './stores/errors'
+import { useMediaQuery } from './hooks/useResponsive'
+// Lazy-loaded heavy components for better performance
+import {
+  LazyAgentCanvas,
+  LazyMemoryBrowser,
+  LazyTerminal,
+  LazyChatInterface,
+  LazyGlobalSettings,
+} from './components/common/LazyComponents'
 
-type View = 'dashboard' | 'projects' | 'sessions' | 'mcp' | 'memory' | 'profiles' | 'context' | 'services' | 'logs' | 'ollama' | 'agents' | 'chat' | 'terminal' | 'globalSettings' | 'preferences'
+type View =
+  | 'dashboard'
+  | 'projects'
+  | 'sessions'
+  | 'mcp'
+  | 'memory'
+  | 'profiles'
+  | 'context'
+  | 'services'
+  | 'logs'
+  | 'ollama'
+  | 'agents'
+  | 'chat'
+  | 'terminal'
+  | 'globalSettings'
+  | 'preferences'
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [userToggledSidebar, setUserToggledSidebar] = useState(false)
   const commandPalette = useCommandPalette()
+  const isNarrowWindow = useMediaQuery('(max-width: 900px)')
 
   // Memoized navigation handler for command palette
-  const handleNavigate = useCallback((view: string) => {
-    setCurrentView(view as View)
-    commandPalette.close()
-  }, [commandPalette])
+  const handleNavigate = useCallback(
+    (view: string) => {
+      setCurrentView(view as View)
+      commandPalette.close()
+    },
+    [commandPalette]
+  )
 
   // Initialize error listener on mount
   useEffect(() => {
     const unsubscribe = initializeErrorListener()
     return () => unsubscribe()
+  }, [])
+
+  // Auto-collapse sidebar on narrow windows (unless user manually toggled)
+  useEffect(() => {
+    if (!userToggledSidebar) {
+      setSidebarCollapsed(isNarrowWindow)
+    }
+  }, [isNarrowWindow, userToggledSidebar])
+
+  // Handle manual sidebar toggle
+  const handleToggleSidebar = useCallback(() => {
+    setUserToggledSidebar(true)
+    setSidebarCollapsed((prev) => !prev)
+    // Reset user override after resize
+    const resetTimeout = setTimeout(() => setUserToggledSidebar(false), 2000)
+    return () => clearTimeout(resetTimeout)
   }, [])
 
   const renderView = () => {
@@ -51,7 +91,7 @@ export default function App() {
       case 'mcp':
         return <MCPManager />
       case 'memory':
-        return <MemoryBrowser />
+        return <LazyMemoryBrowser />
       case 'profiles':
         return <ProfileManager />
       case 'context':
@@ -63,13 +103,13 @@ export default function App() {
       case 'ollama':
         return <OllamaManager />
       case 'agents':
-        return <AgentCanvas />
+        return <LazyAgentCanvas />
       case 'chat':
-        return <ChatInterface />
+        return <LazyChatInterface />
       case 'terminal':
-        return <Terminal />
+        return <LazyTerminal />
       case 'globalSettings':
-        return <GlobalSettings />
+        return <LazyGlobalSettings />
       case 'preferences':
         return <Settings />
       default:
@@ -85,20 +125,15 @@ export default function App() {
           currentView={currentView}
           onViewChange={setCurrentView}
           collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          onToggleCollapse={handleToggleSidebar}
         />
 
         {/* Main content */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Header
-            title={getViewTitle(currentView)}
-            onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-          />
+          <Header title={getViewTitle(currentView)} onToggleSidebar={handleToggleSidebar} />
 
           <main className="flex-1 overflow-auto p-6 bg-background">
-            <ErrorBoundary key={currentView}>
-              {renderView()}
-            </ErrorBoundary>
+            <ErrorBoundary key={currentView}>{renderView()}</ErrorBoundary>
           </main>
         </div>
 

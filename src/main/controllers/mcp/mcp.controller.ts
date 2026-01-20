@@ -21,7 +21,8 @@ import { existsSync } from 'fs'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
-import type { MCPServer, MCPServerConfig } from '../../../shared/types'
+import type { MCPServer, MCPServerConfig, MCPServerMetadata } from '../../../shared/types'
+import { getMCPServerMetadata, inferServerCategory } from '../../../shared/mcp-metadata-registry'
 
 // ============================================================================
 // Constants
@@ -97,10 +98,19 @@ async function getMCPServers(): Promise<MCPServer[]> {
             disabled: serverConfig.disabled,
           }
 
+          // Get metadata for this server
+          const knownMetadata = getMCPServerMetadata(name)
+          const metadata: MCPServerMetadata = knownMetadata || {
+            name,
+            description: `MCP server: ${serverConfig.command}`,
+            category: inferServerCategory(name, serverConfig.command),
+          }
+
           servers.push({
             name,
             status: serverConfig.disabled ? 'offline' : 'online',
             config: cfg,
+            metadata,
           })
         }
       } catch (error) {

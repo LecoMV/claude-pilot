@@ -16,6 +16,7 @@ export {
   AsyncBoundary,
 } from './ErrorBoundary'
 export { ErrorToast, useErrorToast } from './ErrorNotifications'
+export { ErrorState, InlineError, EmptyErrorState, type ErrorType } from './ErrorState'
 
 // Progressive disclosure
 export { AdvancedSection, CollapsibleCard } from './AdvancedSection'
@@ -30,6 +31,17 @@ export {
 
 // Help system
 export { HelpTooltip, FormField, InfoBanner } from './HelpTooltip'
+
+// Schema-driven forms
+export {
+  SchemaForm,
+  validateSchemaForm,
+  createSchemaFromObject,
+  type SchemaField,
+  type SchemaFieldType,
+  type SchemaFieldOption,
+  type SchemaFormProps,
+} from './SchemaForm'
 
 // Editor
 export { default as CodeEditor } from './CodeEditor'

@@ -146,6 +146,7 @@ export interface MCPServer {
   toolCount?: number
   lastPing?: number
   config: MCPServerConfig
+  metadata?: MCPServerMetadata
 }
 
 export interface MCPServerConfig {
@@ -153,6 +154,30 @@ export interface MCPServerConfig {
   args?: string[]
   env?: Record<string, string>
   disabled?: boolean
+}
+
+// Module discovery metadata for MCP servers
+export type MCPServerCategory =
+  | 'database'
+  | 'filesystem'
+  | 'browser'
+  | 'api'
+  | 'memory'
+  | 'developer'
+  | 'ai'
+  | 'productivity'
+  | 'security'
+  | 'other'
+
+export interface MCPServerMetadata {
+  name: string
+  description: string
+  category: MCPServerCategory
+  version?: string
+  author?: string
+  homepage?: string
+  capabilities?: string[]
+  tags?: string[]
 }
 
 // MCP Proxy/Federation (deploy-zebp)

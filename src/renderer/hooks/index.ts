@@ -19,3 +19,14 @@ export { useMemorySearch, useEmbeddingStatus, useStoreEmbedding } from './useMem
 
 // Terminal (legacy hybrid approach)
 export * from './useTerminal'
+
+// Responsive Design
+export {
+  useBreakpoint,
+  useMediaQuery,
+  useAutoCollapseSidebar,
+  useResponsiveColumns,
+  useWindowSize,
+  useCompactMode,
+  type Breakpoint,
+} from './useResponsive'

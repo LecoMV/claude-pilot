@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import {
   Server,
   Box,
@@ -7,16 +7,17 @@ import {
   RotateCcw,
   RefreshCw,
   Search,
-  CheckCircle,
-  XCircle,
-  AlertCircle,
-  Pause,
   Activity,
   Network,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/react'
 import { useServicesStore, type SystemdService, type PodmanContainer } from '@/stores/services'
+import {
+  StatusIndicator,
+  BatchActions,
+  type ServiceStatus,
+} from '@/components/common/StatusIndicator'
 
 export function ServicesManager() {
   const {
@@ -31,6 +32,10 @@ export function ServicesManager() {
     setSelectedContainer,
     setFilter,
   } = useServicesStore()
+
+  // Batch selection state
+  const [selectedContainerIds, setSelectedContainerIds] = useState<string[]>([])
+  const [selectedServiceNames, setSelectedServiceNames] = useState<string[]>([])
 
   // tRPC queries for data fetching
   const systemdQuery = trpc.services.systemd.useQuery(undefined, {
@@ -51,6 +56,39 @@ export function ServicesManager() {
       podmanQuery.refetch()
     },
   })
+
+  // Batch action handlers
+  const handleBatchContainerAction = useCallback(
+    (ids: string[], action: 'start' | 'stop' | 'restart') => {
+      ids.forEach((id) => {
+        podmanActionMutation.mutate({ id, action })
+      })
+      setSelectedContainerIds([])
+    },
+    [podmanActionMutation]
+  )
+
+  const handleBatchServiceAction = useCallback(
+    (names: string[], action: 'start' | 'stop' | 'restart') => {
+      names.forEach((name) => {
+        systemdActionMutation.mutate({ name, action })
+      })
+      setSelectedServiceNames([])
+    },
+    [systemdActionMutation]
+  )
+
+  const toggleContainerSelection = useCallback((id: string) => {
+    setSelectedContainerIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    )
+  }, [])
+
+  const toggleServiceSelection = useCallback((name: string) => {
+    setSelectedServiceNames((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    )
+  }, [])
 
   // Sync data to store for components that need it
   useEffect(() => {
@@ -160,6 +198,61 @@ export function ServicesManager() {
         </button>
       </div>
 
+      {/* Batch Actions Toolbar */}
+      {activeTab === 'podman' && selectedContainerIds.length > 0 && (
+        <BatchActions
+          selectedIds={selectedContainerIds}
+          totalCount={filteredContainers.length}
+          actions={[
+            {
+              label: 'Start',
+              icon: Play,
+              onClick: (ids) => handleBatchContainerAction(ids, 'start'),
+            },
+            {
+              label: 'Stop',
+              icon: Square,
+              onClick: (ids) => handleBatchContainerAction(ids, 'stop'),
+              variant: 'danger',
+            },
+            {
+              label: 'Restart',
+              icon: RotateCcw,
+              onClick: (ids) => handleBatchContainerAction(ids, 'restart'),
+            },
+          ]}
+          onClear={() => setSelectedContainerIds([])}
+          onSelectAll={() => setSelectedContainerIds(filteredContainers.map((c) => c.id))}
+        />
+      )}
+
+      {activeTab === 'systemd' && selectedServiceNames.length > 0 && (
+        <BatchActions
+          selectedIds={selectedServiceNames}
+          totalCount={filteredServices.length}
+          actions={[
+            {
+              label: 'Start',
+              icon: Play,
+              onClick: (names) => handleBatchServiceAction(names, 'start'),
+            },
+            {
+              label: 'Stop',
+              icon: Square,
+              onClick: (names) => handleBatchServiceAction(names, 'stop'),
+              variant: 'danger',
+            },
+            {
+              label: 'Restart',
+              icon: RotateCcw,
+              onClick: (names) => handleBatchServiceAction(names, 'restart'),
+            },
+          ]}
+          onClear={() => setSelectedServiceNames([])}
+          onSelectAll={() => setSelectedServiceNames(filteredServices.map((s) => s.name))}
+        />
+      )}
+
       {/* Content */}
       {activeTab === 'podman' ? (
         <ContainersList
@@ -167,6 +260,8 @@ export function ServicesManager() {
           selected={selectedContainer}
           onSelect={setSelectedContainer}
           onAction={handleContainerAction}
+          selectedIds={selectedContainerIds}
+          onToggleSelect={toggleContainerSelection}
         />
       ) : (
         <ServicesList
@@ -174,6 +269,8 @@ export function ServicesManager() {
           selected={selectedService}
           onSelect={setSelectedService}
           onAction={handleServiceAction}
+          selectedNames={selectedServiceNames}
+          onToggleSelect={toggleServiceSelection}
         />
       )}
     </div>
@@ -232,9 +329,18 @@ interface ContainersListProps {
   selected: PodmanContainer | null
   onSelect: (container: PodmanContainer | null) => void
   onAction: (id: string, action: 'start' | 'stop' | 'restart') => void
+  selectedIds: string[]
+  onToggleSelect: (id: string) => void
 }
 
-function ContainersList({ containers, selected, onSelect, onAction }: ContainersListProps) {
+function ContainersList({
+  containers,
+  selected,
+  onSelect,
+  onAction,
+  selectedIds,
+  onToggleSelect,
+}: ContainersListProps) {
   if (containers.length === 0) {
     return (
       <div className="card p-8 text-center">
@@ -244,65 +350,94 @@ function ContainersList({ containers, selected, onSelect, onAction }: Containers
     )
   }
 
+  const mapContainerStatus = (status: string): ServiceStatus => {
+    switch (status) {
+      case 'running':
+        return 'online'
+      case 'paused':
+        return 'idle'
+      case 'exited':
+      case 'stopped':
+        return 'offline'
+      default:
+        return 'unknown'
+    }
+  }
+
   return (
     <div className="space-y-2">
-      {containers.map((container) => (
-        <div
-          key={container.id}
-          className={cn(
-            'card p-4 cursor-pointer transition-all hover:border-border-hover',
-            selected?.id === container.id && 'border-accent-purple'
-          )}
-          onClick={() => onSelect(selected?.id === container.id ? null : container)}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <StatusIcon status={container.status} />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-text-primary">{container.name}</span>
-                  <span className="text-xs text-text-muted font-mono">
-                    {container.id.slice(0, 12)}
-                  </span>
-                </div>
-                <p className="text-xs text-text-muted">{container.image}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {container.ports.length > 0 && (
-                <span className="text-xs text-text-muted flex items-center gap-1">
-                  <Network className="w-3 h-3" />
-                  {container.ports.slice(0, 2).join(', ')}
-                </span>
-              )}
-              <ActionButtons
-                status={container.status}
-                onStart={() => onAction(container.id, 'start')}
-                onStop={() => onAction(container.id, 'stop')}
-                onRestart={() => onAction(container.id, 'restart')}
-              />
-            </div>
-          </div>
-          {selected?.id === container.id && (
-            <div className="mt-4 pt-4 border-t border-border grid grid-cols-3 gap-4 text-sm">
-              <div>
-                <p className="text-text-muted">Created</p>
-                <p className="text-text-primary">{container.created}</p>
-              </div>
-              <div>
-                <p className="text-text-muted">State</p>
-                <p className="text-text-primary">{container.state}</p>
-              </div>
-              {container.health && (
+      {containers.map((container) => {
+        const isSelected = selectedIds.includes(container.id)
+        return (
+          <div
+            key={container.id}
+            className={cn(
+              'card p-4 cursor-pointer transition-all hover:border-border-hover',
+              selected?.id === container.id && 'border-accent-purple',
+              isSelected && 'bg-accent-blue/5 ring-1 ring-accent-blue/30'
+            )}
+            onClick={() => onSelect(selected?.id === container.id ? null : container)}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={(e) => {
+                    e.stopPropagation()
+                    onToggleSelect(container.id)
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-4 h-4 rounded border-border focus:ring-accent-blue"
+                  aria-label={`Select ${container.name}`}
+                />
+                <StatusIndicator status={mapContainerStatus(container.status)} variant="icon" />
                 <div>
-                  <p className="text-text-muted">Health</p>
-                  <p className="text-text-primary">{container.health}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-text-primary">{container.name}</span>
+                    <span className="text-xs text-text-muted font-mono">
+                      {container.id.slice(0, 12)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-text-muted">{container.image}</p>
                 </div>
-              )}
+              </div>
+              <div className="flex items-center gap-2">
+                {container.ports.length > 0 && (
+                  <span className="text-xs text-text-muted flex items-center gap-1">
+                    <Network className="w-3 h-3" />
+                    {container.ports.slice(0, 2).join(', ')}
+                  </span>
+                )}
+                <ActionButtons
+                  status={container.status}
+                  onStart={() => onAction(container.id, 'start')}
+                  onStop={() => onAction(container.id, 'stop')}
+                  onRestart={() => onAction(container.id, 'restart')}
+                />
+              </div>
             </div>
-          )}
-        </div>
-      ))}
+            {selected?.id === container.id && (
+              <div className="mt-4 pt-4 border-t border-border grid grid-cols-3 gap-4 text-sm">
+                <div>
+                  <p className="text-text-muted">Created</p>
+                  <p className="text-text-primary">{container.created}</p>
+                </div>
+                <div>
+                  <p className="text-text-muted">State</p>
+                  <p className="text-text-primary">{container.state}</p>
+                </div>
+                {container.health && (
+                  <div>
+                    <p className="text-text-muted">Health</p>
+                    <p className="text-text-primary">{container.health}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -312,9 +447,18 @@ interface ServicesListProps {
   selected: SystemdService | null
   onSelect: (service: SystemdService | null) => void
   onAction: (name: string, action: 'start' | 'stop' | 'restart') => void
+  selectedNames: string[]
+  onToggleSelect: (name: string) => void
 }
 
-function ServicesList({ services, selected, onSelect, onAction }: ServicesListProps) {
+function ServicesList({
+  services,
+  selected,
+  onSelect,
+  onAction,
+  selectedNames,
+  onToggleSelect,
+}: ServicesListProps) {
   if (services.length === 0) {
     return (
       <div className="card p-8 text-center">
@@ -324,84 +468,99 @@ function ServicesList({ services, selected, onSelect, onAction }: ServicesListPr
     )
   }
 
+  const mapServiceStatus = (status: string): ServiceStatus => {
+    switch (status) {
+      case 'running':
+        return 'online'
+      case 'failed':
+        return 'error'
+      case 'inactive':
+      case 'stopped':
+        return 'offline'
+      default:
+        return 'unknown'
+    }
+  }
+
   return (
     <div className="space-y-2">
-      {services.map((service) => (
-        <div
-          key={service.name}
-          className={cn(
-            'card p-4 cursor-pointer transition-all hover:border-border-hover',
-            selected?.name === service.name && 'border-accent-purple'
-          )}
-          onClick={() => onSelect(selected?.name === service.name ? null : service)}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <StatusIcon status={service.status} />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-text-primary">{service.name}</span>
-                  {service.enabled && (
-                    <span className="text-xs px-1.5 py-0.5 bg-accent-green/20 text-accent-green rounded">
-                      enabled
-                    </span>
-                  )}
+      {services.map((service) => {
+        const isSelected = selectedNames.includes(service.name)
+        return (
+          <div
+            key={service.name}
+            className={cn(
+              'card p-4 cursor-pointer transition-all hover:border-border-hover',
+              selected?.name === service.name && 'border-accent-purple',
+              isSelected && 'bg-accent-blue/5 ring-1 ring-accent-blue/30'
+            )}
+            onClick={() => onSelect(selected?.name === service.name ? null : service)}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={(e) => {
+                    e.stopPropagation()
+                    onToggleSelect(service.name)
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-4 h-4 rounded border-border focus:ring-accent-blue"
+                  aria-label={`Select ${service.name}`}
+                />
+                <StatusIndicator status={mapServiceStatus(service.status)} variant="icon" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-text-primary">{service.name}</span>
+                    {service.enabled && (
+                      <span className="text-xs px-1.5 py-0.5 bg-accent-green/20 text-accent-green rounded">
+                        enabled
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-text-muted line-clamp-1">{service.description}</p>
                 </div>
-                <p className="text-xs text-text-muted line-clamp-1">{service.description}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {service.pid && <span className="text-xs text-text-muted">PID: {service.pid}</span>}
+                <ActionButtons
+                  status={service.status}
+                  onStart={() => onAction(service.name, 'start')}
+                  onStop={() => onAction(service.name, 'stop')}
+                  onRestart={() => onAction(service.name, 'restart')}
+                />
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {service.pid && <span className="text-xs text-text-muted">PID: {service.pid}</span>}
-              <ActionButtons
-                status={service.status}
-                onStart={() => onAction(service.name, 'start')}
-                onStop={() => onAction(service.name, 'stop')}
-                onRestart={() => onAction(service.name, 'restart')}
-              />
-            </div>
+            {selected?.name === service.name && (
+              <div className="mt-4 pt-4 border-t border-border grid grid-cols-4 gap-4 text-sm">
+                <div>
+                  <p className="text-text-muted">Active State</p>
+                  <p className="text-text-primary">{service.activeState}</p>
+                </div>
+                <div>
+                  <p className="text-text-muted">Sub State</p>
+                  <p className="text-text-primary">{service.subState}</p>
+                </div>
+                {service.memory && (
+                  <div>
+                    <p className="text-text-muted">Memory</p>
+                    <p className="text-text-primary">{service.memory}</p>
+                  </div>
+                )}
+                {service.cpu && (
+                  <div>
+                    <p className="text-text-muted">CPU</p>
+                    <p className="text-text-primary">{service.cpu}</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          {selected?.name === service.name && (
-            <div className="mt-4 pt-4 border-t border-border grid grid-cols-4 gap-4 text-sm">
-              <div>
-                <p className="text-text-muted">Active State</p>
-                <p className="text-text-primary">{service.activeState}</p>
-              </div>
-              <div>
-                <p className="text-text-muted">Sub State</p>
-                <p className="text-text-primary">{service.subState}</p>
-              </div>
-              {service.memory && (
-                <div>
-                  <p className="text-text-muted">Memory</p>
-                  <p className="text-text-primary">{service.memory}</p>
-                </div>
-              )}
-              {service.cpu && (
-                <div>
-                  <p className="text-text-muted">CPU</p>
-                  <p className="text-text-primary">{service.cpu}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
-}
-
-function StatusIcon({ status }: { status: string }) {
-  switch (status) {
-    case 'running':
-      return <CheckCircle className="w-5 h-5 text-accent-green" />
-    case 'failed':
-    case 'exited':
-      return <XCircle className="w-5 h-5 text-accent-red" />
-    case 'paused':
-      return <Pause className="w-5 h-5 text-accent-yellow" />
-    default:
-      return <AlertCircle className="w-5 h-5 text-text-muted" />
-  }
 }
 
 interface ActionButtonsProps {

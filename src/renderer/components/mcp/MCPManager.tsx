@@ -17,7 +17,17 @@ import {
   FileJson,
   Save,
   FolderOpen,
+  Database,
+  Globe,
+  Plug,
+  Brain,
+  Code,
+  Sparkles,
+  CheckSquare,
+  Shield,
+  Tag,
 } from 'lucide-react'
+import type { MCPServerCategory } from '@shared/types'
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/react'
 import { useMCPStore } from '@/stores/mcp'
@@ -382,6 +392,9 @@ interface ServerCardProps {
 }
 
 function ServerCard({ server, selected, onSelect, onToggle }: ServerCardProps) {
+  const category = server.metadata?.category || 'other'
+  const CategoryIcon = CATEGORY_ICONS[category]
+
   return (
     <div
       className={cn(
@@ -392,15 +405,21 @@ function ServerCard({ server, selected, onSelect, onToggle }: ServerCardProps) {
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <div className="p-2 rounded-lg bg-surface-hover">
-            <Server className="w-5 h-5 text-text-secondary" />
+          <div className={cn('p-2 rounded-lg', CATEGORY_COLORS[category].split(' ')[1])}>
+            <CategoryIcon className={cn('w-5 h-5', CATEGORY_COLORS[category].split(' ')[0])} />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium text-text-primary">{server.name}</span>
               <StatusBadge status={server.status} disabled={server.config.disabled} />
+              <CategoryBadge category={category} />
             </div>
-            <p className="text-xs text-text-muted font-mono mt-1">{server.config.command}</p>
+            {server.metadata?.description && (
+              <p className="text-xs text-text-muted mt-1 truncate max-w-md">
+                {server.metadata.description}
+              </p>
+            )}
+            <p className="text-xs text-text-muted/70 font-mono mt-1">{server.config.command}</p>
           </div>
         </div>
 
@@ -459,6 +478,8 @@ function ServerDetailPanel({
   isReloading,
 }: ServerDetailPanelProps) {
   const [copied, setCopied] = useState(false)
+  const category = server.metadata?.category || 'other'
+  const CategoryIcon = CATEGORY_ICONS[category]
 
   const copyCommand = () => {
     const fullCommand = [server.config.command, ...(server.config.args || [])].join(' ')
@@ -472,12 +493,15 @@ function ServerDetailPanel({
       {/* Header */}
       <div className="sticky top-0 bg-surface border-b border-border px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-surface-hover">
-            <Server className="w-5 h-5 text-text-secondary" />
+          <div className={cn('p-2 rounded-lg', CATEGORY_COLORS[category].split(' ')[1])}>
+            <CategoryIcon className={cn('w-5 h-5', CATEGORY_COLORS[category].split(' ')[0])} />
           </div>
           <div>
             <h2 className="font-medium text-text-primary">{server.name}</h2>
-            <StatusBadge status={server.status} disabled={server.config.disabled} />
+            <div className="flex items-center gap-2 mt-1">
+              <StatusBadge status={server.status} disabled={server.config.disabled} />
+              <CategoryBadge category={category} />
+            </div>
           </div>
         </div>
         <button
@@ -561,6 +585,52 @@ function ServerDetailPanel({
           </section>
         )}
 
+        {/* Description */}
+        {server.metadata?.description && (
+          <section>
+            <h3 className="text-sm font-medium text-text-secondary mb-2">Description</h3>
+            <p className="text-sm text-text-primary bg-background rounded-lg p-3">
+              {server.metadata.description}
+            </p>
+          </section>
+        )}
+
+        {/* Capabilities */}
+        {server.metadata?.capabilities && server.metadata.capabilities.length > 0 && (
+          <section>
+            <h3 className="text-sm font-medium text-text-secondary mb-2">Capabilities</h3>
+            <div className="flex flex-wrap gap-2">
+              {server.metadata.capabilities.map((cap) => (
+                <span
+                  key={cap}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-accent-purple/10 text-accent-purple"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  {cap}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Tags */}
+        {server.metadata?.tags && server.metadata.tags.length > 0 && (
+          <section>
+            <h3 className="text-sm font-medium text-text-secondary mb-2">Tags</h3>
+            <div className="flex flex-wrap gap-2">
+              {server.metadata.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-surface-hover text-text-muted"
+                >
+                  <Tag className="w-3 h-3" />
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Statistics */}
         <section>
           <h3 className="text-sm font-medium text-text-secondary mb-2">Statistics</h3>
@@ -587,6 +657,54 @@ function ServerDetailPanel({
         </section>
       </div>
     </div>
+  )
+}
+
+// Category icon and color helpers
+const CATEGORY_ICONS: Record<MCPServerCategory, typeof Server> = {
+  database: Database,
+  filesystem: FolderOpen,
+  browser: Globe,
+  api: Plug,
+  memory: Brain,
+  developer: Code,
+  ai: Sparkles,
+  productivity: CheckSquare,
+  security: Shield,
+  other: Server,
+}
+
+const CATEGORY_COLORS: Record<MCPServerCategory, string> = {
+  database: 'text-accent-blue bg-accent-blue/10',
+  filesystem: 'text-accent-yellow bg-accent-yellow/10',
+  browser: 'text-accent-purple bg-accent-purple/10',
+  api: 'text-accent-green bg-accent-green/10',
+  memory: 'text-accent-blue bg-accent-blue/10',
+  developer: 'text-accent-purple bg-accent-purple/10',
+  ai: 'text-accent-purple bg-accent-purple/10',
+  productivity: 'text-accent-green bg-accent-green/10',
+  security: 'text-accent-red bg-accent-red/10',
+  other: 'text-text-muted bg-surface-hover',
+}
+
+interface CategoryBadgeProps {
+  category: MCPServerCategory
+}
+
+function CategoryBadge({ category }: CategoryBadgeProps) {
+  const Icon = CATEGORY_ICONS[category]
+  const colorClass = CATEGORY_COLORS[category]
+
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium capitalize',
+        colorClass
+      )}
+    >
+      <Icon className="w-3 h-3" />
+      {category}
+    </span>
   )
 }
 
