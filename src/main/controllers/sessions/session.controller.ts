@@ -172,6 +172,57 @@ interface ClaudeProcessInfo {
 }
 
 /**
+ * Decode a project folder name to an actual filesystem path.
+ * The folder name "-home-deploy-projects-claude-command-center" encodes
+ * "/home/deploy/projects/claude-command-center", but since dashes in
+ * directory names can't be distinguished from path separators, we need
+ * to try different interpretations and check which one exists.
+ */
+function decodeProjectPath(encoded: string): string {
+  // Remove leading dash and split by dash
+  const parts = encoded.replace(/^-/, '').split('-')
+
+  // Try simple interpretation first (all dashes are slashes)
+  const simplePath = '/' + parts.join('/')
+  if (existsSync(simplePath)) return simplePath
+
+  // Dynamic programming approach: try all possible segmentations
+  // Build paths incrementally, checking at each step if the path exists
+  function findValidPath(remainingParts: string[], basePath: string): string | null {
+    if (remainingParts.length === 0) {
+      return existsSync(basePath) ? basePath : null
+    }
+
+    // Try combining 1, 2, 3, ... parts as the next segment
+    for (let segLen = 1; segLen <= remainingParts.length; segLen++) {
+      const segment = remainingParts.slice(0, segLen).join('-')
+      const newPath = basePath + '/' + segment
+      const remaining = remainingParts.slice(segLen)
+
+      // Check if this path exists and recurse
+      if (existsSync(newPath)) {
+        if (remaining.length === 0) {
+          return newPath // Found complete valid path
+        }
+
+        // Try to complete the path with remaining parts
+        const result = findValidPath(remaining, newPath)
+        if (result) return result
+      }
+    }
+
+    return null
+  }
+
+  // Start from root
+  const result = findValidPath(parts, '')
+  if (result) return result
+
+  // Fallback: return simple interpretation (directory might have been deleted)
+  return '/' + parts.join('/')
+}
+
+/**
  * Parse a single JSONL session file (async with cache support)
  */
 async function parseSessionFile(filePath: string): Promise<ExternalSession | null> {
@@ -261,10 +312,14 @@ async function parseSessionFile(filePath: string): Promise<ExternalSession | nul
     if (!firstEntry) return null
 
     // Extract project path from file path
+    // The folder name like "-home-deploy-projects-claude-command-center" encodes
+    // the path "/home/deploy/projects/claude-command-center". Since dashes in
+    // directory names are indistinguishable from path separators, we try to
+    // reconstruct the actual path by checking what exists on the filesystem.
     const projectsDir = join(CLAUDE_DIR, 'projects')
     const relativePath = filePath.replace(projectsDir + '/', '')
     const projectDir = relativePath.split('/')[0]
-    const projectPath = projectDir.replace(/-/g, '/').replace(/^\//, '')
+    const projectPath = decodeProjectPath(projectDir)
     const projectName = projectPath.split('/').pop() || projectDir
 
     // Extract session ID from filename
@@ -468,10 +523,19 @@ function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
       const cmdLine = proc.cmdline
       const args = cmdLine.split(/\s+/)
 
-      // Skip if not a main claude process
+      // Skip if not an actual Claude CLI process
+      // The main Claude CLI process has proc.name === 'claude' (from /proc/pid/comm)
+      // Exclude electron, esbuild, chrome, and other helper processes
+      const isClaudeCli =
+        proc.name === 'claude' ||
+        (args[0] === 'claude' && args.includes('--settings')) ||
+        (args[0] === 'claude' && args.includes('--permission-mode'))
+
+      if (!isClaudeCli) continue
+
+      // Also skip non-main processes
       const mainCmd = args[0] || ''
-      if (!mainCmd.includes('claude') || mainCmd.includes('conmon') || mainCmd.includes('podman'))
-        continue
+      if (mainCmd.includes('conmon') || mainCmd.includes('podman')) continue
 
       // Determine profile from --settings path
       let profile = 'default'
@@ -490,8 +554,9 @@ function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
       else if (cmdLine.includes('claude-eng')) wrapper = 'claude-eng'
       else if (cmdLine.includes('claude-sec')) wrapper = 'claude-sec'
 
-      // Detect launch mode
-      const launchMode: 'new' | 'resume' = args.includes('--resume') ? 'resume' : 'new'
+      // Detect launch mode (--resume or --continue both mean resuming a session)
+      const launchMode: 'new' | 'resume' =
+        args.includes('--resume') || args.includes('--continue') ? 'resume' : 'new'
 
       // Detect permission mode
       const permIdx = args.indexOf('--permission-mode')
@@ -556,12 +621,14 @@ function matchSessionToProcess(
   session: ExternalSession,
   processes: ClaudeProcessInfo[]
 ): SessionProcessInfo | undefined {
-  const sessionCwd = session.workingDirectory
-  if (!sessionCwd) return undefined
+  // Use projectPath (derived from folder name) since workingDirectory (from JSONL cwd field)
+  // is often not populated. projectPath is like "/home/deploy/projects/my-project"
+  const sessionPath = session.projectPath || session.workingDirectory
+  if (!sessionPath) return undefined
 
   // Normalize paths for comparison
   const normalizePath = (p: string) => p.replace(/\/+$/, '').toLowerCase()
-  const normalizedSessionCwd = normalizePath(sessionCwd)
+  const normalizedSessionPath = normalizePath(sessionPath)
 
   for (const proc of processes) {
     // Skip processes without cwd
@@ -569,12 +636,10 @@ function matchSessionToProcess(
 
     const normalizedProcCwd = normalizePath(proc.cwd)
 
-    // Check for exact match or if one contains the other
-    if (
-      normalizedSessionCwd === normalizedProcCwd ||
-      normalizedSessionCwd.includes(normalizedProcCwd) ||
-      normalizedProcCwd.includes(normalizedSessionCwd)
-    ) {
+    // Check for exact match only - paths must be the same
+    // We need strict matching to avoid false positives like /home/deploy matching
+    // all sessions under /home/deploy/projects/*
+    if (normalizedSessionPath === normalizedProcCwd) {
       return {
         pid: proc.pid,
         cwd: proc.cwd,
@@ -619,18 +684,25 @@ async function getActiveSessions(): Promise<ExternalSession[]> {
   const processes = detectActiveClaudeProcesses()
 
   // Only return sessions that have a matching running process
-  const activeSessions: ExternalSession[] = []
+  // Dedupe by projectPath - keep only the most recent session per project
+  const sessionsByProject = new Map<string, ExternalSession>()
 
   for (const session of sessions) {
     const processInfo = matchSessionToProcess(session, processes)
     if (processInfo) {
-      session.processInfo = processInfo
-      session.isActive = true // Confirmed active via process detection
-      activeSessions.push(session)
+      const projectKey = session.projectPath || session.projectName
+      const existing = sessionsByProject.get(projectKey)
+
+      // Keep the session with the most recent activity
+      if (!existing || session.lastActivity > existing.lastActivity) {
+        session.processInfo = processInfo
+        session.isActive = true // Confirmed active via process detection
+        sessionsByProject.set(projectKey, session)
+      }
     }
   }
 
-  return activeSessions
+  return Array.from(sessionsByProject.values())
 }
 
 // ============================================================================

@@ -55,6 +55,27 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     try {
       const activeSessions = await trpc.session.getActive.query()
       set({ activeSessions })
+
+      // Merge processInfo from active sessions into the main sessions list
+      // This allows the UI to show green dots and process info for active sessions
+      const { sessions } = get()
+      if (sessions.length > 0 && activeSessions.length > 0) {
+        const activeByPath = new Map(activeSessions.map((s) => [s.projectPath || s.projectName, s]))
+
+        const updatedSessions = sessions.map((session) => {
+          const activeSession = activeByPath.get(session.projectPath || session.projectName)
+          if (activeSession?.processInfo) {
+            return {
+              ...session,
+              processInfo: activeSession.processInfo,
+              isActive: true,
+            }
+          }
+          return session
+        })
+
+        set({ sessions: updatedSessions })
+      }
     } catch (error) {
       console.error('Failed to fetch active sessions:', error)
     }
