@@ -355,7 +355,7 @@ function ContainersList({
       case 'running':
         return 'online'
       case 'paused':
-        return 'idle'
+        return 'warning'
       case 'exited':
       case 'stopped':
         return 'offline'
