@@ -41,11 +41,19 @@ type ViewMode = 'auto' | 'cytoscape' | 'sigma'
 // Color palette for different node types
 const nodeColors: Record<string, string> = {
   Technique: '#cba6f7', // Purple
+  CyberTechnique: '#cba6f7', // Purple (alias for Memgraph)
   CVE: '#f38ba8', // Red
+  Vulnerability: '#f38ba8', // Red (alias)
   Tool: '#89b4fa', // Blue
+  Software: '#89b4fa', // Blue (alias)
   Target: '#a6e3a1', // Green
+  Host: '#a6e3a1', // Green (alias)
   Attack: '#f9e2af', // Yellow
+  Tactic: '#f9e2af', // Yellow (alias for MITRE)
   Defense: '#94e2d5', // Teal
+  Mitigation: '#94e2d5', // Teal (alias)
+  Group: '#fab387', // Orange - threat actors
+  Campaign: '#eba0ac', // Pink - campaigns
   Unknown: '#6c7086', // Gray
 }
 
@@ -225,7 +233,7 @@ export function HybridGraphViewer({ className }: HybridGraphViewerProps) {
       setSelectedNode({
         id: node,
         label: attrs.label || node,
-        type: attrs.type || 'Unknown',
+        type: attrs.nodeType || 'Unknown', // Use nodeType (Sigma reserves 'type' for programs)
         properties: attrs.properties || {},
       })
     })
@@ -293,10 +301,11 @@ export function HybridGraphViewer({ className }: HybridGraphViewerProps) {
     if (graphData.nodes.length === 0) return
 
     // Add nodes with random positions for initial layout
+    // Note: 'type' is reserved in Sigma for node program selection, so we use 'nodeType'
     for (const node of graphData.nodes) {
       graph.addNode(node.id, {
         label: node.label.slice(0, 30),
-        type: node.type,
+        nodeType: node.type, // Store as nodeType to avoid Sigma's reserved 'type' attribute
         color: getNodeColor(node.type),
         size: 8,
         x: Math.random() * 1000,
