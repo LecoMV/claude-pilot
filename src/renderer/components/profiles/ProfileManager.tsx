@@ -569,7 +569,7 @@ function CustomProfilesPanel({
                           <button
                             onClick={() => handleActivate(profile.id)}
                             className="btn btn-secondary btn-sm"
-                            title="Activate profile (apply settings)"
+                            title="Apply this profile's settings to your global Claude configuration (model, tokens, CLAUDE.md). Use Launch to open a new terminal with this profile."
                           >
                             <Play className="w-4 h-4" />
                             Activate
@@ -765,15 +765,29 @@ function CustomProfilesPanel({
       <div className="card p-4">
         <div className="flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-accent-blue flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-text-secondary">
-            <p className="font-medium text-text-primary mb-1">About Work Profiles</p>
+          <div className="text-sm text-text-secondary space-y-2">
+            <p className="font-medium text-text-primary">About Work Profiles</p>
             <p>
               Work profiles let you quickly switch between different Claude configurations. Create
               profiles for specific contexts like{' '}
               <code className="text-accent-purple">claude-eng</code> for engineering work or{' '}
-              <code className="text-accent-purple">claude-sec</code> for security research. Each
-              profile can have its own model, token limits, and custom instructions.
+              <code className="text-accent-purple">claude-sec</code> for security research.
             </p>
+            <div className="grid grid-cols-2 gap-4 mt-2 pt-2 border-t border-border">
+              <div>
+                <p className="font-medium text-text-primary text-xs">Launch</p>
+                <p className="text-xs">
+                  Opens a new Claude Code terminal with this profile&apos;s settings.
+                </p>
+              </div>
+              <div>
+                <p className="font-medium text-text-primary text-xs">Activate</p>
+                <p className="text-xs">
+                  Applies profile settings to your global Claude config without opening a new
+                  terminal.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
