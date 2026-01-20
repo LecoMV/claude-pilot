@@ -42,6 +42,7 @@ import {
   streamRouter,
   updateRouter,
   terminalRouter,
+  diagnosticsRouter,
 } from '../controllers/utilities'
 
 // Chat controller
@@ -103,6 +104,7 @@ export const appRouter = router({
   stream: streamRouter,
   update: updateRouter,
   terminal: terminalRouter,
+  diagnostics: diagnosticsRouter,
 
   // Chat controller
   chat: chatRouter,

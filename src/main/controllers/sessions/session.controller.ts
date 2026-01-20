@@ -185,6 +185,15 @@ async function parseSessionFile(filePath: string): Promise<ExternalSession | nul
       return cached
     }
 
+    // Skip files larger than 50MB to prevent memory issues
+    const MAX_FILE_SIZE = 50 * 1024 * 1024
+    if (stat.size > MAX_FILE_SIZE) {
+      console.warn(
+        `Skipping large session file (${Math.round(stat.size / 1024 / 1024)}MB): ${filePath}`
+      )
+      return null
+    }
+
     const content = await readFile(filePath, 'utf-8')
     const lines = content
       .trim()
