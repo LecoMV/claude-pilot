@@ -92,9 +92,7 @@ describe('logs.controller', () => {
   // ===========================================================================
   describe('recent', () => {
     it('should return empty array when no logs are available', async () => {
-      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(
-        new Error('Command failed')
-      )
+      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(new Error('Command failed'))
       vi.mocked(fs.existsSync).mockReturnValue(false)
 
       const result = await caller.recent()
@@ -103,9 +101,7 @@ describe('logs.controller', () => {
     })
 
     it('should use default limit when not specified', async () => {
-      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(
-        new Error('Command failed')
-      )
+      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(new Error('Command failed'))
       vi.mocked(fs.existsSync).mockReturnValue(false)
 
       const result = await caller.recent()
@@ -115,9 +111,7 @@ describe('logs.controller', () => {
     })
 
     it('should accept custom limit', async () => {
-      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(
-        new Error('Command failed')
-      )
+      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(new Error('Command failed'))
       vi.mocked(fs.existsSync).mockReturnValue(false)
 
       const result = await caller.recent({ limit: 50 })
@@ -164,7 +158,10 @@ describe('logs.controller', () => {
       vi.mocked(fs.readdirSync).mockImplementation((dirPath, options) => {
         const dirPathStr = String(dirPath)
         // Check if withFileTypes is requested
-        const withFileTypes = options && typeof options === 'object' && (options as { withFileTypes?: boolean }).withFileTypes
+        const withFileTypes =
+          options &&
+          typeof options === 'object' &&
+          (options as { withFileTypes?: boolean }).withFileTypes
         if (dirPathStr.endsWith('projects') && withFileTypes) {
           return [
             { name: 'project1', isDirectory: () => true } as fs.Dirent,
@@ -266,9 +263,7 @@ describe('logs.controller', () => {
 
       // Logs should be sorted by timestamp ascending
       for (let i = 1; i < result.length; i++) {
-        expect(result[i].timestamp).toBeGreaterThanOrEqual(
-          result[i - 1].timestamp
-        )
+        expect(result[i].timestamp).toBeGreaterThanOrEqual(result[i - 1].timestamp)
       }
     })
 
@@ -284,9 +279,7 @@ describe('logs.controller', () => {
 
       const result = await caller.recent({ limit: 100 })
 
-      const logWithLongMessage = result.find((log) =>
-        log.message.includes('AAA')
-      )
+      const logWithLongMessage = result.find((log) => log.message.includes('AAA'))
       expect(logWithLongMessage?.message.length).toBeLessThanOrEqual(500)
     })
 
@@ -304,9 +297,7 @@ describe('logs.controller', () => {
         return ['session-abc.jsonl']
       })
 
-      vi.mocked(fs.readFileSync).mockReturnValue(
-        'invalid json line\n' + '{"valid":"json"}\n'
-      )
+      vi.mocked(fs.readFileSync).mockReturnValue('invalid json line\n' + '{"valid":"json"}\n')
 
       // Should not throw
       const result = await caller.recent({ limit: 100 })
@@ -500,9 +491,7 @@ describe('logs.controller', () => {
   // ===========================================================================
   describe('edge cases', () => {
     it('should handle journalctl timeout gracefully', async () => {
-      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(
-        new Error('timeout')
-      )
+      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(new Error('timeout'))
       vi.mocked(fs.existsSync).mockReturnValue(false)
 
       const result = await caller.recent()
@@ -511,9 +500,7 @@ describe('logs.controller', () => {
     })
 
     it('should handle missing projects directory gracefully', async () => {
-      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(
-        new Error('No journalctl')
-      )
+      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(new Error('No journalctl'))
       vi.mocked(fs.existsSync).mockReturnValue(false)
 
       const result = await caller.recent()
@@ -522,9 +509,7 @@ describe('logs.controller', () => {
     })
 
     it('should handle unreadable session files gracefully', async () => {
-      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(
-        new Error('No journalctl')
-      )
+      vi.mocked(spawnAsyncModule.spawnAsync).mockRejectedValue(new Error('No journalctl'))
       vi.mocked(fs.existsSync).mockReturnValue(true)
       vi.mocked(fs.readdirSync).mockImplementation((dirPath) => {
         const dirPathStr = String(dirPath)
@@ -565,7 +550,8 @@ describe('logs.controller', () => {
       const claudeLog = result.find((log) => log.source === 'claude')
       if (claudeLog) {
         expect(claudeLog.metadata).toBeDefined()
-        expect(claudeLog.metadata).toHaveProperty('sessionId')
+        // Claude log files have logFile in metadata (e.g., health-check, watchdog)
+        expect(claudeLog.metadata).toHaveProperty('logFile')
       }
     })
 
