@@ -171,3 +171,5 @@ export function CodeViewer({
     />
   )
 }
+
+export default CodeEditor

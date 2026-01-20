@@ -469,3 +469,5 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     </div>
   )
 }
+
+export default ChatInterface

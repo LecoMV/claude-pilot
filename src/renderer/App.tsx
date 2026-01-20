@@ -95,7 +95,7 @@ export default function App() {
       case 'profiles':
         return <ProfileManager />
       case 'context':
-        return <ContextDashboard />
+        return <ContextDashboard onNavigate={(view) => setCurrentView(view as View)} />
       case 'services':
         return <ServicesManager />
       case 'logs':

@@ -1461,3 +1461,5 @@ function SystemLLMSettingsPanel() {
     </div>
   )
 }
+
+export default GlobalSettings

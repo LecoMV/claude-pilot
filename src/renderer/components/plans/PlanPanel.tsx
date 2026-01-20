@@ -681,3 +681,5 @@ function CreatePlanModal({ projectPath, onClose, onCreated }: CreatePlanModalPro
     </div>
   )
 }
+
+export default PlanPanel

@@ -23,7 +23,11 @@ import { trpc } from '@/lib/trpc/react'
 import { useContextStore, type SessionSummary } from '@/stores/context'
 import type { ExternalSession } from '@shared/types'
 
-export function ContextDashboard() {
+interface ContextDashboardProps {
+  onNavigate?: (view: string) => void
+}
+
+export function ContextDashboard({ onNavigate }: ContextDashboardProps) {
   const {
     sessions,
     tokenUsage,
@@ -163,6 +167,7 @@ export function ContextDashboard() {
           sessions={activeSessions}
           selectedSession={selectedActiveSession}
           onSelectSession={setSelectedActiveSession}
+          onNavigate={onNavigate}
           onRefresh={handleRefresh}
         />
       )}
@@ -231,12 +236,14 @@ interface ActiveSessionsPanelProps {
   selectedSession: ExternalSession | null
   onSelectSession: (session: ExternalSession | null) => void
   onRefresh: () => void
+  onNavigate?: (view: string) => void
 }
 
 function ActiveSessionsPanel({
   sessions,
   selectedSession,
   onSelectSession,
+  onNavigate,
 }: ActiveSessionsPanelProps) {
   const formatTokens = (num: number) => {
     if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
@@ -532,21 +539,35 @@ function ActiveSessionsPanel({
                         </div>
                         <div className="flex items-center justify-between">
                           <p
-                            className="text-xs text-text-muted truncate max-w-[300px]"
+                            className="text-xs text-text-muted truncate max-w-[200px]"
                             title={session.projectPath}
                           >
                             {session.projectPath}
                           </p>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openProjectFolder(session.projectPath)
-                            }}
-                            className="btn btn-secondary btn-sm"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            Open Folder
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {onNavigate && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  onNavigate('sessions')
+                                }}
+                                className="btn btn-primary btn-sm"
+                              >
+                                <Terminal className="w-3 h-3" />
+                                View Transcript
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openProjectFolder(session.projectPath)
+                              }}
+                              className="btn btn-secondary btn-sm"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              Open Folder
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}

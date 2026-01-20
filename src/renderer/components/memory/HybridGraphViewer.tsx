@@ -591,3 +591,5 @@ export function HybridGraphViewer({ className }: HybridGraphViewerProps) {
     </div>
   )
 }
+
+export default HybridGraphViewer

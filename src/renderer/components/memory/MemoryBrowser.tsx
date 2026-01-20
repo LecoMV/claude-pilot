@@ -1753,3 +1753,5 @@ function EmptyState({ icon: Icon, title, description }: EmptyStateProps) {
     </div>
   )
 }
+
+export default MemoryBrowser

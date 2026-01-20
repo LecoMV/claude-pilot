@@ -414,3 +414,5 @@ export function AgentCanvas() {
     </div>
   )
 }
+
+export default AgentCanvas

@@ -795,3 +795,5 @@ function MergeModal({
     </div>
   )
 }
+
+export default BranchPanel

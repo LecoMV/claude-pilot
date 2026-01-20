@@ -117,3 +117,5 @@ function TerminalPanel({ tabId, visible }: TerminalPanelProps) {
     </div>
   )
 }
+
+export default Terminal
