@@ -22,7 +22,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { glob } from 'glob'
 import { BrowserWindow } from 'electron'
-import { findClaudeProcesses, getChildren } from '../../utils/process-utils'
+import { findClaudeProcesses, getChildren, getProcessCwd } from '../../utils/process-utils'
 import type {
   ExternalSession,
   SessionMessage,
@@ -497,6 +497,23 @@ function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
       const permIdx = args.indexOf('--permission-mode')
       const permissionMode = permIdx >= 0 ? args[permIdx + 1] : undefined
 
+      // Get working directory - try /proc/pid/cwd first, then --project arg
+      let cwd = getProcessCwd(proc.pid)
+      if (!cwd) {
+        // Fallback: extract from --project argument
+        const projectIdx = args.indexOf('--project')
+        if (projectIdx >= 0 && args[projectIdx + 1]) {
+          cwd = args[projectIdx + 1]
+        }
+      }
+
+      // Extract model from --model argument (for future use)
+      let _model: string | undefined
+      const modelIdx = args.indexOf('--model')
+      if (modelIdx >= 0 && args[modelIdx + 1]) {
+        _model = args[modelIdx + 1]
+      }
+
       // Detect active MCP servers by looking at child processes
       const mcpServers: string[] = []
       const childProcs = getChildren(proc.pid)
@@ -508,11 +525,15 @@ function detectActiveClaudeProcesses(): ClaudeProcessInfo[] {
         if (childCmd.includes('context7')) mcpServers.push('context7')
         if (childCmd.includes('playwright')) mcpServers.push('playwright')
         if (childCmd.includes('--claude-in-chrome-mcp')) mcpServers.push('chrome')
+        if (childCmd.includes('memory-keeper')) mcpServers.push('memory-keeper')
+        if (childCmd.includes('beads')) mcpServers.push('beads')
+        if (childCmd.includes('sequential-thinking')) mcpServers.push('sequential-thinking')
       }
 
       processes.push({
         pid: proc.pid,
         tty: proc.tty || 'background',
+        cwd: cwd || undefined,
         args,
         profile,
         launchMode,
@@ -538,10 +559,25 @@ function matchSessionToProcess(
   const sessionCwd = session.workingDirectory
   if (!sessionCwd) return undefined
 
+  // Normalize paths for comparison
+  const normalizePath = (p: string) => p.replace(/\/+$/, '').toLowerCase()
+  const normalizedSessionCwd = normalizePath(sessionCwd)
+
   for (const proc of processes) {
-    if (session.projectPath && sessionCwd.includes(session.projectName)) {
+    // Skip processes without cwd
+    if (!proc.cwd) continue
+
+    const normalizedProcCwd = normalizePath(proc.cwd)
+
+    // Check for exact match or if one contains the other
+    if (
+      normalizedSessionCwd === normalizedProcCwd ||
+      normalizedSessionCwd.includes(normalizedProcCwd) ||
+      normalizedProcCwd.includes(normalizedSessionCwd)
+    ) {
       return {
         pid: proc.pid,
+        cwd: proc.cwd,
         profile: proc.profile,
         terminal: proc.tty,
         launchMode: proc.launchMode,
@@ -552,17 +588,22 @@ function matchSessionToProcess(
     }
   }
 
-  // Fallback: if there's only one active process, match it to any active session
-  if (processes.length === 1) {
-    const proc = processes[0]
-    return {
-      pid: proc.pid,
-      profile: proc.profile,
-      terminal: proc.tty,
-      launchMode: proc.launchMode,
-      permissionMode: proc.permissionMode,
-      wrapper: proc.wrapper,
-      activeMcpServers: proc.activeMcpServers,
+  // Secondary match: try to match by project name in the path
+  const sessionProjectName = session.projectName?.toLowerCase()
+  if (sessionProjectName) {
+    for (const proc of processes) {
+      if (proc.cwd && proc.cwd.toLowerCase().includes(sessionProjectName)) {
+        return {
+          pid: proc.pid,
+          cwd: proc.cwd,
+          profile: proc.profile,
+          terminal: proc.tty,
+          launchMode: proc.launchMode,
+          permissionMode: proc.permissionMode,
+          wrapper: proc.wrapper,
+          activeMcpServers: proc.activeMcpServers,
+        }
+      }
     }
   }
 

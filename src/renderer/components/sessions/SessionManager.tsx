@@ -405,10 +405,15 @@ const SessionCard = memo(function SessionCard({
         </div>
       )}
 
-      {/* Working Directory */}
+      {/* Working Directory - use process cwd if available (more accurate for active sessions) */}
       <div className="flex items-center gap-2 text-xs text-text-muted mb-2">
         <FolderOpen className="w-3 h-3 flex-shrink-0" />
-        <span className="truncate">{session.workingDirectory || session.projectName}</span>
+        <span
+          className="truncate"
+          title={processInfo?.cwd || session.workingDirectory || session.projectName}
+        >
+          {processInfo?.cwd || session.workingDirectory || session.projectName}
+        </span>
       </div>
 
       {/* Stats Row */}

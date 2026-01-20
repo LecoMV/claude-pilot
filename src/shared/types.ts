@@ -420,6 +420,7 @@ export interface ExternalSession {
 
 export interface SessionProcessInfo {
   pid: number // Process ID
+  cwd?: string // Working directory of the process
   profile: string // Profile name (default, engineering, security, etc.)
   terminal: string // TTY (pts/3) or 'background'
   launchMode: 'new' | 'resume' // Whether session was resumed or new

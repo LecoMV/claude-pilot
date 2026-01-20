@@ -8,7 +8,7 @@
  * @module process-utils
  */
 
-import { readdirSync, readFileSync, existsSync } from 'fs'
+import { readdirSync, readFileSync, existsSync, readlinkSync } from 'fs'
 import { join } from 'path'
 
 // ============================================================================
@@ -225,6 +225,25 @@ export function findMCPProcesses(): ProcessInfo[] {
 }
 
 /**
+ * Get the current working directory of a process from /proc/{pid}/cwd
+ *
+ * @param pid - Process ID
+ * @returns Working directory path or null if not accessible
+ */
+export function getProcessCwd(pid: number): string | null {
+  try {
+    const cwdPath = join('/proc', String(pid), 'cwd')
+    if (!existsSync(cwdPath)) return null
+
+    // cwd is a symlink to the actual directory
+    return readlinkSync(cwdPath)
+  } catch {
+    // Permission denied or process exited
+    return null
+  }
+}
+
+/**
  * Get memory usage for a process from /proc/{pid}/statm
  *
  * @param pid - Process ID
@@ -263,5 +282,6 @@ export default {
   getProcessesByTTY,
   findClaudeProcesses,
   findMCPProcesses,
+  getProcessCwd,
   getProcessMemory,
 }
