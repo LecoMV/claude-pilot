@@ -211,7 +211,7 @@ function parseLogLevel(line: string): LogLevel {
 
 async function getRecentLogs(limit = 200): Promise<LogEntry[]> {
   const logs: LogEntry[] = []
-  const logCount = Math.floor(limit / 4)
+  const logCount = Math.floor(limit / 5)
 
   // Read from journalctl for system logs
   try {
@@ -237,6 +237,45 @@ async function getRecentLogs(limit = 200): Promise<LogEntry[]> {
     }
   } catch {
     // Ignore journalctl errors
+  }
+
+  // Read Claude Code log files
+  const claudeLogFiles = [
+    { path: join(CLAUDE_DIR, 'logs', 'health-check.log'), name: 'health-check' },
+    { path: join(CLAUDE_DIR, 'logs', 'watchdog.log'), name: 'watchdog' },
+    { path: join(CLAUDE_DIR, 'logs', 'memory-health.log'), name: 'memory' },
+    { path: join(CLAUDE_DIR, 'audit.log'), name: 'audit' },
+  ]
+
+  for (const logFile of claudeLogFiles) {
+    if (!existsSync(logFile.path)) continue
+    try {
+      const content = readFileSync(logFile.path, 'utf-8')
+      const lines = content
+        .trim()
+        .split('\n')
+        .slice(-Math.floor(logCount / 4))
+
+      for (const line of lines) {
+        if (!line.trim()) continue
+        // Try to parse timestamp from common formats
+        const timestampMatch = line.match(
+          /\[?(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\]?/
+        )
+        const timestamp = timestampMatch ? new Date(timestampMatch[1]).getTime() : Date.now()
+
+        logs.push({
+          id: generateLogId(),
+          timestamp: isNaN(timestamp) ? Date.now() : timestamp,
+          source: 'claude',
+          level: parseLogLevel(line),
+          message: `[${logFile.name}] ${line.slice(0, 400)}`,
+          metadata: { logFile: logFile.name },
+        })
+      }
+    } catch {
+      // Skip unreadable files
+    }
   }
 
   // Read Claude Code logs from recent session transcripts
