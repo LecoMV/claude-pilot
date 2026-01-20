@@ -8,7 +8,7 @@
  * Migrated from handlers.ts (15 handlers):
  * - profile:settings, saveSettings, claudemd, saveClaudemd
  * - profile:rules, toggleRule, saveRule
- * - profiles:list, get, create, update, delete, activate, getActive, launch
+ * - profiles:list, get, create, update, delete, activate, deactivate, getActive, launch
  *
  * @module profiles.controller
  */
@@ -634,6 +634,19 @@ async function getActiveProfileId(): Promise<string | null> {
   }
 }
 
+async function deactivateProfile(): Promise<boolean> {
+  try {
+    // Remove the active profile marker
+    if (await fileExists(ACTIVE_PROFILE_FILE)) {
+      await unlink(ACTIVE_PROFILE_FILE)
+    }
+    return true
+  } catch (error) {
+    console.error('Failed to deactivate profile:', error)
+    return false
+  }
+}
+
 async function launchProfile(
   id: string,
   projectPath?: string
@@ -784,6 +797,10 @@ export const profilesRouter = router({
 
   activate: auditedProcedure.input(ProfileIdSchema).mutation(({ input }): Promise<boolean> => {
     return activateProfile(input.id)
+  }),
+
+  deactivate: auditedProcedure.mutation((): Promise<boolean> => {
+    return deactivateProfile()
   }),
 
   getActive: publicProcedure.query((): Promise<string | null> => {

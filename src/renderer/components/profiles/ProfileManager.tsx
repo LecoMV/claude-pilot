@@ -13,6 +13,7 @@ import {
   Copy,
   Users,
   Play,
+  Square,
   Shield,
   Code,
   Brain,
@@ -141,6 +142,9 @@ function CustomProfilesPanel({
   const activateMutation = trpc.profiles.activate.useMutation({
     onSuccess: () => onProfilesChange(),
   })
+  const deactivateMutation = trpc.profiles.deactivate.useMutation({
+    onSuccess: () => onProfilesChange(),
+  })
   const launchMutation = trpc.profiles.launch.useMutation()
 
   const saving = createMutation.isPending || updateMutation.isPending
@@ -247,6 +251,17 @@ function CustomProfilesPanel({
         },
       }
     )
+  }
+
+  const handleDeactivate = () => {
+    deactivateMutation.mutate(undefined, {
+      onSuccess: () => {
+        onActiveChange(null)
+      },
+      onError: (error) => {
+        console.error('Failed to deactivate profile:', error)
+      },
+    })
   }
 
   const launching = launchMutation.isPending ? launchMutation.variables?.id : null
@@ -565,7 +580,16 @@ function CustomProfilesPanel({
                           )}
                           Launch
                         </button>
-                        {!isActive && (
+                        {isActive ? (
+                          <button
+                            onClick={handleDeactivate}
+                            className="btn btn-secondary btn-sm"
+                            title="Remove this profile from active state. Your global Claude settings will remain unchanged until you activate another profile."
+                          >
+                            <Square className="w-4 h-4" />
+                            Deactivate
+                          </button>
+                        ) : (
                           <button
                             onClick={() => handleActivate(profile.id)}
                             className="btn btn-secondary btn-sm"
@@ -773,7 +797,7 @@ function CustomProfilesPanel({
               <code className="text-accent-purple">claude-eng</code> for engineering work or{' '}
               <code className="text-accent-purple">claude-sec</code> for security research.
             </p>
-            <div className="grid grid-cols-2 gap-4 mt-2 pt-2 border-t border-border">
+            <div className="grid grid-cols-3 gap-4 mt-2 pt-2 border-t border-border">
               <div>
                 <p className="font-medium text-text-primary text-xs">Launch</p>
                 <p className="text-xs">
@@ -783,8 +807,14 @@ function CustomProfilesPanel({
               <div>
                 <p className="font-medium text-text-primary text-xs">Activate</p>
                 <p className="text-xs">
-                  Applies profile settings to your global Claude config without opening a new
-                  terminal.
+                  Applies profile settings to your global Claude config without opening a terminal.
+                </p>
+              </div>
+              <div>
+                <p className="font-medium text-text-primary text-xs">Deactivate</p>
+                <p className="text-xs">
+                  Clears the active profile state. Settings remain until another profile is
+                  activated.
                 </p>
               </div>
             </div>
