@@ -16,7 +16,7 @@
 import { z } from 'zod'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
 import { existsSync } from 'fs'
-import { readFile, writeFile, readdir, mkdir, unlink, stat, access } from 'fs/promises'
+import { readFile, writeFile, readdir, mkdir, unlink, stat, access, rm } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { spawn } from 'child_process'
@@ -296,6 +296,7 @@ async function listProfiles(): Promise<ClaudeCodeProfile[]> {
         const settingsPath = join(profilePath, 'settings.json')
         const mcpPath = join(profilePath, 'mcp.json')
         const claudeMdPath = join(profilePath, 'CLAUDE.md')
+        const metadataPath = join(profilePath, 'metadata.json')
 
         let settings: ClaudeCodeProfile['settings'] = {}
         if (await fileExists(settingsPath)) {
@@ -314,19 +315,33 @@ async function listProfiles(): Promise<ClaudeCodeProfile[]> {
           claudeMd = await readFile(claudeMdPath, 'utf-8')
         }
 
+        // Read metadata for name, description, and timestamps
+        let metadata: {
+          name?: string
+          description?: string
+          enabledRules?: string[]
+          createdAt?: number
+          updatedAt?: number
+        } = {}
+        if (await fileExists(metadataPath)) {
+          const content = await readFile(metadataPath, 'utf-8')
+          metadata = JSON.parse(content)
+        }
+
         const hasMcp = await fileExists(mcpPath)
         const stats = await stat(profilePath)
 
         profiles.push({
           id: dir.name,
-          name: dir.name,
-          description: `Profile at ${profilePath}`,
+          name: metadata.name || dir.name,
+          description: metadata.description || `Profile at ${profilePath}`,
           settings,
           claudeMd,
+          enabledRules: metadata.enabledRules,
           hasMcpConfig: hasMcp,
           profilePath,
-          createdAt: stats.birthtime.getTime(),
-          updatedAt: stats.mtime.getTime(),
+          createdAt: metadata.createdAt || stats.birthtime.getTime(),
+          updatedAt: metadata.updatedAt || stats.mtime.getTime(),
         })
       } catch (err) {
         console.error(`[Profiles] Failed to load profile ${dir.name}:`, err)
@@ -347,6 +362,7 @@ async function getProfile(id: string): Promise<ClaudeCodeProfile | null> {
     const settingsPath = join(profilePath, 'settings.json')
     const mcpPath = join(profilePath, 'mcp.json')
     const claudeMdPath = join(profilePath, 'CLAUDE.md')
+    const metadataPath = join(profilePath, 'metadata.json')
 
     let settings: ClaudeCodeProfile['settings'] = {}
     if (await fileExists(settingsPath)) {
@@ -365,19 +381,33 @@ async function getProfile(id: string): Promise<ClaudeCodeProfile | null> {
       claudeMd = await readFile(claudeMdPath, 'utf-8')
     }
 
+    // Read metadata for name, description, and timestamps
+    let metadata: {
+      name?: string
+      description?: string
+      enabledRules?: string[]
+      createdAt?: number
+      updatedAt?: number
+    } = {}
+    if (await fileExists(metadataPath)) {
+      const content = await readFile(metadataPath, 'utf-8')
+      metadata = JSON.parse(content)
+    }
+
     const hasMcp = await fileExists(mcpPath)
     const stats = await stat(profilePath)
 
     return {
       id,
-      name: id,
-      description: `Profile at ${profilePath}`,
+      name: metadata.name || id,
+      description: metadata.description || `Profile at ${profilePath}`,
       settings,
       claudeMd,
+      enabledRules: metadata.enabledRules,
       hasMcpConfig: hasMcp,
       profilePath,
-      createdAt: stats.birthtime.getTime(),
-      updatedAt: stats.mtime.getTime(),
+      createdAt: metadata.createdAt || stats.birthtime.getTime(),
+      updatedAt: metadata.updatedAt || stats.mtime.getTime(),
     }
   } catch (error) {
     console.error('Failed to get profile:', error)
@@ -396,20 +426,61 @@ async function createProfile(
     .replace(/^-|-$/g, '')
   const now = Date.now()
 
-  const newProfile: ClaudeCodeProfile = {
-    ...profile,
-    id,
-    createdAt: now,
-    updatedAt: now,
-  }
-
-  const profilePath = join(PROFILES_DIR, `${id}.json`)
+  // Create a directory structure for the profile (consistent with listProfiles/getProfile)
+  const profileDir = join(PROFILES_DIR, id)
   try {
-    if (await fileExists(profilePath)) {
+    if (await fileExists(profileDir)) {
       console.error('Profile with this name already exists')
       return null
     }
-    await writeFile(profilePath, JSON.stringify(newProfile, null, 2))
+
+    // Create the profile directory
+    await mkdir(profileDir, { recursive: true })
+
+    // Create settings.json with profile settings
+    const settingsData: Record<string, unknown> = {}
+    if (profile.settings?.model) {
+      settingsData.model = profile.settings.model
+    }
+    if (profile.settings?.maxTokens) {
+      settingsData.max_tokens = profile.settings.maxTokens
+    }
+    if (profile.settings?.thinkingEnabled !== undefined) {
+      settingsData.thinking = {
+        type: profile.settings.thinkingEnabled ? 'enabled' : 'disabled',
+        budget_tokens: profile.settings.thinkingBudget || 32000,
+      }
+    }
+    await writeFile(join(profileDir, 'settings.json'), JSON.stringify(settingsData, null, 2))
+
+    // Create CLAUDE.md if provided
+    if (profile.claudeMd) {
+      await writeFile(join(profileDir, 'CLAUDE.md'), profile.claudeMd)
+    }
+
+    // Create a metadata.json for description and other metadata
+    const metadata = {
+      name: profile.name,
+      description: profile.description,
+      enabledRules: profile.enabledRules,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await writeFile(join(profileDir, 'metadata.json'), JSON.stringify(metadata, null, 2))
+
+    const newProfile: ClaudeCodeProfile = {
+      id,
+      name: profile.name,
+      description: profile.description,
+      settings: profile.settings ?? {},
+      claudeMd: profile.claudeMd,
+      enabledRules: profile.enabledRules,
+      profilePath: profileDir,
+      hasMcpConfig: false,
+      createdAt: now,
+      updatedAt: now,
+    }
+
     return newProfile
   } catch (error) {
     console.error('Failed to create profile:', error)
@@ -418,21 +489,72 @@ async function createProfile(
 }
 
 async function updateProfile(id: string, updates: Partial<ClaudeCodeProfile>): Promise<boolean> {
-  const profilePath = join(PROFILES_DIR, `${id}.json`)
+  const profileDir = join(PROFILES_DIR, id)
   try {
-    if (!(await fileExists(profilePath))) return false
+    if (!(await fileExists(profileDir))) return false
 
-    const content = await readFile(profilePath, 'utf-8')
-    const existing = JSON.parse(content) as ClaudeCodeProfile
-    const updated: ClaudeCodeProfile = {
-      ...existing,
-      ...updates,
-      id: existing.id,
-      createdAt: existing.createdAt,
-      updatedAt: Date.now(),
+    const now = Date.now()
+
+    // Update settings.json if settings changed
+    if (updates.settings) {
+      const settingsPath = join(profileDir, 'settings.json')
+      let settingsData: Record<string, unknown> = {}
+
+      // Read existing settings
+      if (await fileExists(settingsPath)) {
+        const content = await readFile(settingsPath, 'utf-8')
+        settingsData = JSON.parse(content)
+      }
+
+      // Merge updates
+      if (updates.settings.model) {
+        settingsData.model = updates.settings.model
+      }
+      if (updates.settings.maxTokens) {
+        settingsData.max_tokens = updates.settings.maxTokens
+      }
+      if (updates.settings.thinkingEnabled !== undefined) {
+        settingsData.thinking = {
+          type: updates.settings.thinkingEnabled ? 'enabled' : 'disabled',
+          budget_tokens: updates.settings.thinkingBudget || 32000,
+        }
+      }
+
+      await writeFile(settingsPath, JSON.stringify(settingsData, null, 2))
     }
 
-    await writeFile(profilePath, JSON.stringify(updated, null, 2))
+    // Update CLAUDE.md if provided
+    if (updates.claudeMd !== undefined) {
+      const claudeMdPath = join(profileDir, 'CLAUDE.md')
+      if (updates.claudeMd) {
+        await writeFile(claudeMdPath, updates.claudeMd)
+      } else {
+        // Remove CLAUDE.md if set to empty
+        if (await fileExists(claudeMdPath)) {
+          await unlink(claudeMdPath)
+        }
+      }
+    }
+
+    // Update metadata.json
+    const metadataPath = join(profileDir, 'metadata.json')
+    let metadata: Record<string, unknown> = {
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    if (await fileExists(metadataPath)) {
+      const content = await readFile(metadataPath, 'utf-8')
+      metadata = JSON.parse(content)
+    }
+
+    if (updates.name) metadata.name = updates.name
+    if (updates.description !== undefined) metadata.description = updates.description
+    if (updates.enabledRules !== undefined) metadata.enabledRules = updates.enabledRules
+    metadata.updatedAt = now
+
+    await writeFile(metadataPath, JSON.stringify(metadata, null, 2))
+
     return true
   } catch (error) {
     console.error('Failed to update profile:', error)
@@ -441,11 +563,14 @@ async function updateProfile(id: string, updates: Partial<ClaudeCodeProfile>): P
 }
 
 async function deleteProfile(id: string): Promise<boolean> {
-  const profilePath = join(PROFILES_DIR, `${id}.json`)
+  const profileDir = join(PROFILES_DIR, id)
   try {
-    if (!(await fileExists(profilePath))) return false
-    await unlink(profilePath)
+    if (!(await fileExists(profileDir))) return false
 
+    // Remove the entire profile directory
+    await rm(profileDir, { recursive: true, force: true })
+
+    // Clear active profile if it was the deleted one
     if ((await getActiveProfileId()) === id) {
       if (await fileExists(ACTIVE_PROFILE_FILE)) {
         await unlink(ACTIVE_PROFILE_FILE)

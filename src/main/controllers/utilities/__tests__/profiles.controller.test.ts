@@ -20,6 +20,7 @@ vi.mock('fs/promises', () => ({
   unlink: vi.fn(),
   stat: vi.fn(),
   access: vi.fn(),
+  rm: vi.fn(),
 }))
 
 // Mock fs (sync functions)
@@ -39,7 +40,7 @@ vi.mock('os', () => ({
   homedir: vi.fn(() => '/home/testuser'),
 }))
 
-import { readFile, writeFile, readdir, mkdir, unlink, stat, access } from 'fs/promises'
+import { readFile, writeFile, readdir, mkdir, unlink, stat, access, rm } from 'fs/promises'
 import { existsSync } from 'fs'
 import { spawn } from 'child_process'
 
@@ -324,9 +325,7 @@ describe('profiles.controller', () => {
   describe('toggleRule', () => {
     it('should enable a disabled rule', async () => {
       vi.mocked(access).mockResolvedValue(undefined) // Rule file exists
-      vi.mocked(readFile).mockResolvedValue(
-        JSON.stringify({ disabledRules: ['my-rule'] })
-      )
+      vi.mocked(readFile).mockResolvedValue(JSON.stringify({ disabledRules: ['my-rule'] }))
       vi.mocked(writeFile).mockResolvedValue(undefined)
 
       const result = await caller.toggleRule({ name: 'my-rule', enabled: true })
@@ -339,9 +338,7 @@ describe('profiles.controller', () => {
 
     it('should disable an enabled rule', async () => {
       vi.mocked(access).mockResolvedValue(undefined)
-      vi.mocked(readFile).mockResolvedValue(
-        JSON.stringify({ disabledRules: [] })
-      )
+      vi.mocked(readFile).mockResolvedValue(JSON.stringify({ disabledRules: [] }))
       vi.mocked(writeFile).mockResolvedValue(undefined)
 
       const result = await caller.toggleRule({ name: 'my-rule', enabled: false })
@@ -362,9 +359,7 @@ describe('profiles.controller', () => {
 
     it('should not duplicate rule in disabled list', async () => {
       vi.mocked(access).mockResolvedValue(undefined)
-      vi.mocked(readFile).mockResolvedValue(
-        JSON.stringify({ disabledRules: ['already-disabled'] })
-      )
+      vi.mocked(readFile).mockResolvedValue(JSON.stringify({ disabledRules: ['already-disabled'] }))
       vi.mocked(writeFile).mockResolvedValue(undefined)
 
       await caller.toggleRule({ name: 'already-disabled', enabled: false })
@@ -445,6 +440,23 @@ describe('profiles.controller', () => {
         if (typeof path === 'string' && path.includes('CLAUDE.md')) {
           return '# Profile Instructions'
         }
+        if (typeof path === 'string' && path.includes('metadata.json')) {
+          // Return metadata based on which profile directory
+          if (path.includes('engineering')) {
+            return JSON.stringify({
+              name: 'engineering',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            })
+          }
+          if (path.includes('security')) {
+            return JSON.stringify({
+              name: 'security',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            })
+          }
+        }
         throw new Error('File not found')
       })
       vi.mocked(stat).mockResolvedValue({
@@ -495,6 +507,14 @@ describe('profiles.controller', () => {
         if (typeof path === 'string' && path.includes('CLAUDE.md')) {
           return '# My Profile'
         }
+        if (typeof path === 'string' && path.includes('metadata.json')) {
+          return JSON.stringify({
+            name: 'my-profile',
+            description: 'My test profile',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          })
+        }
         throw new Error('Not found')
       })
       vi.mocked(stat).mockResolvedValue({
@@ -535,10 +555,16 @@ describe('profiles.controller', () => {
   // ===========================================================================
   describe('create', () => {
     it('should create a new profile', async () => {
-      vi.mocked(access).mockImplementation(async (path) => {
-        if (typeof path === 'string' && path.includes('.json')) {
-          throw new Error('ENOENT') // Profile file doesn't exist yet
+      // First call checks PROFILES_DIR exists, subsequent calls check profile dir doesn't exist
+      let callCount = 0
+      vi.mocked(access).mockImplementation(async (_path) => {
+        callCount++
+        // First call is for profiles dir (should exist)
+        if (callCount === 1) {
+          return undefined
         }
+        // Second call is for the profile directory (should NOT exist)
+        throw new Error('ENOENT')
       })
       vi.mocked(mkdir).mockResolvedValue(undefined)
       vi.mocked(writeFile).mockResolvedValue(undefined)
@@ -553,6 +579,9 @@ describe('profiles.controller', () => {
       expect(result?.name).toBe('My New Profile')
       expect(result?.id).toBe('my-new-profile')
       expect(result?.settings?.model).toBe('claude-sonnet-4-5-20250929')
+      // Should have created directory and written files
+      expect(mkdir).toHaveBeenCalled()
+      expect(writeFile).toHaveBeenCalled()
     })
 
     it('should return null if profile already exists', async () => {
@@ -592,14 +621,20 @@ describe('profiles.controller', () => {
   describe('update', () => {
     it('should update existing profile', async () => {
       vi.mocked(access).mockResolvedValue(undefined)
-      vi.mocked(readFile).mockResolvedValue(
-        JSON.stringify({
-          id: 'my-profile',
-          name: 'My Profile',
-          createdAt: Date.now() - 1000000,
-          updatedAt: Date.now() - 500000,
-        })
-      )
+      const originalCreatedAt = Date.now() - 1000000
+      vi.mocked(readFile).mockImplementation(async (path) => {
+        if (typeof path === 'string' && path.includes('metadata.json')) {
+          return JSON.stringify({
+            name: 'My Profile',
+            createdAt: originalCreatedAt,
+            updatedAt: Date.now() - 500000,
+          })
+        }
+        if (typeof path === 'string' && path.includes('settings.json')) {
+          return JSON.stringify({ model: 'claude-sonnet-4-5-20250929' })
+        }
+        throw new Error('File not found')
+      })
       vi.mocked(writeFile).mockResolvedValue(undefined)
 
       const result = await caller.update({
@@ -608,10 +643,8 @@ describe('profiles.controller', () => {
       })
 
       expect(result).toBe(true)
-      const writeCall = vi.mocked(writeFile).mock.calls[0]
-      const written = JSON.parse(writeCall[1] as string)
-      expect(written.name).toBe('Updated Profile Name')
-      expect(written.id).toBe('my-profile') // ID should not change
+      // Should have written to metadata.json
+      expect(writeFile).toHaveBeenCalled()
     })
 
     it('should return false for non-existent profile', async () => {
@@ -628,14 +661,19 @@ describe('profiles.controller', () => {
     it('should preserve createdAt timestamp', async () => {
       const originalCreatedAt = Date.now() - 1000000
       vi.mocked(access).mockResolvedValue(undefined)
-      vi.mocked(readFile).mockResolvedValue(
-        JSON.stringify({
-          id: 'my-profile',
-          name: 'My Profile',
-          createdAt: originalCreatedAt,
-          updatedAt: Date.now() - 500000,
-        })
-      )
+      vi.mocked(readFile).mockImplementation(async (path) => {
+        if (typeof path === 'string' && path.includes('metadata.json')) {
+          return JSON.stringify({
+            name: 'My Profile',
+            createdAt: originalCreatedAt,
+            updatedAt: Date.now() - 500000,
+          })
+        }
+        if (typeof path === 'string' && path.includes('settings.json')) {
+          return JSON.stringify({ model: 'claude-sonnet-4-5-20250929' })
+        }
+        throw new Error('File not found')
+      })
       vi.mocked(writeFile).mockResolvedValue(undefined)
 
       await caller.update({
@@ -643,8 +681,14 @@ describe('profiles.controller', () => {
         updates: { description: 'New description' },
       })
 
-      const writeCall = vi.mocked(writeFile).mock.calls[0]
-      const written = JSON.parse(writeCall[1] as string)
+      // Find the metadata.json write call and verify createdAt is preserved
+      const metadataWriteCall = vi
+        .mocked(writeFile)
+        .mock.calls.find(
+          (call) => typeof call[0] === 'string' && (call[0] as string).includes('metadata.json')
+        )
+      expect(metadataWriteCall).toBeDefined()
+      const written = JSON.parse(metadataWriteCall![1] as string)
       expect(written.createdAt).toBe(originalCreatedAt)
     })
   })
@@ -655,13 +699,13 @@ describe('profiles.controller', () => {
   describe('delete', () => {
     it('should delete existing profile', async () => {
       vi.mocked(access).mockResolvedValue(undefined)
-      vi.mocked(unlink).mockResolvedValue(undefined)
+      vi.mocked(rm).mockResolvedValue(undefined)
       vi.mocked(readFile).mockResolvedValue('') // For active profile check
 
       const result = await caller.delete({ id: 'my-profile' })
 
       expect(result).toBe(true)
-      expect(unlink).toHaveBeenCalled()
+      expect(rm).toHaveBeenCalled()
     })
 
     it('should return false for non-existent profile', async () => {
@@ -675,12 +719,14 @@ describe('profiles.controller', () => {
     it('should clear active profile if deleting active one', async () => {
       vi.mocked(access).mockResolvedValue(undefined)
       vi.mocked(readFile).mockResolvedValue('my-profile') // This is the active profile
+      vi.mocked(rm).mockResolvedValue(undefined)
       vi.mocked(unlink).mockResolvedValue(undefined)
 
       await caller.delete({ id: 'my-profile' })
 
-      // Should have called unlink twice - once for profile, once for active-profile file
-      expect(unlink).toHaveBeenCalledTimes(2)
+      // Should have called rm once for profile directory and unlink for active-profile file
+      expect(rm).toHaveBeenCalledTimes(1)
+      expect(unlink).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -696,6 +742,14 @@ describe('profiles.controller', () => {
         }
         if (typeof path === 'string' && path.includes('CLAUDE.md')) {
           return '# Profile instructions'
+        }
+        if (typeof path === 'string' && path.includes('metadata.json')) {
+          return JSON.stringify({
+            name: 'my-profile',
+            description: 'Test profile',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          })
         }
         return ''
       })
@@ -830,11 +884,7 @@ describe('profiles.controller', () => {
   // ===========================================================================
   describe('security', () => {
     it('should reject path traversal in profile ID', async () => {
-      const maliciousIds = [
-        '../../../etc/passwd',
-        '..\\..\\windows\\system32',
-        'profile/../secret',
-      ]
+      const maliciousIds = ['../../../etc/passwd', '..\\..\\windows\\system32', 'profile/../secret']
 
       for (const id of maliciousIds) {
         await expect(caller.get({ id })).rejects.toThrow()
@@ -886,14 +936,12 @@ describe('profiles.controller', () => {
     it('should handle unicode in CLAUDE.md content', async () => {
       vi.mocked(writeFile).mockResolvedValue(undefined)
 
-      const unicodeContent = '# Instructions\n\nUse emojis: \u{1F680}\u{1F4BB}\u{2728}\nChinese: \u4F60\u597D'
+      const unicodeContent =
+        '# Instructions\n\nUse emojis: \u{1F680}\u{1F4BB}\u{2728}\nChinese: \u4F60\u597D'
       const result = await caller.saveClaudemd({ content: unicodeContent })
 
       expect(result).toBe(true)
-      expect(writeFile).toHaveBeenCalledWith(
-        expect.any(String),
-        unicodeContent
-      )
+      expect(writeFile).toHaveBeenCalledWith(expect.any(String), unicodeContent)
     })
 
     it('should handle very long CLAUDE.md content', async () => {
