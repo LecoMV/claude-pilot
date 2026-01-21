@@ -37,7 +37,7 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@electron-toolkit/utils": "^3.0.0",
+    "@electron-toolkit/utils": "^4.0.0",
     "@monaco-editor/react": "^4.7.0",
     "@qdrant/js-client-rest": "^1.16.2",
     "@sentry/electron": "^7.6.0",
@@ -54,7 +54,7 @@
     "clsx": "^2.1.1",
     "cytoscape": "^3.30.4",
     "dotenv": "^17.2.3",
-    "electron-store": "^10.0.0",
+    "electron-store": "^11.0.2",
     "electron-trpc": "^1.0.0-alpha.0",
     "electron-updater": "^6.7.3",
     "execa": "^9.6.1",
@@ -84,7 +84,7 @@
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^19.8.1",
-    "@electron-toolkit/tsconfig": "^1.0.1",
+    "@electron-toolkit/tsconfig": "^2.0.0",
     "@eslint/js": "^9.39.2",
     "@playwright/test": "^1.57.0",
     "@stryker-mutator/core": "^9.4.0",
@@ -105,7 +105,7 @@
     "autoprefixer": "^10.4.20",
     "electron": "^34.0.0",
     "electron-builder": "^26.5.0",
-    "electron-vite": "^2.3.0",
+    "electron-vite": "^5.0.0",
     "eslint": "^9.17.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react": "^7.37.5",
