@@ -123,8 +123,12 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 15000,
 
-    // Reporters
-    reporters: ['default'],
+    // Reporters - use basic for cleaner output
+    reporters: ['basic'],
+
+    // Reduce output verbosity
+    outputTruncateLength: 500,
+    outputDiffLines: 10,
   },
   resolve: {
     alias: {

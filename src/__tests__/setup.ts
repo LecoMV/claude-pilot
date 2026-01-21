@@ -47,6 +47,18 @@ if (typeof window !== 'undefined') {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('@testing-library/jest-dom')
 
+  // Configure testing-library to reduce verbose DOM output
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { configure } = require('@testing-library/react')
+  configure({
+    // Limit DOM debug output to prevent massive test logs
+    getElementError: (message: string | null) => {
+      const error = new Error(message ?? '')
+      error.name = 'TestingLibraryElementError'
+      return error
+    },
+  })
+
   // Mock window.electron API for renderer tests
   const mockElectronAPI = {
     invoke: vi.fn().mockResolvedValue(null),
