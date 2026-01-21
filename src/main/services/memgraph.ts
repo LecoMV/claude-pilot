@@ -4,26 +4,22 @@ import neo4j, { Driver, Session, Record as Neo4jRecord } from 'neo4j-driver'
 class MemgraphService {
   private driver: Driver | null = null
   private readonly uri = 'bolt://localhost:7687'
-  private readonly user = ''  // Memgraph default: no auth
+  private readonly user = '' // Memgraph default: no auth
   private readonly password = ''
 
   async connect(): Promise<boolean> {
     try {
       if (this.driver) return true
 
-      this.driver = neo4j.driver(
-        this.uri,
-        neo4j.auth.basic(this.user, this.password),
-        {
-          maxConnectionPoolSize: 10,
-          connectionAcquisitionTimeout: 5000,
-          connectionTimeout: 5000,
-        }
-      )
+      this.driver = neo4j.driver(this.uri, neo4j.auth.basic(this.user, this.password), {
+        maxConnectionPoolSize: 10,
+        connectionAcquisitionTimeout: 5000,
+        connectionTimeout: 5000,
+      })
 
       // Verify connection
       await this.driver.verifyConnectivity()
-      console.log('[Memgraph] Connected successfully via Bolt protocol')
+      console.info('[Memgraph] Connected successfully via Bolt protocol')
       return true
     } catch (error) {
       console.error('[Memgraph] Connection failed:', error)
@@ -111,17 +107,19 @@ class MemgraphService {
       return {
         start: this.convertNeo4jValue(value.start),
         end: this.convertNeo4jValue(value.end),
-        segments: value.segments.map((seg: { start: unknown; end: unknown; relationship: unknown }) => ({
-          start: this.convertNeo4jValue(seg.start),
-          end: this.convertNeo4jValue(seg.end),
-          relationship: this.convertNeo4jValue(seg.relationship),
-        })),
+        segments: value.segments.map(
+          (seg: { start: unknown; end: unknown; relationship: unknown }) => ({
+            start: this.convertNeo4jValue(seg.start),
+            end: this.convertNeo4jValue(seg.end),
+            relationship: this.convertNeo4jValue(seg.relationship),
+          })
+        ),
       }
     }
 
     // Handle arrays
     if (Array.isArray(value)) {
-      return value.map(v => this.convertNeo4jValue(v))
+      return value.map((v) => this.convertNeo4jValue(v))
     }
 
     // Handle objects/maps
@@ -140,28 +138,50 @@ class MemgraphService {
     return result
   }
 
-  private isNode(value: unknown): value is { identity: unknown; labels: string[]; properties: Record<string, unknown> } {
+  private isNode(
+    value: unknown
+  ): value is { identity: unknown; labels: string[]; properties: Record<string, unknown> } {
     return value !== null && typeof value === 'object' && 'labels' in value && 'properties' in value
   }
 
-  private isRelationship(value: unknown): value is { identity: unknown; type: string; start: unknown; end: unknown; properties: Record<string, unknown> } {
-    return value !== null && typeof value === 'object' && 'type' in value && 'start' in value && 'end' in value
+  private isRelationship(value: unknown): value is {
+    identity: unknown
+    type: string
+    start: unknown
+    end: unknown
+    properties: Record<string, unknown>
+  } {
+    return (
+      value !== null &&
+      typeof value === 'object' &&
+      'type' in value &&
+      'start' in value &&
+      'end' in value
+    )
   }
 
-  private isPath(value: unknown): value is { start: unknown; end: unknown; segments: Array<{ start: unknown; end: unknown; relationship: unknown }> } {
+  private isPath(value: unknown): value is {
+    start: unknown
+    end: unknown
+    segments: Array<{ start: unknown; end: unknown; relationship: unknown }>
+  } {
     return value !== null && typeof value === 'object' && 'segments' in value
   }
 
   // Get database stats
   async getStats(): Promise<{ nodes: number; edges: number; labels: string[] }> {
     const [nodeCount] = await this.query<{ count: number }>('MATCH (n) RETURN count(n) as count')
-    const [edgeCount] = await this.query<{ count: number }>('MATCH ()-[r]->() RETURN count(r) as count')
-    const labels = await this.query<{ label: string }>('MATCH (n) RETURN DISTINCT labels(n)[0] as label ORDER BY label')
+    const [edgeCount] = await this.query<{ count: number }>(
+      'MATCH ()-[r]->() RETURN count(r) as count'
+    )
+    const labels = await this.query<{ label: string }>(
+      'MATCH (n) RETURN DISTINCT labels(n)[0] as label ORDER BY label'
+    )
 
     return {
       nodes: nodeCount?.count || 0,
       edges: edgeCount?.count || 0,
-      labels: labels.map(l => l.label).filter(Boolean),
+      labels: labels.map((l) => l.label).filter(Boolean),
     }
   }
 
@@ -173,12 +193,14 @@ class MemgraphService {
     keyword: string,
     nodeType?: string,
     limit = 50
-  ): Promise<Array<{
-    id: number
-    label: string
-    type: string
-    properties: Record<string, unknown>
-  }>> {
+  ): Promise<
+    Array<{
+      id: number
+      label: string
+      type: string
+      properties: Record<string, unknown>
+    }>
+  > {
     const typeFilter = nodeType ? `AND labels(n)[0] = $nodeType` : ''
     // Case-insensitive search across multiple property fields
     // Different node types have different properties:
@@ -206,7 +228,7 @@ class MemgraphService {
       node: { properties: Record<string, unknown> }
     }>(cypher, { keyword: keywordLower, nodeType, limit: neo4j.int(limit) })
 
-    return results.map(r => {
+    return results.map((r) => {
       const props = r.node.properties
       // Get a meaningful label based on node type
       let label: string
@@ -240,13 +262,15 @@ class MemgraphService {
     keyword: string,
     nodeType?: string,
     limit = 50
-  ): Promise<Array<{
-    id: number
-    label: string
-    type: string
-    properties: Record<string, unknown>
-    score: number
-  }>> {
+  ): Promise<
+    Array<{
+      id: number
+      label: string
+      type: string
+      properties: Record<string, unknown>
+      score: number
+    }>
+  > {
     const results: Array<{
       id: number
       label: string
@@ -265,12 +289,15 @@ class MemgraphService {
         const instrResults = await this.query<{
           node: { id: number; labels: string[]; properties: Record<string, unknown> }
           score: number
-        }>(`
+        }>(
+          `
           CALL text_search.regex_search('cyber_instr', $pattern)
           YIELD node, score
           RETURN node, score
           LIMIT $limit
-        `, { pattern: regexPattern, limit: neo4j.int(limit) })
+        `,
+          { pattern: regexPattern, limit: neo4j.int(limit) }
+        )
 
         for (const r of instrResults) {
           const props = r.node.properties
@@ -292,21 +319,24 @@ class MemgraphService {
           const catResults = await this.query<{
             node: { id: number; labels: string[]; properties: Record<string, unknown> }
             score: number
-          }>(`
+          }>(
+            `
             CALL text_search.regex_search('cyber_cat', $pattern)
             YIELD node, score
             RETURN node, score
             LIMIT $limit
-          `, { pattern: regexPattern, limit: neo4j.int(remaining) })
+          `,
+            { pattern: regexPattern, limit: neo4j.int(remaining) }
+          )
 
           // Add unique results only
-          const existingIds = new Set(results.map(r => r.id))
+          const existingIds = new Set(results.map((r) => r.id))
           for (const r of catResults) {
             if (!existingIds.has(r.node.id)) {
               const props = r.node.properties
               results.push({
                 id: r.node.id,
-                label: `[${props.category}] ${(props.instruction as string || '').slice(0, 60)}...`,
+                label: `[${props.category}] ${((props.instruction as string) || '').slice(0, 60)}...`,
                 type: 'CyberTechnique',
                 properties: props,
                 score: r.score,
@@ -319,13 +349,13 @@ class MemgraphService {
       // Text search failed, fall back to CONTAINS-based search
       console.warn('[Memgraph] Text index search failed, using fallback:', error)
       const fallbackResults = await this.searchNodes(keyword, nodeType, limit)
-      return fallbackResults.map(r => ({ ...r, score: 1.0 }))
+      return fallbackResults.map((r) => ({ ...r, score: 1.0 }))
     }
 
     // For non-CyberTechnique types, use CONTAINS-based search
     if (nodeType && nodeType !== 'CyberTechnique') {
       const fallbackResults = await this.searchNodes(keyword, nodeType, limit)
-      return fallbackResults.map(r => ({ ...r, score: 1.0 }))
+      return fallbackResults.map((r) => ({ ...r, score: 1.0 }))
     }
 
     // Sort by score descending
@@ -336,7 +366,13 @@ class MemgraphService {
   // Get sample graph for visualization
   async getSampleGraph(limit = 100): Promise<{
     nodes: Array<{ id: string; label: string; type: string; properties: Record<string, unknown> }>
-    edges: Array<{ id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>
+    edges: Array<{
+      id: string
+      source: string
+      target: string
+      type: string
+      properties: Record<string, unknown>
+    }>
   }> {
     const cypher = `
       MATCH (n)
@@ -361,8 +397,20 @@ class MemgraphService {
       rel: { properties: Record<string, unknown> } | null
     }>(cypher, { limit: neo4j.int(limit) })
 
-    const nodes = new Map<string, { id: string; label: string; type: string; properties: Record<string, unknown> }>()
-    const edges = new Map<string, { id: string; source: string; target: string; type: string; properties: Record<string, unknown> }>()
+    const nodes = new Map<
+      string,
+      { id: string; label: string; type: string; properties: Record<string, unknown> }
+    >()
+    const edges = new Map<
+      string,
+      {
+        id: string
+        source: string
+        target: string
+        type: string
+        properties: Record<string, unknown>
+      }
+    >()
 
     // Helper to get a meaningful label for a node
     const getNodeLabel = (props: Record<string, unknown>, nodeId: string): string => {
@@ -432,6 +480,92 @@ class MemgraphService {
       'MATCH (n) RETURN labels(n)[0] as type, count(*) as count ORDER BY count DESC LIMIT 20'
     )
     return results
+  }
+
+  /**
+   * Ensure required indexes exist for optimal query performance.
+   * Should be called during application startup.
+   */
+  async ensureIndexes(): Promise<void> {
+    const indexes = [
+      // Label indexes for faster node lookups
+      'CREATE INDEX ON :CyberTechnique',
+      'CREATE INDEX ON :Technology',
+      'CREATE INDEX ON :Feature',
+      'CREATE INDEX ON :Category',
+      // Property indexes for common search fields
+      'CREATE INDEX ON :CyberTechnique(category)',
+      'CREATE INDEX ON :CyberTechnique(id)',
+      'CREATE INDEX ON :Technology(name)',
+      'CREATE INDEX ON :Feature(name)',
+    ]
+
+    for (const indexQuery of indexes) {
+      try {
+        await this.query(indexQuery)
+        console.info(`[Memgraph] Index created: ${indexQuery.slice(0, 50)}...`)
+      } catch (error) {
+        // Index may already exist, which is fine
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        if (!errorMsg.includes('already exists')) {
+          console.warn(`[Memgraph] Index creation warning: ${errorMsg}`)
+        }
+      }
+    }
+    console.info('[Memgraph] Index verification complete')
+  }
+
+  /**
+   * Get optimized database stats using SHOW STORAGE INFO when available.
+   * Falls back to COUNT queries if storage info is not available.
+   */
+  async getOptimizedStats(): Promise<{
+    nodes: number
+    edges: number
+    labels: string[]
+    indexes: number
+  }> {
+    try {
+      // Try to get stats from storage info (much faster than full scan)
+      const storageInfo = await this.query<{
+        storage_mode: string
+        vertex_count: number
+        edge_count: number
+      }>('SHOW STORAGE INFO')
+
+      if (storageInfo.length > 0) {
+        const info = storageInfo[0]
+        const labels = await this.query<{ label: string }>(
+          'MATCH (n) RETURN DISTINCT labels(n)[0] as label LIMIT 50'
+        )
+        const indexCount = await this.query<{ count: number }>('SHOW INDEX INFO')
+
+        return {
+          nodes: info.vertex_count || 0,
+          edges: info.edge_count || 0,
+          labels: labels.map((l) => l.label).filter(Boolean),
+          indexes: indexCount.length,
+        }
+      }
+    } catch {
+      // SHOW STORAGE INFO not available, fall back to count queries
+    }
+
+    // Fallback: Use sampled counts for very large databases
+    const [nodeCount] = await this.query<{ count: number }>('MATCH (n) RETURN count(n) as count')
+    const [edgeCount] = await this.query<{ count: number }>(
+      'MATCH ()-[r]->() RETURN count(r) as count'
+    )
+    const labels = await this.query<{ label: string }>(
+      'MATCH (n) RETURN DISTINCT labels(n)[0] as label LIMIT 50'
+    )
+
+    return {
+      nodes: nodeCount?.count || 0,
+      edges: edgeCount?.count || 0,
+      labels: labels.map((l) => l.label).filter(Boolean),
+      indexes: 0,
+    }
   }
 }
 

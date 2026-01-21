@@ -4,6 +4,7 @@ import { Header } from './components/layout/Header'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { ErrorToast } from './components/common/ErrorNotifications'
 import { CommandPalette, useCommandPalette } from './components/common/CommandPalette'
+import { ShortcutsHelp, useShortcutsHelp } from './components/common/ShortcutsHelp'
 import { initializeErrorListener } from './stores/errors'
 import { useMediaQuery } from './hooks/useResponsive'
 // All views lazy-loaded for code splitting and faster startup
@@ -47,6 +48,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [userToggledSidebar, setUserToggledSidebar] = useState(false)
   const commandPalette = useCommandPalette()
+  const shortcutsHelp = useShortcutsHelp()
   const isNarrowWindow = useMediaQuery('(max-width: 900px)')
 
   // Memoized navigation handler for command palette
@@ -120,7 +122,15 @@ export default function App() {
   return (
     <ErrorBoundary>
       <div className="flex h-screen overflow-hidden">
-        {/* Sidebar */}
+        {/* Skip link for keyboard navigation - hidden until focused */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-accent-purple focus:text-white focus:rounded-lg focus:outline-none"
+        >
+          Skip to main content
+        </a>
+
+        {/* Sidebar navigation */}
         <Sidebar
           currentView={currentView}
           onViewChange={setCurrentView}
@@ -128,17 +138,24 @@ export default function App() {
           onToggleCollapse={handleToggleSidebar}
         />
 
-        {/* Main content */}
+        {/* Main content area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <Header title={getViewTitle(currentView)} onToggleSidebar={handleToggleSidebar} />
 
-          <main className="flex-1 overflow-auto p-6 bg-background">
+          <main
+            id="main-content"
+            role="main"
+            aria-label={`${getViewTitle(currentView)} content`}
+            className="flex-1 overflow-auto p-6 bg-background"
+          >
             <ErrorBoundary key={currentView}>{renderView()}</ErrorBoundary>
           </main>
         </div>
 
-        {/* Error notifications */}
-        <ErrorToast />
+        {/* Error notifications - live region for screen readers */}
+        <div role="status" aria-live="polite" aria-atomic="true">
+          <ErrorToast />
+        </div>
 
         {/* Command Palette (Ctrl+K) */}
         <CommandPalette
@@ -146,6 +163,9 @@ export default function App() {
           onClose={commandPalette.close}
           onNavigate={handleNavigate}
         />
+
+        {/* Keyboard Shortcuts Help (?) */}
+        <ShortcutsHelp isOpen={shortcutsHelp.isOpen} onClose={shortcutsHelp.close} />
       </div>
     </ErrorBoundary>
   )

@@ -12,6 +12,7 @@
  */
 
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../../trpc/trpc'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { BrowserWindow } from 'electron'
@@ -439,7 +440,10 @@ export const chatRouter = router({
       const session = chatSessions.get(sessionKey)
 
       if (!session?.process) {
-        return { success: false, error: 'Session not found or not running' }
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Session not found or not running',
+        })
       }
 
       // Send message in stream-json format
@@ -453,7 +457,10 @@ export const chatRouter = router({
         session.messageCount++
         return { success: true, messageId }
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : 'Write failed' }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: err instanceof Error ? err.message : 'Write failed',
+        })
       }
     }),
 
@@ -462,17 +469,20 @@ export const chatRouter = router({
    */
   cancel: publicProcedure.input(z.object({ messageId: z.string() })).mutation(({ input }) => {
     const chat = activeChats.get(input.messageId)
-    if (chat) {
-      chat.process.kill('SIGTERM')
-      activeChats.delete(input.messageId)
-      sendToRenderer({
-        type: 'error',
-        messageId: input.messageId,
-        error: 'Request cancelled',
+    if (!chat) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: 'Chat not found',
       })
-      return { success: true }
     }
-    return { success: false, error: 'Chat not found' }
+    chat.process.kill('SIGTERM')
+    activeChats.delete(input.messageId)
+    sendToRenderer({
+      type: 'error',
+      messageId: input.messageId,
+      error: 'Request cancelled',
+    })
+    return { success: true }
   }),
 
   /**

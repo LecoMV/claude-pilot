@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, useCallback, memo } from 'react'
-import { VariableSizeList as List, ListChildComponentProps } from 'react-window'
-import AutoSizer from 'react-virtualized-auto-sizer'
+import { useEffect, useState, useCallback, memo } from 'react'
+import { List, useListRef, type RowComponentProps } from 'react-window'
+import { AutoSizer } from 'react-virtualized-auto-sizer'
 import {
   Terminal,
   Search,
@@ -39,7 +39,6 @@ const sourceIcons: Record<LogSource, typeof Terminal> = {
   system: Cpu,
   agent: Brain,
   workflow: Workflow,
-  all: Terminal,
 }
 
 const levelColors: Record<LogLevel, string> = {
@@ -56,9 +55,36 @@ const levelIcons: Record<LogLevel, typeof Info> = {
   error: AlertCircle,
 }
 
-// Row height constants
-const BASE_ROW_HEIGHT = 32
-const EXPANDED_ROW_HEIGHT = 200
+interface StatCardProps {
+  icon: typeof Terminal
+  value: number | string
+  label: string
+  color: string
+}
+
+function StatCard({ icon: Icon, value, label, color }: StatCardProps) {
+  return (
+    <div className="card p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className={cn('text-2xl font-bold', color)}>{value}</p>
+          <p className="text-xs text-text-muted">{label}</p>
+        </div>
+        <Icon className={cn('w-6 h-6', color)} />
+      </div>
+    </div>
+  )
+}
+
+// Fixed row height for react-window v2
+const ROW_HEIGHT = 32
+
+// Row props type for react-window v2
+interface LogRowProps {
+  filteredLogs: LogEntry[]
+  expandedRows: Set<string>
+  toggleExpand: (id: string) => void
+}
 
 export function LogsViewer() {
   const {
@@ -77,7 +103,7 @@ export function LogsViewer() {
     setAutoScroll,
   } = useLogsStore()
 
-  const listRef = useRef<List>(null)
+  const listRef = useListRef()
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
   // tRPC query for initial logs
@@ -119,39 +145,22 @@ export function LogsViewer() {
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
     if (autoScroll && listRef.current && filteredLogs.length > 0) {
-      listRef.current.scrollToItem(filteredLogs.length - 1, 'end')
+      listRef.current.scrollToRow(filteredLogs.length - 1)
     }
-  }, [filteredLogs.length, autoScroll])
-
-  // Get row height (variable based on expansion)
-  const getItemSize = useCallback(
-    (index: number) => {
-      const log = filteredLogs[index]
-      if (log && expandedRows.has(log.id)) {
-        return EXPANDED_ROW_HEIGHT
-      }
-      return BASE_ROW_HEIGHT
-    },
-    [filteredLogs, expandedRows]
-  )
+  }, [filteredLogs.length, autoScroll, listRef])
 
   // Toggle row expansion
-  const toggleExpand = useCallback(
-    (logId: string) => {
-      setExpandedRows((prev) => {
-        const next = new Set(prev)
-        if (next.has(logId)) {
-          next.delete(logId)
-        } else {
-          next.add(logId)
-        }
-        return next
-      })
-      // Reset list to recalculate heights
-      listRef.current?.resetAfterIndex(0)
-    },
-    [setExpandedRows]
-  )
+  const toggleExpand = useCallback((logId: string) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev)
+      if (next.has(logId)) {
+        next.delete(logId)
+      } else {
+        next.add(logId)
+      }
+      return next
+    })
+  }, [])
 
   const exportLogs = () => {
     const content = filteredLogs
@@ -176,24 +185,21 @@ export function LogsViewer() {
     warn: logs.filter((l) => l.level === 'warn').length,
   }
 
-  // Row renderer for virtualized list
-  const Row = useCallback(
-    ({ index, style }: ListChildComponentProps) => {
-      const log = filteredLogs[index]
-      if (!log) return null
+  // Row component for virtualized list (react-window v2 API)
+  const LogRow = useCallback(({ index, style, data }: RowComponentProps<LogRowProps>) => {
+    const log = data.filteredLogs[index]
+    if (!log) return null
 
-      return (
-        <div style={style}>
-          <LogLine
-            log={log}
-            expanded={expandedRows.has(log.id)}
-            onToggle={() => toggleExpand(log.id)}
-          />
-        </div>
-      )
-    },
-    [filteredLogs, expandedRows, toggleExpand]
-  )
+    return (
+      <div style={style}>
+        <LogLine
+          log={log}
+          expanded={data.expandedRows.has(log.id)}
+          onToggle={() => data.toggleExpand(log.id)}
+        />
+      </div>
+    )
+  }, [])
 
   return (
     <div className="space-y-4 animate-in h-full flex flex-col">
@@ -271,31 +277,35 @@ export function LogsViewer() {
             placeholder="Search logs..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="input pl-10 w-full py-1.5 text-sm"
+            className="input pl-9 py-1.5 text-sm w-full"
           />
         </div>
 
         <div className="flex-1" />
 
-        {/* Actions */}
+        <button
+          onClick={loadLogs}
+          disabled={loading}
+          className="btn btn-secondary"
+          title="Refresh logs"
+        >
+          <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+        </button>
+
         <button
           onClick={() => setPaused(!paused)}
-          className={cn('btn btn-secondary', paused && 'bg-accent-yellow/20')}
-          title={paused ? 'Resume' : 'Pause'}
+          className={cn('btn', paused ? 'btn-primary' : 'btn-secondary')}
+          title={paused ? 'Resume stream' : 'Pause stream'}
         >
           {paused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
         </button>
 
         <button
           onClick={() => setAutoScroll(!autoScroll)}
-          className={cn('btn btn-secondary', autoScroll && 'bg-accent-blue/20')}
+          className={cn('btn', autoScroll ? 'btn-primary' : 'btn-secondary')}
           title="Toggle auto-scroll"
         >
           <ArrowDown className="w-4 h-4" />
-        </button>
-
-        <button onClick={loadLogs} className="btn btn-secondary" title="Refresh">
-          <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
         </button>
 
         <button onClick={exportLogs} className="btn btn-secondary" title="Export logs">
@@ -322,16 +332,14 @@ export function LogsViewer() {
           <AutoSizer>
             {({ height, width }) => (
               <List
-                ref={listRef}
-                height={height}
-                width={width}
-                itemCount={filteredLogs.length}
-                itemSize={getItemSize}
-                overscanCount={10}
+                listRef={listRef}
+                rowCount={filteredLogs.length}
+                rowHeight={ROW_HEIGHT}
+                rowComponent={LogRow}
+                rowProps={{ filteredLogs, expandedRows, toggleExpand }}
                 className="scrollbar-thin"
-              >
-                {Row}
-              </List>
+                style={{ height, width }}
+              />
             )}
           </AutoSizer>
         )}
@@ -398,26 +406,3 @@ const LogLine = memo(function LogLine({ log, expanded, onToggle }: LogLineProps)
     </div>
   )
 })
-
-interface StatCardProps {
-  icon: typeof Terminal
-  value: number | string
-  label: string
-  color: string
-}
-
-function StatCard({ icon: Icon, value, label, color }: StatCardProps) {
-  return (
-    <div className="card p-3">
-      <div className="flex items-center gap-3">
-        <Icon className={cn('w-5 h-5', color)} />
-        <div>
-          <p className="text-lg font-semibold text-text-primary">{value}</p>
-          <p className="text-xs text-text-muted">{label}</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-export default LogsViewer

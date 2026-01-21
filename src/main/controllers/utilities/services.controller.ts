@@ -14,6 +14,7 @@
  */
 
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
 import { spawnAsync } from '../../utils/spawn-async'
 import type { SystemdService, PodmanContainer } from '../../../shared/types'
@@ -158,36 +159,48 @@ async function getPodmanContainers(): Promise<PodmanContainer[]> {
 /**
  * Execute systemd action
  */
-async function systemdAction(name: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> {
+async function systemdAction(name: string, action: 'start' | 'stop' | 'restart'): Promise<true> {
+  const safeName = sanitizeServiceName(name)
+  if (!safeName) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Invalid service name: ${name}`,
+    })
+  }
+
   try {
-    const safeName = sanitizeServiceName(name)
-    if (!safeName) {
-      console.error('Invalid service name:', name)
-      return false
-    }
     await spawnAsync('systemctl', ['--user', action, safeName], { timeout: 30000 })
     return true
   } catch (error) {
     console.error(`Failed to ${action} service ${name}:`, error)
-    return false
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Failed to ${action} service ${name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    })
   }
 }
 
 /**
  * Execute Podman container action
  */
-async function podmanAction(id: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> {
+async function podmanAction(id: string, action: 'start' | 'stop' | 'restart'): Promise<true> {
+  const safeId = sanitizeContainerId(id)
+  if (!safeId) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Invalid container ID: ${id}`,
+    })
+  }
+
   try {
-    const safeId = sanitizeContainerId(id)
-    if (!safeId) {
-      console.error('Invalid container ID:', id)
-      return false
-    }
     await spawnAsync('podman', [action, safeId], { timeout: 30000 })
     return true
   } catch (error) {
     console.error(`Failed to ${action} container ${id}:`, error)
-    return false
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Failed to ${action} container ${id}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    })
   }
 }
 

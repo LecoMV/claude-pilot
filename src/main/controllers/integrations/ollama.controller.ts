@@ -17,6 +17,7 @@
  */
 
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
 import { spawnAsync } from '../../utils/spawn-async'
 import type { OllamaStatus, OllamaModel, OllamaRunningModel } from '../../../shared/types'
@@ -151,51 +152,66 @@ async function getRunningModels(): Promise<OllamaRunningModel[]> {
 /**
  * Pull a model from Ollama registry
  */
-async function pullOllamaModel(model: string): Promise<boolean> {
+async function pullOllamaModel(model: string): Promise<true> {
+  const safeModel = sanitizeModelName(model)
+  if (!safeModel) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Invalid model name: ${model}`,
+    })
+  }
+
   try {
-    const safeModel = sanitizeModelName(model)
-    if (!safeModel) {
-      console.error('[ollama] Invalid model name:', model)
-      return false
-    }
     // Use spawnAsync with args array (SECURITY: no shell, 10 minute timeout)
     await spawnAsync('ollama', ['pull', safeModel], { timeout: 600000 })
     return true
   } catch (error) {
     console.error('[ollama] Failed to pull model:', error)
-    return false
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Failed to pull model ${model}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    })
   }
 }
 
 /**
  * Delete a model from local storage
  */
-async function deleteOllamaModel(model: string): Promise<boolean> {
+async function deleteOllamaModel(model: string): Promise<true> {
+  const safeModel = sanitizeModelName(model)
+  if (!safeModel) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Invalid model name: ${model}`,
+    })
+  }
+
   try {
-    const safeModel = sanitizeModelName(model)
-    if (!safeModel) {
-      console.error('[ollama] Invalid model name:', model)
-      return false
-    }
     // Use spawnAsync with args array (SECURITY: no shell)
     await spawnAsync('ollama', ['rm', safeModel], { timeout: 30000 })
     return true
   } catch (error) {
     console.error('[ollama] Failed to delete model:', error)
-    return false
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Failed to delete model ${model}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    })
   }
 }
 
 /**
  * Load a model into memory for inference
  */
-async function runOllamaModel(model: string): Promise<boolean> {
+async function runOllamaModel(model: string): Promise<true> {
+  const safeModel = sanitizeModelName(model)
+  if (!safeModel) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Invalid model name: ${model}`,
+    })
+  }
+
   try {
-    const safeModel = sanitizeModelName(model)
-    if (!safeModel) {
-      console.error('[ollama] Invalid model name:', model)
-      return false
-    }
     // Use native fetch instead of curl (no shell)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 60000)
@@ -206,23 +222,36 @@ async function runOllamaModel(model: string): Promise<boolean> {
       signal: controller.signal,
     })
     clearTimeout(timeout)
-    return response.ok
+    if (!response.ok) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: `Ollama API returned ${response.status}`,
+      })
+    }
+    return true
   } catch (error) {
+    if (error instanceof TRPCError) throw error
     console.error('[ollama] Failed to run model:', error)
-    return false
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Failed to run model ${model}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    })
   }
 }
 
 /**
  * Unload a model from memory
  */
-async function stopOllamaModel(model: string): Promise<boolean> {
+async function stopOllamaModel(model: string): Promise<true> {
+  const safeModel = sanitizeModelName(model)
+  if (!safeModel) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Invalid model name: ${model}`,
+    })
+  }
+
   try {
-    const safeModel = sanitizeModelName(model)
-    if (!safeModel) {
-      console.error('[ollama] Invalid model name:', model)
-      return false
-    }
     // Use native fetch instead of curl (no shell)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 30000)
@@ -233,10 +262,20 @@ async function stopOllamaModel(model: string): Promise<boolean> {
       signal: controller.signal,
     })
     clearTimeout(timeout)
-    return response.ok
+    if (!response.ok) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: `Ollama API returned ${response.status}`,
+      })
+    }
+    return true
   } catch (error) {
+    if (error instanceof TRPCError) throw error
     console.error('[ollama] Failed to stop model:', error)
-    return false
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Failed to stop model ${model}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    })
   }
 }
 

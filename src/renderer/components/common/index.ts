@@ -8,6 +8,11 @@
  * - Error handling (ErrorBoundary)
  */
 
+// Base UI components
+export { Button, type ButtonVariant, type ButtonSize, type ButtonProps } from './Button'
+export { Input, type InputSize, type InputProps } from './Input'
+export { Modal, type ModalSize, type ModalProps } from './Modal'
+
 // Error handling
 export {
   ErrorBoundary,
@@ -48,6 +53,9 @@ export { default as CodeEditor } from './CodeEditor'
 
 // Command palette
 export { CommandPalette } from './CommandPalette'
+
+// Shortcuts help
+export { ShortcutsHelp, useShortcutsHelp } from './ShortcutsHelp'
 
 // Loading skeletons
 export { Skeleton, SkeletonList, SkeletonGrid, SkeletonTable, PageSkeleton } from './Skeleton'

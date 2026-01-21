@@ -16,6 +16,7 @@
  */
 
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
 import { existsSync } from 'fs'
 import { readFile, writeFile } from 'fs/promises'
@@ -152,8 +153,10 @@ async function toggleServer(name: string, enabled: boolean): Promise<boolean> {
 
     const serverConfig = config.mcpServers[name]
     if (!serverConfig) {
-      console.error('[MCP] Server not found:', name)
-      return false
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: `MCP server not found: ${name}`,
+      })
     }
 
     // Update the disabled flag (disabled = !enabled)
@@ -166,8 +169,12 @@ async function toggleServer(name: string, enabled: boolean): Promise<boolean> {
     console.info('[MCP] Toggled server', name, 'to', enabled ? 'enabled' : 'disabled')
     return true
   } catch (error) {
+    if (error instanceof TRPCError) throw error
     console.error('[MCP] Failed to toggle server:', error)
-    return false
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Failed to toggle MCP server: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    })
   }
 }
 
@@ -188,17 +195,27 @@ async function getConfigContent(): Promise<string> {
 /**
  * Validate and save settings.json content
  */
-async function saveConfigContent(content: string): Promise<boolean> {
+async function saveConfigContent(content: string): Promise<true> {
   try {
     // Validate JSON
     JSON.parse(content)
+  } catch {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Invalid JSON content',
+    })
+  }
 
+  try {
     await writeFile(SETTINGS_JSON_PATH, content, 'utf-8')
     console.info('[MCP] Saved settings.json')
     return true
   } catch (error) {
     console.error('[MCP] Failed to save settings.json:', error)
-    return false
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Failed to save settings.json: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    })
   }
 }
 

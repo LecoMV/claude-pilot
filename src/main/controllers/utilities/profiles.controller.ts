@@ -14,6 +14,7 @@
  */
 
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
 import { existsSync } from 'fs'
 import { readFile, writeFile, readdir, mkdir, unlink, stat, access, rm } from 'fs/promises'
@@ -21,6 +22,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { spawn } from 'child_process'
 import type { ProfileSettings, ClaudeRule, ClaudeCodeProfile } from '../../../shared/types'
+import { validatePath, sanitizeFilename } from '../../utils/path-validation'
 
 // ============================================================================
 // Constants
@@ -88,6 +90,28 @@ const LaunchProfileSchema = z.object({
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/**
+ * Validates and returns a safe profile path.
+ * Prevents path traversal attacks by ensuring the path stays within PROFILES_DIR.
+ */
+function getValidProfilePath(profileId: string): string {
+  // Sanitize the profile ID to remove any path separators
+  const safeId = sanitizeFilename(profileId)
+  const profilePath = join(PROFILES_DIR, safeId)
+
+  // Validate the resulting path is within PROFILES_DIR
+  try {
+    validatePath(profilePath, PROFILES_DIR)
+  } catch {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Invalid profile ID: path traversal detected',
+    })
+  }
+
+  return profilePath
+}
 
 async function ensureProfilesDir(): Promise<void> {
   try {
@@ -355,7 +379,7 @@ async function listProfiles(): Promise<ClaudeCodeProfile[]> {
 }
 
 async function getProfile(id: string): Promise<ClaudeCodeProfile | null> {
-  const profilePath = join(PROFILES_DIR, id)
+  const profilePath = getValidProfilePath(id)
   try {
     if (!(await fileExists(profilePath))) return null
 
@@ -427,7 +451,8 @@ async function createProfile(
   const now = Date.now()
 
   // Create a directory structure for the profile (consistent with listProfiles/getProfile)
-  const profileDir = join(PROFILES_DIR, id)
+  // Validate the path to prevent any traversal issues
+  const profileDir = getValidProfilePath(id)
   try {
     if (await fileExists(profileDir)) {
       console.error('Profile with this name already exists')
@@ -489,7 +514,7 @@ async function createProfile(
 }
 
 async function updateProfile(id: string, updates: Partial<ClaudeCodeProfile>): Promise<boolean> {
-  const profileDir = join(PROFILES_DIR, id)
+  const profileDir = getValidProfilePath(id)
   try {
     if (!(await fileExists(profileDir))) return false
 
@@ -563,7 +588,8 @@ async function updateProfile(id: string, updates: Partial<ClaudeCodeProfile>): P
 }
 
 async function deleteProfile(id: string): Promise<boolean> {
-  const profileDir = join(PROFILES_DIR, id)
+  // Critical: Validate path before deletion to prevent traversal attacks
+  const profileDir = getValidProfilePath(id)
   try {
     if (!(await fileExists(profileDir))) return false
 
@@ -647,13 +673,13 @@ async function deactivateProfile(): Promise<boolean> {
   }
 }
 
-async function launchProfile(
-  id: string,
-  projectPath?: string
-): Promise<{ success: boolean; error?: string }> {
+async function launchProfile(id: string, projectPath?: string): Promise<{ success: true }> {
   const profile = await getProfile(id)
   if (!profile) {
-    return { success: false, error: 'Profile not found' }
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Profile not found',
+    })
   }
 
   try {
@@ -714,7 +740,10 @@ async function launchProfile(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Launch failed'
     console.error('Failed to launch profile:', error)
-    return { success: false, error: message }
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Failed to launch profile: ${message}`,
+    })
   }
 }
 
