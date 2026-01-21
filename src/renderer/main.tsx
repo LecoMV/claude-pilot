@@ -1,32 +1,12 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { loader } from '@monaco-editor/react'
-import * as monaco from 'monaco-editor'
 import * as Sentry from '@sentry/electron/renderer'
 import { TRPCProvider } from './lib/trpc/react'
 import App from './App'
 import './styles/globals.css'
 
-// Import Monaco workers for language features (prevents CDN loading)
-import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
-import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
-import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
-
-// Configure Monaco environment for local workers (fixes CSP issues with CDN)
-self.MonacoEnvironment = {
-  getWorker(_, label) {
-    if (label === 'json') {
-      return new jsonWorker()
-    }
-    if (label === 'typescript' || label === 'javascript') {
-      return new tsWorker()
-    }
-    return new editorWorker()
-  },
-}
-
-// Configure Monaco to use local bundle instead of CDN (fixes CSP blocking)
-loader.config({ monaco })
+// Note: Monaco is now lazy-loaded via CodeEditor component
+// This reduces initial bundle size by ~4MB
 
 // Initialize Sentry for renderer process error tracking
 // DSN is configured via VITE_SENTRY_DSN environment variable

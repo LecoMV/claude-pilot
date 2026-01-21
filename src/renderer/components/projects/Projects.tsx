@@ -85,8 +85,13 @@ export function Projects() {
           />
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={loadProjects} className="btn btn-secondary" title="Refresh projects">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <button
+            onClick={loadProjects}
+            className="btn btn-secondary"
+            title="Refresh projects"
+            aria-label="Refresh projects"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
           </button>
           <button onClick={addProjectFolder} className="btn btn-primary">
             <Plus className="w-4 h-4" />

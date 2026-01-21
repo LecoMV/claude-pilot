@@ -142,7 +142,7 @@ export function ServicesManager() {
   return (
     <div className="space-y-6 animate-in">
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard
           icon={Box}
           value={podmanContainers.length}
@@ -418,7 +418,7 @@ function ContainersList({
               </div>
             </div>
             {selected?.id === container.id && (
-              <div className="mt-4 pt-4 border-t border-border grid grid-cols-3 gap-4 text-sm">
+              <div className="mt-4 pt-4 border-t border-border grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                 <div>
                   <p className="text-text-muted">Created</p>
                   <p className="text-text-primary">{container.created}</p>
@@ -533,7 +533,7 @@ function ServicesList({
               </div>
             </div>
             {selected?.name === service.name && (
-              <div className="mt-4 pt-4 border-t border-border grid grid-cols-4 gap-4 text-sm">
+              <div className="mt-4 pt-4 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                 <div>
                   <p className="text-text-muted">Active State</p>
                   <p className="text-text-primary">{service.activeState}</p>

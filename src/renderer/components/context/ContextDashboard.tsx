@@ -443,7 +443,7 @@ function ActiveSessionsPanel({
                     </div>
 
                     {/* Stats */}
-                    <div className="grid grid-cols-5 gap-2 text-xs">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 text-xs">
                       <div className="bg-background rounded p-2 text-center">
                         <p className="text-text-primary font-medium">
                           {session.stats.messageCount}
@@ -492,7 +492,7 @@ function ActiveSessionsPanel({
                           ) : null
                         })()}
 
-                        <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                           <div>
                             <p className="text-text-muted">Input Tokens</p>
                             <p className="text-text-primary font-medium">
@@ -667,7 +667,7 @@ function UsagePanel({ tokenUsage, compactionSettings, onToggleAutoCompact }: Usa
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-background rounded-lg p-3 text-center">
               <Zap className="w-5 h-5 mx-auto text-accent-yellow mb-1" />
               <p className="text-lg font-semibold text-text-primary">

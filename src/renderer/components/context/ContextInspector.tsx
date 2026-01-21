@@ -112,8 +112,7 @@ export function ContextInspector({ transcriptPath, className }: ContextInspector
     for (const msg of messagesQuery.data) {
       if (msg.type === 'tool_use' || msg.type === 'tool_result') {
         try {
-          const content =
-            typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content
+          const content = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content
           if (content?.name === 'Read' || content?.name === 'Edit' || content?.name === 'Write') {
             const filePath = content.input?.file_path || content.input?.path
             if (filePath) {
@@ -142,8 +141,7 @@ export function ContextInspector({ transcriptPath, className }: ContextInspector
     for (const msg of messagesQuery.data) {
       if (msg.type === 'tool_use') {
         try {
-          const content =
-            typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content
+          const content = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content
           const toolName = content?.name || 'Unknown'
           tools.set(toolName, (tools.get(toolName) || 0) + 1)
         } catch {
@@ -233,11 +231,17 @@ export function ContextInspector({ transcriptPath, className }: ContextInspector
             }}
             className="btn btn-secondary btn-sm"
             title="Refresh"
+            aria-label="Refresh context data"
           >
-            <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+            <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} aria-hidden="true" />
           </button>
-          <button onClick={exportContext} className="btn btn-secondary btn-sm" title="Export">
-            <Download className="w-4 h-4" />
+          <button
+            onClick={exportContext}
+            className="btn btn-secondary btn-sm"
+            title="Export"
+            aria-label="Export context"
+          >
+            <Download className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -265,7 +269,7 @@ export function ContextInspector({ transcriptPath, className }: ContextInspector
         {activeTab === 'overview' && (
           <div className="space-y-6">
             {/* Stats Grid */}
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard
                 icon={MessageSquare}
                 label="Messages"
@@ -322,7 +326,7 @@ export function ContextInspector({ transcriptPath, className }: ContextInspector
             </div>
 
             {/* Quick Stats */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <h4 className="text-sm font-medium text-text-primary flex items-center gap-2">
                   <FileText className="w-4 h-4" />

@@ -229,7 +229,7 @@ export function BeadsPanel() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard label="Total" value={stats.total} color="purple" />
         <StatCard label="Open" value={stats.open} color="blue" />
         <StatCard label="In Progress" value={stats.inProgress} color="yellow" />

@@ -192,7 +192,7 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
             Configuration
           </h3>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -224,7 +224,7 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
             </label>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="text-xs text-text-muted mb-1 block">Max Predictions</label>
               <input
@@ -283,7 +283,7 @@ export function PredictiveContextPanel({ projectPath }: PredictiveContextPanelPr
 
       {/* Stats summary */}
       {stats && (
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="p-3 bg-surface rounded-lg border border-border">
             <div className="flex items-center gap-2 mb-1">
               <Target className="w-4 h-4 text-accent-purple" />

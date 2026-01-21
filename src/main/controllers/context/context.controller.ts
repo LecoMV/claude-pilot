@@ -27,6 +27,7 @@ import { homedir } from 'os'
 import { spawn } from 'child_process'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
 import { predictiveContextService } from '../../services/predictive-context'
+import { SecureProjectPathSchema, createProjectPathSchema } from '../../utils/path-security'
 import type {
   TokenUsage,
   CompactionSettings,
@@ -52,9 +53,9 @@ const SetAutoCompactSchema = z.object({
   enabled: z.boolean(),
 })
 
-const ProjectPathSchema = z.object({
-  projectPath: z.string().min(1, 'Project path cannot be empty'),
-})
+// Use secure path schema to prevent path traversal attacks
+// @see SEC-2 Path Traversal Prevention
+const ProjectPathSchema = SecureProjectPathSchema
 
 const PredictiveContextConfigSchema = z.object({
   enabled: z.boolean().optional(),
@@ -67,7 +68,8 @@ const PredictiveContextConfigSchema = z.object({
 
 const PredictSchema = z.object({
   prompt: z.string().min(1, 'Prompt cannot be empty'),
-  projectPath: z.string().min(1, 'Project path cannot be empty'),
+  // Use secure path validation
+  projectPath: createProjectPathSchema(),
 })
 
 // ============================================================================

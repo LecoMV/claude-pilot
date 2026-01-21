@@ -22,17 +22,21 @@ import {
   type TranscriptMessage,
   type TranscriptMessageType,
 } from '../../services/transcript'
+import { createFilePathSchema, SecureFilePathSchema } from '../../utils/path-security'
 
 // ============================================================================
 // Schemas
 // ============================================================================
 
-const FilePathSchema = z.object({
-  filePath: z.string().min(1, 'File path cannot be empty'),
-})
+// Use secure file path schema to prevent path traversal attacks
+// @see SEC-2 Path Traversal Prevention
+const FilePathSchema = SecureFilePathSchema
+
+// Secure path for parsing options
+const secureFilePath = createFilePathSchema()
 
 const ParseOptionsSchema = z.object({
-  filePath: z.string().min(1, 'File path cannot be empty'),
+  filePath: secureFilePath,
   options: z
     .object({
       types: z
@@ -59,12 +63,12 @@ const ParseOptionsSchema = z.object({
 })
 
 const LastMessagesSchema = z.object({
-  filePath: z.string().min(1, 'File path cannot be empty'),
+  filePath: secureFilePath,
   count: z.number().int().positive().default(10),
 })
 
 const WatchTranscriptSchema = z.object({
-  filePath: z.string().min(1, 'File path cannot be empty'),
+  filePath: secureFilePath,
   enable: z.boolean(),
 })
 

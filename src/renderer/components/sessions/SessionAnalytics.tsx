@@ -62,7 +62,7 @@ function calculateAnalytics(sessions: ExternalSession[]): AnalyticsData {
   const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000
 
   // Filter to last 30 days
-  const recentSessions = sessions.filter(s => s.startTime > thirtyDaysAgo)
+  const recentSessions = sessions.filter((s) => s.startTime > thirtyDaysAgo)
 
   // Basic totals
   let totalMessages = 0
@@ -132,7 +132,8 @@ function calculateAnalytics(sessions: ExternalSession[]): AnalyticsData {
   // Format day data
   const sessionsByDay: AnalyticsData['sessionsByDay'] = []
   const sortedDays = Array.from(byDay.entries()).sort((a, b) => a[0].localeCompare(b[0]))
-  for (const [date, count] of sortedDays.slice(-14)) { // Last 14 days
+  for (const [date, count] of sortedDays.slice(-14)) {
+    // Last 14 days
     sessionsByDay.push({ date: date.slice(5), count }) // MM-DD format
   }
 
@@ -259,7 +260,7 @@ export function SessionAnalytics() {
       </div>
 
       {/* Token Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card p-4">
           <p className="text-sm text-text-muted mb-1">Input Tokens</p>
           <p className="text-xl font-semibold text-text-primary">
@@ -301,7 +302,11 @@ export function SessionAnalytics() {
                 <XAxis dataKey="date" stroke="#6c7086" fontSize={11} />
                 <YAxis stroke="#6c7086" fontSize={11} />
                 <Tooltip
-                  contentStyle={{ background: '#2a2a3d', border: '1px solid #3d3d5c', borderRadius: '8px' }}
+                  contentStyle={{
+                    background: '#2a2a3d',
+                    border: '1px solid #3d3d5c',
+                    borderRadius: '8px',
+                  }}
                   labelStyle={{ color: '#cdd6f4' }}
                 />
                 <Area
@@ -334,7 +339,11 @@ export function SessionAnalytics() {
                 />
                 <YAxis stroke="#6c7086" fontSize={11} />
                 <Tooltip
-                  contentStyle={{ background: '#2a2a3d', border: '1px solid #3d3d5c', borderRadius: '8px' }}
+                  contentStyle={{
+                    background: '#2a2a3d',
+                    border: '1px solid #3d3d5c',
+                    borderRadius: '8px',
+                  }}
                   labelFormatter={(h) => `${h}:00 - ${h}:59`}
                 />
                 <Bar dataKey="count" fill={COLORS.blue} radius={[4, 4, 0, 0]} />
@@ -355,7 +364,7 @@ export function SessionAnalytics() {
           <div className="space-y-3">
             {analytics.sessionsByModel.slice(0, 5).map((item, i) => {
               const colors = [COLORS.purple, COLORS.blue, COLORS.green, COLORS.yellow, COLORS.teal]
-              const maxCount = Math.max(...analytics.sessionsByModel.map(m => m.count))
+              const maxCount = Math.max(...analytics.sessionsByModel.map((m) => m.count))
               const percent = (item.count / maxCount) * 100
 
               return (
@@ -407,7 +416,7 @@ export function SessionAnalytics() {
       </div>
 
       {/* Averages */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="card p-4">
           <p className="text-sm text-text-muted mb-1">Avg. Session Duration</p>
           <p className="text-xl font-semibold text-text-primary">

@@ -213,9 +213,7 @@ export function CosmographWrapper({
 
     const filteredNodes = coloredNodes.filter((n) => n.type === filterType)
     const nodeIds = new Set(filteredNodes.map((n) => n.id))
-    const filteredEdges = data.edges.filter(
-      (e) => nodeIds.has(e.source) && nodeIds.has(e.target)
-    )
+    const filteredEdges = data.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
 
     return { nodes: filteredNodes, edges: filteredEdges }
   }, [coloredNodes, data.edges, filterType])
@@ -442,11 +440,7 @@ export function CosmographWrapper({
         ctx.fillStyle = '#cdd6f4'
         ctx.textAlign = 'center'
         ctx.textBaseline = 'top'
-        ctx.fillText(
-          node.label,
-          node.x!,
-          node.y! + (node.size || config.nodeSize) + 4
-        )
+        ctx.fillText(node.label, node.x!, node.y! + (node.size || config.nodeSize) + 4)
       }
     }
 
@@ -682,24 +676,46 @@ export function CosmographWrapper({
       {showControls && (
         <div className="absolute top-4 left-4 flex flex-col gap-2">
           <div className="flex gap-1 bg-surface/90 backdrop-blur rounded-lg p-1">
-            <button onClick={zoomIn} className="p-2 hover:bg-border rounded" title="Zoom In">
-              <ZoomIn className="w-4 h-4" />
+            <button
+              onClick={zoomIn}
+              className="p-2 hover:bg-border rounded"
+              title="Zoom In"
+              aria-label="Zoom In"
+            >
+              <ZoomIn className="w-4 h-4" aria-hidden="true" />
             </button>
-            <button onClick={zoomOut} className="p-2 hover:bg-border rounded" title="Zoom Out">
-              <ZoomOut className="w-4 h-4" />
+            <button
+              onClick={zoomOut}
+              className="p-2 hover:bg-border rounded"
+              title="Zoom Out"
+              aria-label="Zoom Out"
+            >
+              <ZoomOut className="w-4 h-4" aria-hidden="true" />
             </button>
-            <button onClick={fitView} className="p-2 hover:bg-border rounded" title="Fit View">
-              <Maximize2 className="w-4 h-4" />
+            <button
+              onClick={fitView}
+              className="p-2 hover:bg-border rounded"
+              title="Fit View"
+              aria-label="Fit View"
+            >
+              <Maximize2 className="w-4 h-4" aria-hidden="true" />
             </button>
-            <button onClick={exportPNG} className="p-2 hover:bg-border rounded" title="Export PNG">
-              <Download className="w-4 h-4" />
+            <button
+              onClick={exportPNG}
+              className="p-2 hover:bg-border rounded"
+              title="Export PNG"
+              aria-label="Export PNG"
+            >
+              <Download className="w-4 h-4" aria-hidden="true" />
             </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
               className={cn('p-2 hover:bg-border rounded', showSettings && 'bg-border')}
               title="Settings"
+              aria-label="Settings"
+              aria-expanded={showSettings}
             >
-              <Settings className="w-4 h-4" />
+              <Settings className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
 

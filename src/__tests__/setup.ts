@@ -7,7 +7,7 @@
  * @module setup
  */
 
-import { vi, beforeEach, beforeAll, afterAll } from 'vitest'
+import { vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
 
 // ===========================================================================
 // COMMON SETUP (ALL ENVIRONMENTS)
@@ -47,9 +47,16 @@ if (typeof window !== 'undefined') {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('@testing-library/jest-dom')
 
-  // Configure testing-library to reduce verbose DOM output
+  // Import cleanup for explicit DOM cleanup between tests
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { configure } = require('@testing-library/react')
+  const { configure, cleanup } = require('@testing-library/react')
+
+  // Ensure DOM cleanup after each test
+  afterEach(() => {
+    cleanup()
+    // Clear any lingering test elements
+    document.body.innerHTML = ''
+  })
   configure({
     // Limit DOM debug output to prevent massive test logs
     getElementError: (message: string | null) => {

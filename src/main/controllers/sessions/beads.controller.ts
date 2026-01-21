@@ -25,6 +25,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import type { Bead, BeadStats, BeadStatus, BeadType, BeadPriority } from '../../../shared/types'
+import { SecureProjectPathSchema } from '../../utils/path-security'
 
 const HOME = homedir()
 
@@ -99,9 +100,9 @@ const BeadCloseSchema = z.object({
   reason: z.string().max(500, 'Reason too long').optional(),
 })
 
-const ProjectPathSchema = z.object({
-  projectPath: z.string().min(1, 'Project path cannot be empty'),
-})
+// Use secure path schema to prevent path traversal attacks
+// @see SEC-2 Path Traversal Prevention
+const ProjectPathSchema = SecureProjectPathSchema
 
 // ============================================================================
 // Helper Functions

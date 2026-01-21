@@ -204,7 +204,7 @@ export function LogsViewer() {
   return (
     <div className="space-y-4 animate-in h-full flex flex-col">
       {/* Header Stats */}
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatCard
           icon={Terminal}
           value={logCounts.total}
@@ -308,8 +308,13 @@ export function LogsViewer() {
           <ArrowDown className="w-4 h-4" />
         </button>
 
-        <button onClick={exportLogs} className="btn btn-secondary" title="Export logs">
-          <Download className="w-4 h-4" />
+        <button
+          onClick={exportLogs}
+          className="btn btn-secondary"
+          title="Export logs"
+          aria-label="Export logs"
+        >
+          <Download className="w-4 h-4" aria-hidden="true" />
         </button>
 
         <button

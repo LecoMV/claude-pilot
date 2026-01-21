@@ -275,17 +275,37 @@ export function GraphViewer() {
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1">
-          <button onClick={handleZoomIn} className="btn btn-icon" title="Zoom in">
-            <ZoomIn className="w-4 h-4" />
+          <button
+            onClick={handleZoomIn}
+            className="btn btn-icon"
+            title="Zoom in"
+            aria-label="Zoom in"
+          >
+            <ZoomIn className="w-4 h-4" aria-hidden="true" />
           </button>
-          <button onClick={handleZoomOut} className="btn btn-icon" title="Zoom out">
-            <ZoomOut className="w-4 h-4" />
+          <button
+            onClick={handleZoomOut}
+            className="btn btn-icon"
+            title="Zoom out"
+            aria-label="Zoom out"
+          >
+            <ZoomOut className="w-4 h-4" aria-hidden="true" />
           </button>
-          <button onClick={handleFit} className="btn btn-icon" title="Fit to view">
-            <Maximize2 className="w-4 h-4" />
+          <button
+            onClick={handleFit}
+            className="btn btn-icon"
+            title="Fit to view"
+            aria-label="Fit to view"
+          >
+            <Maximize2 className="w-4 h-4" aria-hidden="true" />
           </button>
-          <button onClick={handleCenter} className="btn btn-icon" title="Center">
-            <Home className="w-4 h-4" />
+          <button
+            onClick={handleCenter}
+            className="btn btn-icon"
+            title="Center"
+            aria-label="Center"
+          >
+            <Home className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
         <div className="text-xs text-text-muted">

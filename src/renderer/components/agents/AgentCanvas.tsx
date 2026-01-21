@@ -265,7 +265,7 @@ export function AgentCanvas() {
   return (
     <div className="space-y-4 animate-in">
       {/* Stats */}
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatCard icon={Brain} value={stats.total} label="Agents" color="text-accent-purple" />
         <StatCard icon={Activity} value={stats.active} label="Active" color="text-accent-green" />
         <StatCard icon={Cpu} value={stats.busy} label="Busy" color="text-accent-yellow" />
@@ -345,8 +345,8 @@ export function AgentCanvas() {
       </div>
 
       {/* Canvas */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2">
           <div className="card bg-background h-[500px] relative overflow-hidden">
             {agents.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-text-muted">

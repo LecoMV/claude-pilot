@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import { spawn, ChildProcess } from 'child_process'
+import { ChildProcess } from 'child_process'
 import { BrowserWindow } from 'electron'
 import type {
   Plan,
@@ -13,6 +13,7 @@ import type {
   PlanCreateParams,
   PlanExecutionStats,
 } from '../../shared/types'
+import { safeSpawnString, validateCommandString, validatePath } from '../utils/command-security'
 
 const HOME = homedir()
 const PLANS_DIR = join(HOME, '.config', 'claude-pilot', 'plans')
@@ -286,7 +287,10 @@ class PlanService {
     this.emitUpdate(plan)
 
     if (step.type === 'shell' && step.command) {
-      this.executeShellStep(plan, step)
+      // Execute shell step asynchronously (handles its own errors)
+      this.executeShellStep(plan, step).catch((error) => {
+        this.stepFail(plan.id, step.id, `Execution error: ${(error as Error).message}`)
+      })
     } else if (step.type === 'manual') {
       // Manual steps wait for user to mark complete
       // Just emit update and wait
@@ -300,49 +304,82 @@ class PlanService {
 
   /**
    * Execute a shell command step
+   *
+   * Security: Uses safeSpawnString which:
+   * - Validates command against allowlist
+   * - Uses spawn with argument arrays (no shell injection)
+   * - Validates paths to prevent traversal
+   *
+   * @see SEC-1 Shell Injection Prevention
    */
-  private executeShellStep(plan: Plan, step: PlanStep): void {
+  private async executeShellStep(plan: Plan, step: PlanStep): Promise<void> {
     if (!step.command) {
       this.stepFail(plan.id, step.id, 'No command specified')
       return
     }
 
-    const proc = spawn('bash', ['-c', step.command], {
-      cwd: plan.projectPath,
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    // Validate the command string before execution
+    const validation = validateCommandString(step.command)
+    if (!validation.valid) {
+      this.stepFail(
+        plan.id,
+        step.id,
+        `Command validation failed: ${validation.error}. ` +
+          'Only allowlisted commands (npm, git, vitest, etc.) can be executed.'
+      )
+      return
+    }
 
-    this.activeProcesses.set(`${plan.id}:${step.id}`, proc)
-
-    let stdout = ''
-    let stderr = ''
-
-    proc.stdout.on('data', (data) => {
-      stdout += data.toString()
-      step.output = stdout
-      plan.updatedAt = Date.now()
-      this.emitUpdate(plan)
-    })
-
-    proc.stderr.on('data', (data) => {
-      stderr += data.toString()
-    })
-
-    proc.on('close', (code) => {
-      this.activeProcesses.delete(`${plan.id}:${step.id}`)
-
-      if (code === 0) {
-        this.stepComplete(plan.id, step.id, stdout)
-      } else {
-        this.stepFail(plan.id, step.id, stderr || `Exit code: ${code}`)
+    // Validate the working directory if specified
+    if (plan.projectPath) {
+      const pathValidation = await validatePath(plan.projectPath, [HOME, '/tmp', '/var/tmp'])
+      if (!pathValidation.valid) {
+        this.stepFail(plan.id, step.id, `Invalid project path: ${pathValidation.error}`)
+        return
       }
-    })
+    }
 
-    proc.on('error', (error) => {
-      this.activeProcesses.delete(`${plan.id}:${step.id}`)
-      this.stepFail(plan.id, step.id, error.message)
-    })
+    try {
+      // Use safe spawn which uses argument arrays (no shell)
+      const { process: proc } = safeSpawnString(step.command, {
+        cwd: plan.projectPath,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+
+      this.activeProcesses.set(`${plan.id}:${step.id}`, proc)
+
+      let stdout = ''
+      let stderr = ''
+
+      proc.stdout?.on('data', (data) => {
+        stdout += data.toString()
+        step.output = stdout
+        plan.updatedAt = Date.now()
+        this.emitUpdate(plan)
+      })
+
+      proc.stderr?.on('data', (data) => {
+        stderr += data.toString()
+      })
+
+      proc.on('close', (code) => {
+        this.activeProcesses.delete(`${plan.id}:${step.id}`)
+
+        if (code === 0) {
+          this.stepComplete(plan.id, step.id, stdout)
+        } else {
+          this.stepFail(plan.id, step.id, stderr || `Exit code: ${code}`)
+        }
+      })
+
+      proc.on('error', (error) => {
+        this.activeProcesses.delete(`${plan.id}:${step.id}`)
+        this.stepFail(plan.id, step.id, error.message)
+      })
+    } catch (error) {
+      this.stepFail(plan.id, step.id, (error as Error).message)
+    }
   }
 
   /**

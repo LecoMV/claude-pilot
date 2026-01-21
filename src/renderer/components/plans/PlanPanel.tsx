@@ -228,7 +228,7 @@ export function PlanPanel({ projectPath }: PlanPanelProps) {
 
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-4 gap-4 p-4 border-b border-border">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 border-b border-border">
           <div className="flex items-center gap-2">
             <BarChart3 className="w-4 h-4 text-accent-purple" />
             <span className="text-sm text-text-muted">Total:</span>

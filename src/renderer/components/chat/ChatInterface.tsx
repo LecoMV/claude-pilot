@@ -283,16 +283,27 @@ export function ChatInterface() {
           Full Terminal
         </button>
 
-        <button onClick={clearMessages} className="btn btn-secondary btn-sm" title="Clear messages">
-          <Trash2 className="w-4 h-4" />
+        <button
+          onClick={clearMessages}
+          className="btn btn-secondary btn-sm"
+          title="Clear messages"
+          aria-label="Clear messages"
+        >
+          <Trash2 className="w-4 h-4" aria-hidden="true" />
         </button>
 
         <button
           onClick={() => setExpanded(!expanded)}
           className="btn btn-secondary btn-sm"
           title={expanded ? 'Minimize' : 'Maximize'}
+          aria-label={expanded ? 'Minimize panel' : 'Maximize panel'}
+          aria-expanded={expanded}
         >
-          {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          {expanded ? (
+            <Minimize2 className="w-4 h-4" aria-hidden="true" />
+          ) : (
+            <Maximize2 className="w-4 h-4" aria-hidden="true" />
+          )}
         </button>
 
         <button

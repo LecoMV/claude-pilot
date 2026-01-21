@@ -231,7 +231,7 @@ export function PgVectorPanel() {
             Auto-Embedding Configuration
           </h3>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -277,7 +277,7 @@ export function PgVectorPanel() {
             </label>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="text-xs text-text-muted mb-1 block">Batch Size</label>
               <input
@@ -550,7 +550,7 @@ export function PgVectorPanel() {
 
             <div>
               <label className="text-sm text-text-muted mb-2 block">Index Type</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {(['hnsw', 'ivfflat', 'none'] as VectorIndexType[]).map((type) => (
                   <button
                     key={type}
@@ -569,7 +569,7 @@ export function PgVectorPanel() {
             </div>
 
             {indexConfig.type === 'hnsw' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs text-text-muted mb-1 block">M (connections)</label>
                   <input

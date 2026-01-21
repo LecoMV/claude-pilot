@@ -203,7 +203,7 @@ export function OllamaManager() {
       {activeTab === 'models' && (
         <>
           {/* Stats */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <StatCard
               icon={ollamaOnline ? CheckCircle : XCircle}
               value={ollamaOnline ? 'Online' : 'Offline'}
@@ -524,7 +524,7 @@ function ModelCard({
       </div>
 
       {isSelected && model.details && (
-        <div className="mt-4 pt-4 border-t border-border grid grid-cols-4 gap-4 text-sm">
+        <div className="mt-4 pt-4 border-t border-border grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
           {model.details.format && (
             <div>
               <p className="text-text-muted">Format</p>
@@ -602,7 +602,7 @@ function SystemLLMPanel({
   return (
     <div className="space-y-6">
       {/* System Integration Status */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-accent-blue/10 flex items-center justify-center">

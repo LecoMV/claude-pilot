@@ -366,7 +366,7 @@ function CustomProfilesPanel({
             <h4 className="font-medium text-text-primary">Create New Profile</h4>
           </div>
           <div className="card-body space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-text-secondary mb-1">Profile Name *</label>
                 <input
@@ -389,7 +389,7 @@ function CustomProfilesPanel({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-text-secondary mb-1">Default Model</label>
                 <select
@@ -634,7 +634,7 @@ function CustomProfilesPanel({
                       <div className="px-3 pb-3 border-t border-border">
                         {isEditing ? (
                           <div className="mt-3 space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div>
                                 <label className="block text-sm text-text-secondary mb-1">
                                   Profile Name
@@ -662,7 +662,7 @@ function CustomProfilesPanel({
                                 />
                               </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div>
                                 <label className="block text-sm text-text-secondary mb-1">
                                   Model
@@ -735,7 +735,7 @@ function CustomProfilesPanel({
                           </div>
                         ) : (
                           <div className="mt-3 space-y-3">
-                            <div className="grid grid-cols-3 gap-4 text-sm">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                               <div>
                                 <p className="text-text-muted">Model</p>
                                 <p className="text-text-primary font-medium">
@@ -797,7 +797,7 @@ function CustomProfilesPanel({
               <code className="text-accent-purple">claude-eng</code> for engineering work or{' '}
               <code className="text-accent-purple">claude-sec</code> for security research.
             </p>
-            <div className="grid grid-cols-3 gap-4 mt-2 pt-2 border-t border-border">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-2 pt-2 border-t border-border">
               <div>
                 <p className="font-medium text-text-primary text-xs">Launch</p>
                 <p className="text-xs">

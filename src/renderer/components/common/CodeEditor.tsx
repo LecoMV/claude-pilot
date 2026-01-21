@@ -1,9 +1,10 @@
-import { useRef } from 'react'
+import { useRef, useEffect } from 'react'
 import Editor, { OnMount, OnChange } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
+import { initializeMonaco } from '@lib/monaco-init'
 
-// Monaco loader is configured globally in main.tsx to use local bundle
-// This prevents CSP issues with CDN loading
+// Monaco is now lazy-loaded with this component
+// The initializeMonaco() call sets up local workers to avoid CDN loading
 
 export interface CodeEditorProps {
   value: string
@@ -29,6 +30,11 @@ export function CodeEditor({
   wordWrap = 'on',
 }: CodeEditorProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
+
+  // Initialize Monaco with local workers on first render
+  useEffect(() => {
+    initializeMonaco()
+  }, [])
 
   const handleEditorMount: OnMount = (editor) => {
     editorRef.current = editor
