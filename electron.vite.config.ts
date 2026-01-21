@@ -38,8 +38,8 @@ export default defineConfig({
       minify: true,
       // Target modern browsers for smaller bundle
       target: 'esnext',
-      // Increase chunk size warning limit (Monaco is large)
-      chunkSizeWarningLimit: 1500,
+      // Increase chunk size warning limit (Monaco ~4MB is expected)
+      chunkSizeWarningLimit: 4000,
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
