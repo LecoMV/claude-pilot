@@ -152,8 +152,7 @@ describe('services.controller', () => {
 
     it('should strip .service suffix from service names', async () => {
       vi.mocked(spawnAsync).mockResolvedValue(
-        'UNIT LOAD ACTIVE SUB DESCRIPTION\n' +
-          'postgresql.service loaded active running PostgreSQL'
+        'UNIT LOAD ACTIVE SUB DESCRIPTION\n' + 'postgresql.service loaded active running PostgreSQL'
       )
 
       const result = await caller.systemd()
@@ -408,12 +407,12 @@ describe('services.controller', () => {
       )
     })
 
-    it('should return false on command failure', async () => {
+    it('should throw TRPCError on command failure', async () => {
       vi.mocked(spawnAsync).mockRejectedValue(new Error('Failed to start service'))
 
-      const result = await caller.systemdAction({ name: 'broken', action: 'start' })
-
-      expect(result).toBe(false)
+      await expect(caller.systemdAction({ name: 'broken', action: 'start' })).rejects.toThrow(
+        /Failed to start service broken/
+      )
     })
 
     it('should reject invalid service name format', async () => {
@@ -444,21 +443,19 @@ describe('services.controller', () => {
       vi.mocked(spawnAsync).mockResolvedValue('')
 
       // Alphanumeric with dots, dashes, underscores, and @
-      await expect(
-        caller.systemdAction({ name: 'my-service', action: 'start' })
-      ).resolves.toBe(true)
+      await expect(caller.systemdAction({ name: 'my-service', action: 'start' })).resolves.toBe(
+        true
+      )
 
-      await expect(
-        caller.systemdAction({ name: 'my.service', action: 'start' })
-      ).resolves.toBe(true)
+      await expect(caller.systemdAction({ name: 'my.service', action: 'start' })).resolves.toBe(
+        true
+      )
 
-      await expect(
-        caller.systemdAction({ name: 'my_service', action: 'start' })
-      ).resolves.toBe(true)
+      await expect(caller.systemdAction({ name: 'my_service', action: 'start' })).resolves.toBe(
+        true
+      )
 
-      await expect(
-        caller.systemdAction({ name: 'user@123', action: 'start' })
-      ).resolves.toBe(true)
+      await expect(caller.systemdAction({ name: 'user@123', action: 'start' })).resolves.toBe(true)
 
       await expect(
         caller.systemdAction({ name: 'container-service@docker.service', action: 'start' })
@@ -514,11 +511,7 @@ describe('services.controller', () => {
       const result = await caller.podmanAction({ id: 'def456', action: 'stop' })
 
       expect(result).toBe(true)
-      expect(spawnAsync).toHaveBeenCalledWith(
-        'podman',
-        ['stop', 'def456'],
-        expect.any(Object)
-      )
+      expect(spawnAsync).toHaveBeenCalledWith('podman', ['stop', 'def456'], expect.any(Object))
     })
 
     it('should restart a container', async () => {
@@ -527,33 +520,23 @@ describe('services.controller', () => {
       const result = await caller.podmanAction({ id: 'ghi789', action: 'restart' })
 
       expect(result).toBe(true)
-      expect(spawnAsync).toHaveBeenCalledWith(
-        'podman',
-        ['restart', 'ghi789'],
-        expect.any(Object)
+      expect(spawnAsync).toHaveBeenCalledWith('podman', ['restart', 'ghi789'], expect.any(Object))
+    })
+
+    it('should throw TRPCError on command failure', async () => {
+      vi.mocked(spawnAsync).mockRejectedValue(new Error('Container not found'))
+
+      await expect(caller.podmanAction({ id: 'nonexistent', action: 'start' })).rejects.toThrow(
+        /Failed to start container nonexistent/
       )
     })
 
-    it('should return false on command failure', async () => {
-      vi.mocked(spawnAsync).mockRejectedValue(new Error('Container not found'))
-
-      const result = await caller.podmanAction({ id: 'nonexistent', action: 'start' })
-
-      expect(result).toBe(false)
-    })
-
     it('should reject invalid container ID format', async () => {
-      await expect(
-        caller.podmanAction({ id: 'invalid/id', action: 'start' })
-      ).rejects.toThrow()
+      await expect(caller.podmanAction({ id: 'invalid/id', action: 'start' })).rejects.toThrow()
 
-      await expect(
-        caller.podmanAction({ id: 'invalid id', action: 'start' })
-      ).rejects.toThrow()
+      await expect(caller.podmanAction({ id: 'invalid id', action: 'start' })).rejects.toThrow()
 
-      await expect(
-        caller.podmanAction({ id: 'invalid;id', action: 'start' })
-      ).rejects.toThrow()
+      await expect(caller.podmanAction({ id: 'invalid;id', action: 'start' })).rejects.toThrow()
     })
 
     it('should reject empty container ID', async () => {
@@ -561,26 +544,18 @@ describe('services.controller', () => {
     })
 
     it('should reject invalid action', async () => {
-      await expect(
-        caller.podmanAction({ id: 'abc123', action: 'delete' as any })
-      ).rejects.toThrow()
+      await expect(caller.podmanAction({ id: 'abc123', action: 'delete' as any })).rejects.toThrow()
     })
 
     it('should accept valid container ID formats', async () => {
       vi.mocked(spawnAsync).mockResolvedValue('')
 
       // Alphanumeric with dots, dashes, underscores
-      await expect(
-        caller.podmanAction({ id: 'my-container', action: 'start' })
-      ).resolves.toBe(true)
+      await expect(caller.podmanAction({ id: 'my-container', action: 'start' })).resolves.toBe(true)
 
-      await expect(
-        caller.podmanAction({ id: 'my.container', action: 'start' })
-      ).resolves.toBe(true)
+      await expect(caller.podmanAction({ id: 'my.container', action: 'start' })).resolves.toBe(true)
 
-      await expect(
-        caller.podmanAction({ id: 'my_container', action: 'start' })
-      ).resolves.toBe(true)
+      await expect(caller.podmanAction({ id: 'my_container', action: 'start' })).resolves.toBe(true)
 
       // Full SHA256 ID (common in podman/docker)
       await expect(
@@ -588,24 +563,16 @@ describe('services.controller', () => {
       ).resolves.toBe(true)
 
       // Short ID (12 chars, commonly used)
-      await expect(
-        caller.podmanAction({ id: 'abc123def456', action: 'start' })
-      ).resolves.toBe(true)
+      await expect(caller.podmanAction({ id: 'abc123def456', action: 'start' })).resolves.toBe(true)
     })
 
     it('should sanitize container ID to prevent injection', async () => {
       // The regex validation should reject these
-      await expect(
-        caller.podmanAction({ id: 'abc; rm -rf /', action: 'start' })
-      ).rejects.toThrow()
+      await expect(caller.podmanAction({ id: 'abc; rm -rf /', action: 'start' })).rejects.toThrow()
 
-      await expect(
-        caller.podmanAction({ id: 'abc`whoami`', action: 'start' })
-      ).rejects.toThrow()
+      await expect(caller.podmanAction({ id: 'abc`whoami`', action: 'start' })).rejects.toThrow()
 
-      await expect(
-        caller.podmanAction({ id: 'abc$(id)', action: 'start' })
-      ).rejects.toThrow()
+      await expect(caller.podmanAction({ id: 'abc$(id)', action: 'start' })).rejects.toThrow()
     })
   })
 
@@ -619,11 +586,7 @@ describe('services.controller', () => {
       await caller.systemdAction({ name: 'test', action: 'start' })
 
       // The spawnAsync utility enforces shell:false internally
-      expect(spawnAsync).toHaveBeenCalledWith(
-        'systemctl',
-        expect.any(Array),
-        expect.any(Object)
-      )
+      expect(spawnAsync).toHaveBeenCalledWith('systemctl', expect.any(Array), expect.any(Object))
     })
 
     it('should reject path traversal in service name', async () => {
@@ -656,24 +619,15 @@ describe('services.controller', () => {
       ]
 
       for (const name of maliciousNames) {
-        await expect(
-          caller.systemdAction({ name, action: 'start' })
-        ).rejects.toThrow()
+        await expect(caller.systemdAction({ name, action: 'start' })).rejects.toThrow()
       }
     })
 
     it('should reject shell special characters in container ID', async () => {
-      const maliciousIds = [
-        'test; rm -rf /',
-        'test | cat /etc/passwd',
-        '$(whoami)',
-        '`id`',
-      ]
+      const maliciousIds = ['test; rm -rf /', 'test | cat /etc/passwd', '$(whoami)', '`id`']
 
       for (const id of maliciousIds) {
-        await expect(
-          caller.podmanAction({ id, action: 'start' })
-        ).rejects.toThrow()
+        await expect(caller.podmanAction({ id, action: 'start' })).rejects.toThrow()
       }
     })
   })
@@ -684,15 +638,10 @@ describe('services.controller', () => {
   describe('edge cases', () => {
     it('should handle concurrent systemd queries', async () => {
       vi.mocked(spawnAsync).mockResolvedValue(
-        'UNIT LOAD ACTIVE SUB DESCRIPTION\n' +
-          'postgresql.service loaded active running PostgreSQL'
+        'UNIT LOAD ACTIVE SUB DESCRIPTION\n' + 'postgresql.service loaded active running PostgreSQL'
       )
 
-      const results = await Promise.all([
-        caller.systemd(),
-        caller.systemd(),
-        caller.systemd(),
-      ])
+      const results = await Promise.all([caller.systemd(), caller.systemd(), caller.systemd()])
 
       expect(results).toHaveLength(3)
       results.forEach((r) => {
@@ -702,16 +651,10 @@ describe('services.controller', () => {
 
     it('should handle concurrent podman queries', async () => {
       vi.mocked(spawnAsync).mockResolvedValue(
-        JSON.stringify([
-          { Id: '1', Names: ['c1'], Image: 'test', State: 'running', Created: '' },
-        ])
+        JSON.stringify([{ Id: '1', Names: ['c1'], Image: 'test', State: 'running', Created: '' }])
       )
 
-      const results = await Promise.all([
-        caller.podman(),
-        caller.podman(),
-        caller.podman(),
-      ])
+      const results = await Promise.all([caller.podman(), caller.podman(), caller.podman()])
 
       expect(results).toHaveLength(3)
       results.forEach((r) => {
@@ -788,12 +731,12 @@ describe('services.controller', () => {
       expect(result).toEqual([])
     })
 
-    it('should handle action timeout gracefully', async () => {
+    it('should throw TRPCError on action timeout', async () => {
       vi.mocked(spawnAsync).mockRejectedValue(new Error('Command timed out after 30000ms'))
 
-      const result = await caller.systemdAction({ name: 'slow-service', action: 'start' })
-
-      expect(result).toBe(false)
+      await expect(caller.systemdAction({ name: 'slow-service', action: 'start' })).rejects.toThrow(
+        /Failed to start service slow-service/
+      )
     })
   })
 
@@ -825,7 +768,11 @@ describe('services.controller', () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       vi.mocked(spawnAsync).mockRejectedValue(new Error('Failed to start service'))
 
-      await caller.systemdAction({ name: 'broken', action: 'start' })
+      try {
+        await caller.systemdAction({ name: 'broken', action: 'start' })
+      } catch {
+        // Expected to throw
+      }
 
       expect(consoleSpy).toHaveBeenCalled()
       consoleSpy.mockRestore()
@@ -835,7 +782,11 @@ describe('services.controller', () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       vi.mocked(spawnAsync).mockRejectedValue(new Error('Container not found'))
 
-      await caller.podmanAction({ id: 'nonexistent', action: 'start' })
+      try {
+        await caller.podmanAction({ id: 'nonexistent', action: 'start' })
+      } catch {
+        // Expected to throw
+      }
 
       expect(consoleSpy).toHaveBeenCalled()
       consoleSpy.mockRestore()

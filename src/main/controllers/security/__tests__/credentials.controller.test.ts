@@ -51,75 +51,67 @@ describe('credentials.controller', () => {
         value: 'ghp_xxxxxxxxxxxxxxxxxxxx',
       })
 
-      expect(result).toBe(true)
-      expect(credentialService.set).toHaveBeenCalledWith(
-        'github.token',
-        'ghp_xxxxxxxxxxxxxxxxxxxx'
+      expect(result).toEqual({ success: true })
+      expect(credentialService.set).toHaveBeenCalledWith('github.token', 'ghp_xxxxxxxxxxxxxxxxxxxx')
+    })
+
+    it('should throw when storing fails (encryption not available)', async () => {
+      vi.mocked(credentialService.set).mockReturnValue(false)
+
+      await expect(caller.store({ key: 'test.key', value: 'test-value' })).rejects.toThrow(
+        /Failed to store credential/
       )
     })
 
-    it('should return false when storing without encryption', async () => {
-      vi.mocked(credentialService.set).mockReturnValue(false)
-
-      const result = await caller.store({
-        key: 'test.key',
-        value: 'test-value',
-      })
-
-      expect(result).toBe(false)
-    })
-
     it('should reject empty key', async () => {
-      await expect(
-        caller.store({ key: '', value: 'test-value' })
-      ).rejects.toThrow()
+      await expect(caller.store({ key: '', value: 'test-value' })).rejects.toThrow()
     })
 
     it('should reject empty value', async () => {
-      await expect(
-        caller.store({ key: 'test.key', value: '' })
-      ).rejects.toThrow()
+      await expect(caller.store({ key: 'test.key', value: '' })).rejects.toThrow()
     })
 
     it('should reject key exceeding 100 characters', async () => {
       const longKey = 'a'.repeat(101)
 
-      await expect(
-        caller.store({ key: longKey, value: 'test-value' })
-      ).rejects.toThrow()
+      await expect(caller.store({ key: longKey, value: 'test-value' })).rejects.toThrow()
     })
 
     it('should reject key with invalid characters', async () => {
-      await expect(
-        caller.store({ key: 'invalid/key', value: 'test-value' })
-      ).rejects.toThrow()
+      await expect(caller.store({ key: 'invalid/key', value: 'test-value' })).rejects.toThrow()
 
-      await expect(
-        caller.store({ key: 'invalid key', value: 'test-value' })
-      ).rejects.toThrow()
+      await expect(caller.store({ key: 'invalid key', value: 'test-value' })).rejects.toThrow()
 
-      await expect(
-        caller.store({ key: 'invalid@key', value: 'test-value' })
-      ).rejects.toThrow()
+      await expect(caller.store({ key: 'invalid@key', value: 'test-value' })).rejects.toThrow()
     })
 
     it('should accept valid key formats', async () => {
       vi.mocked(credentialService.set).mockReturnValue(true)
 
       // Alphanumeric
-      await expect(caller.store({ key: 'testkey123', value: 'v' })).resolves.toBe(true)
+      await expect(caller.store({ key: 'testkey123', value: 'v' })).resolves.toEqual({
+        success: true,
+      })
 
       // With dots
-      await expect(caller.store({ key: 'test.key.name', value: 'v' })).resolves.toBe(true)
+      await expect(caller.store({ key: 'test.key.name', value: 'v' })).resolves.toEqual({
+        success: true,
+      })
 
       // With dashes
-      await expect(caller.store({ key: 'test-key-name', value: 'v' })).resolves.toBe(true)
+      await expect(caller.store({ key: 'test-key-name', value: 'v' })).resolves.toEqual({
+        success: true,
+      })
 
       // With underscores
-      await expect(caller.store({ key: 'test_key_name', value: 'v' })).resolves.toBe(true)
+      await expect(caller.store({ key: 'test_key_name', value: 'v' })).resolves.toEqual({
+        success: true,
+      })
 
       // Mixed
-      await expect(caller.store({ key: 'test.key-name_123', value: 'v' })).resolves.toBe(true)
+      await expect(caller.store({ key: 'test.key-name_123', value: 'v' })).resolves.toEqual({
+        success: true,
+      })
     })
 
     it('should propagate service errors', async () => {
@@ -127,9 +119,9 @@ describe('credentials.controller', () => {
         throw new Error('Encryption failed')
       })
 
-      await expect(
-        caller.store({ key: 'test.key', value: 'test-value' })
-      ).rejects.toThrow('Encryption failed')
+      await expect(caller.store({ key: 'test.key', value: 'test-value' })).rejects.toThrow(
+        'Encryption failed'
+      )
     })
   })
 
@@ -142,22 +134,20 @@ describe('credentials.controller', () => {
 
       const result = await caller.retrieve({ key: 'github.token' })
 
-      expect(result).toBe('my-secret-value')
+      expect(result).toEqual({ value: 'my-secret-value' })
       expect(credentialService.retrieve).toHaveBeenCalledWith('github.token')
     })
 
-    it('should return null for non-existent credential', async () => {
+    it('should return null value for non-existent credential', async () => {
       vi.mocked(credentialService.retrieve).mockReturnValue(null)
 
       const result = await caller.retrieve({ key: 'nonexistent.key' })
 
-      expect(result).toBeNull()
+      expect(result).toEqual({ value: null })
     })
 
     it('should reject invalid key format', async () => {
-      await expect(
-        caller.retrieve({ key: 'invalid/key' })
-      ).rejects.toThrow()
+      await expect(caller.retrieve({ key: 'invalid/key' })).rejects.toThrow()
     })
 
     it('should propagate retrieval errors', async () => {
@@ -165,9 +155,7 @@ describe('credentials.controller', () => {
         throw new Error('Decryption failed')
       })
 
-      await expect(
-        caller.retrieve({ key: 'test.key' })
-      ).rejects.toThrow('Decryption failed')
+      await expect(caller.retrieve({ key: 'test.key' })).rejects.toThrow('Decryption failed')
     })
   })
 
@@ -180,14 +168,12 @@ describe('credentials.controller', () => {
 
       const result = await caller.delete({ key: 'github.token' })
 
-      expect(result).toBe(true)
+      expect(result).toEqual({ success: true })
       expect(credentialService.delete).toHaveBeenCalledWith('github.token')
     })
 
     it('should reject invalid key format', async () => {
-      await expect(
-        caller.delete({ key: 'invalid@key' })
-      ).rejects.toThrow()
+      await expect(caller.delete({ key: 'invalid@key' })).rejects.toThrow()
     })
 
     it('should propagate deletion errors', async () => {
@@ -195,9 +181,7 @@ describe('credentials.controller', () => {
         throw new Error('Service not initialized')
       })
 
-      await expect(
-        caller.delete({ key: 'test.key' })
-      ).rejects.toThrow('Service not initialized')
+      await expect(caller.delete({ key: 'test.key' })).rejects.toThrow('Service not initialized')
     })
   })
 
@@ -223,9 +207,7 @@ describe('credentials.controller', () => {
     })
 
     it('should reject invalid key format', async () => {
-      await expect(
-        caller.has({ key: '' })
-      ).rejects.toThrow()
+      await expect(caller.has({ key: '' })).rejects.toThrow()
     })
   })
 
@@ -299,7 +281,7 @@ describe('credentials.controller', () => {
         key: 'test.credential',
         value: 'secret-value',
       })
-      expect(storeResult).toBe(true)
+      expect(storeResult).toEqual({ success: true })
 
       // Verify exists
       const hasResult = await caller.has({ key: 'test.credential' })
@@ -307,11 +289,11 @@ describe('credentials.controller', () => {
 
       // Retrieve
       const retrieveResult = await caller.retrieve({ key: 'test.credential' })
-      expect(retrieveResult).toBe('secret-value')
+      expect(retrieveResult).toEqual({ value: 'secret-value' })
 
       // Delete
       const deleteResult = await caller.delete({ key: 'test.credential' })
-      expect(deleteResult).toBe(true)
+      expect(deleteResult).toEqual({ success: true })
 
       // Verify deleted
       vi.mocked(credentialService.has).mockReturnValue(false)
@@ -350,9 +332,7 @@ describe('credentials.controller', () => {
       // Check console was not called with the secret value
       const allCalls = [...consoleSpy.mock.calls, ...consoleInfoSpy.mock.calls]
       const hasSecret = allCalls.some((call) =>
-        call.some((arg) =>
-          typeof arg === 'string' && arg.includes('super-secret')
-        )
+        call.some((arg) => typeof arg === 'string' && arg.includes('super-secret'))
       )
 
       expect(hasSecret).toBe(false)
@@ -371,24 +351,15 @@ describe('credentials.controller', () => {
       ]
 
       for (const key of maliciousKeys) {
-        await expect(
-          caller.store({ key, value: 'test' })
-        ).rejects.toThrow()
+        await expect(caller.store({ key, value: 'test' })).rejects.toThrow()
       }
     })
 
     it('should reject shell injection attempts in key', async () => {
-      const maliciousKeys = [
-        'key; rm -rf /',
-        'key | cat /etc/passwd',
-        'key`whoami`',
-        'key$(id)',
-      ]
+      const maliciousKeys = ['key; rm -rf /', 'key | cat /etc/passwd', 'key`whoami`', 'key$(id)']
 
       for (const key of maliciousKeys) {
-        await expect(
-          caller.store({ key, value: 'test' })
-        ).rejects.toThrow()
+        await expect(caller.store({ key, value: 'test' })).rejects.toThrow()
       }
     })
   })
