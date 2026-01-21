@@ -760,6 +760,64 @@ export const sessionRouter = router({
   getActive: publicProcedure.query((): Promise<ExternalSession[]> => {
     return getActiveSessions()
   }),
+
+  /**
+   * Detect ghost sessions - sessions without active processes that are stale
+   * Ghost sessions are candidates for cleanup
+   */
+  detectGhosts: publicProcedure
+    .input(
+      z
+        .object({
+          staleThresholdDays: z.number().int().positive().default(7),
+        })
+        .optional()
+    )
+    .query(async ({ input }): Promise<GhostSessionInfo[]> => {
+      const staleThresholdMs = (input?.staleThresholdDays ?? 7) * 24 * 60 * 60 * 1000
+      const now = Date.now()
+
+      const allSessions = await discoverExternalSessions()
+      const activeSessions = await getActiveSessions()
+      const activeIds = new Set(activeSessions.map((s) => s.id))
+
+      const ghosts: GhostSessionInfo[] = []
+
+      for (const session of allSessions) {
+        // Skip if session has an active process
+        if (activeIds.has(session.id)) continue
+
+        const age = now - session.lastActivity
+        const isStale = age > staleThresholdMs
+
+        ghosts.push({
+          session,
+          isStale,
+          daysSinceActivity: Math.floor(age / (24 * 60 * 60 * 1000)),
+          sizeBytes: session.stats?.inputTokens
+            ? (session.stats.inputTokens + session.stats.outputTokens) * 4
+            : 0, // Rough estimate
+          recommendation: isStale ? 'delete' : 'review',
+        })
+      }
+
+      // Sort by staleness (oldest first)
+      ghosts.sort((a, b) => b.daysSinceActivity - a.daysSinceActivity)
+
+      return ghosts
+    }),
 })
+
+// ============================================================================
+// Types
+// ============================================================================
+
+interface GhostSessionInfo {
+  session: ExternalSession
+  isStale: boolean
+  daysSinceActivity: number
+  sizeBytes: number
+  recommendation: 'delete' | 'review'
+}
 
 export type SessionRouter = typeof sessionRouter
