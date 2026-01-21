@@ -14,14 +14,16 @@ export default defineConfig({
     pool: 'forks',
     poolOptions: {
       forks: {
-        // Use moderate parallelism (6 workers) for stability
-        // With 38GB available, 6 workers × 2GB = 12GB for workers + headroom
-        maxForks: 6,
+        // Conservative parallelism (3 workers) - prevents OOM on large test suites
+        // 81 test files with 3 workers balances speed vs memory
+        maxForks: 3,
         minForks: 1,
-        // Memory limit per worker (2GB is sufficient for most test suites)
-        memoryLimit: '2048MB',
+        // Memory limit per worker (1.5GB - leaves headroom for system)
+        memoryLimit: '1536MB',
         // Isolate globals for cleaner test environment
         isolate: true,
+        // Single child per worker to reduce memory fragmentation
+        singleFork: true,
       },
     },
 
