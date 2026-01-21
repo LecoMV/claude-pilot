@@ -17,7 +17,12 @@ import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import type { AppSettings, BudgetSettings, ClaudePathSettings } from '../../../shared/types'
+import type {
+  AppSettings,
+  BudgetSettings,
+  ClaudePathSettings,
+  TelemetrySettings,
+} from '../../../shared/types'
 
 // ============================================================================
 // Constants
@@ -60,6 +65,14 @@ const ClaudePathSettingsSchema = z.object({
   projectsPath: z.string().optional(),
 })
 
+const TelemetrySettingsSchema = z.object({
+  enabled: z.boolean(),
+  crashReports: z.boolean(),
+  usageAnalytics: z.boolean(),
+  performanceMetrics: z.boolean(),
+  anonymousId: z.string().optional(),
+})
+
 const AppSettingsSchema = z.object({
   theme: z.enum(['dark', 'light', 'auto']),
   accentColor: z.enum(['purple', 'blue', 'green', 'teal']),
@@ -77,6 +90,7 @@ const AppSettingsSchema = z.object({
   clearOnExit: z.boolean(),
   budget: BudgetSettingsSchema.optional(),
   claude: ClaudePathSettingsSchema.optional(),
+  telemetry: TelemetrySettingsSchema.optional(),
 })
 
 // ============================================================================
@@ -147,5 +161,31 @@ export const settingsRouter = router({
     const settings = getAppSettings()
     settings.claude = input as ClaudePathSettings
     return saveAppSettings(settings)
+  }),
+
+  /**
+   * Set telemetry preferences (privacy-respecting opt-in)
+   * Telemetry is disabled by default and requires explicit user consent
+   */
+  setTelemetry: auditedProcedure.input(TelemetrySettingsSchema).mutation(({ input }): boolean => {
+    const settings = getAppSettings()
+    settings.telemetry = input as TelemetrySettings
+    return saveAppSettings(settings)
+  }),
+
+  /**
+   * Get current telemetry settings
+   * Returns default (all disabled) if not configured
+   */
+  getTelemetry: publicProcedure.query((): TelemetrySettings => {
+    const settings = getAppSettings()
+    return (
+      settings.telemetry ?? {
+        enabled: false,
+        crashReports: false,
+        usageAnalytics: false,
+        performanceMetrics: false,
+      }
+    )
   }),
 })

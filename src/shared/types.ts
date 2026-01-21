@@ -692,6 +692,22 @@ export interface AppSettings {
 
   // Claude Code paths (optional overrides)
   claude?: ClaudePathSettings
+
+  // Telemetry & Privacy (opt-in)
+  telemetry?: TelemetrySettings
+}
+
+export interface TelemetrySettings {
+  // Master toggle - all telemetry disabled if false (default: false - opt-in required)
+  enabled: boolean
+  // Send crash reports to Sentry
+  crashReports: boolean
+  // Send anonymous usage analytics (feature usage, session duration)
+  usageAnalytics: boolean
+  // Send performance metrics (startup time, memory usage)
+  performanceMetrics: boolean
+  // Anonymous user ID for deduplication (auto-generated hash of machine ID)
+  anonymousId?: string
 }
 
 export interface ClaudePathSettings {
