@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { TRPCError } from '@trpc/server'
 import { mcpRouter } from '../mcp.controller'
 import { existsSync } from 'fs'
 import { readFile, writeFile } from 'fs/promises'
@@ -93,7 +94,7 @@ describe('mcp.controller', () => {
       const result = await caller.list()
 
       expect(result).toHaveLength(3)
-      expect(result[0]).toEqual({
+      expect(result[0]).toMatchObject({
         name: 'test-server',
         status: 'online',
         config: {
@@ -255,12 +256,8 @@ describe('mcp.controller', () => {
       vi.mocked(existsSync).mockReturnValue(false)
 
       // Should not throw validation errors
-      await expect(
-        caller.getServer({ name: 'valid-server-name' })
-      ).resolves.toBeNull()
-      await expect(
-        caller.getServer({ name: 'server_with_underscores' })
-      ).resolves.toBeNull()
+      await expect(caller.getServer({ name: 'valid-server-name' })).resolves.toBeNull()
+      await expect(caller.getServer({ name: 'server_with_underscores' })).resolves.toBeNull()
       await expect(caller.getServer({ name: 'server123' })).resolves.toBeNull()
     })
   })
@@ -277,16 +274,10 @@ describe('mcp.controller', () => {
       const result = await caller.toggle({ name: 'disabled-server', enabled: true })
 
       expect(result).toBe(true)
-      expect(writeFile).toHaveBeenCalledWith(
-        MCP_JSON_PATH,
-        expect.any(String),
-        'utf-8'
-      )
+      expect(writeFile).toHaveBeenCalledWith(MCP_JSON_PATH, expect.any(String), 'utf-8')
 
       // Verify the written content
-      const writtenContent = JSON.parse(
-        vi.mocked(writeFile).mock.calls[0][1] as string
-      )
+      const writtenContent = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string)
       expect(writtenContent.mcpServers['disabled-server'].disabled).toBe(false)
     })
 
@@ -299,25 +290,29 @@ describe('mcp.controller', () => {
 
       expect(result).toBe(true)
 
-      const writtenContent = JSON.parse(
-        vi.mocked(writeFile).mock.calls[0][1] as string
-      )
+      const writtenContent = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string)
       expect(writtenContent.mcpServers['test-server'].disabled).toBe(true)
     })
 
-    it('should return false for non-existent server', async () => {
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    it('should throw NOT_FOUND for non-existent server', async () => {
       vi.mocked(existsSync).mockReturnValue(true)
       vi.mocked(readFile).mockResolvedValue(JSON.stringify(sampleMcpConfig))
 
-      const result = await caller.toggle({
-        name: 'nonexistent-server',
-        enabled: true,
-      })
+      await expect(
+        caller.toggle({
+          name: 'nonexistent-server',
+          enabled: true,
+        })
+      ).rejects.toThrow(TRPCError)
 
-      expect(result).toBe(false)
+      await expect(
+        caller.toggle({
+          name: 'nonexistent-server',
+          enabled: true,
+        })
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+
       expect(writeFile).not.toHaveBeenCalled()
-      consoleSpy.mockRestore()
     })
 
     it('should use settings.json when mcp.json does not exist', async () => {
@@ -331,22 +326,23 @@ describe('mcp.controller', () => {
       })
 
       expect(result).toBe(true)
-      expect(writeFile).toHaveBeenCalledWith(
-        SETTINGS_JSON_PATH,
-        expect.any(String),
-        'utf-8'
-      )
+      expect(writeFile).toHaveBeenCalledWith(SETTINGS_JSON_PATH, expect.any(String), 'utf-8')
     })
 
-    it('should handle write errors', async () => {
+    it('should throw on write errors', async () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       vi.mocked(existsSync).mockReturnValue(true)
       vi.mocked(readFile).mockResolvedValue(JSON.stringify(sampleMcpConfig))
       vi.mocked(writeFile).mockRejectedValue(new Error('Write failed'))
 
-      const result = await caller.toggle({ name: 'test-server', enabled: false })
+      await expect(caller.toggle({ name: 'test-server', enabled: false })).rejects.toThrow(
+        TRPCError
+      )
 
-      expect(result).toBe(false)
+      await expect(caller.toggle({ name: 'test-server', enabled: false })).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR',
+      })
+
       consoleSpy.mockRestore()
     })
 
@@ -356,9 +352,7 @@ describe('mcp.controller', () => {
 
     it('should reject server name exceeding 100 characters', async () => {
       const longName = 'a'.repeat(101)
-      await expect(
-        caller.toggle({ name: longName, enabled: true })
-      ).rejects.toThrow()
+      await expect(caller.toggle({ name: longName, enabled: true })).rejects.toThrow()
     })
 
     it('should preserve other server configs when toggling', async () => {
@@ -368,22 +362,22 @@ describe('mcp.controller', () => {
 
       await caller.toggle({ name: 'test-server', enabled: false })
 
-      const writtenContent = JSON.parse(
-        vi.mocked(writeFile).mock.calls[0][1] as string
-      )
+      const writtenContent = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string)
       // Other servers should be preserved
       expect(writtenContent.mcpServers['disabled-server']).toBeDefined()
       expect(writtenContent.mcpServers['minimal-server']).toBeDefined()
     })
 
-    it('should create mcpServers object if missing', async () => {
+    it('should throw NOT_FOUND when mcpServers object is missing', async () => {
       vi.mocked(existsSync).mockReturnValue(true)
       vi.mocked(readFile).mockResolvedValue(JSON.stringify({}))
 
-      const result = await caller.toggle({ name: 'some-server', enabled: true })
+      // Should throw NOT_FOUND because server doesn't exist
+      await expect(caller.toggle({ name: 'some-server', enabled: true })).rejects.toThrow(TRPCError)
 
-      // Should return false because server doesn't exist
-      expect(result).toBe(false)
+      await expect(caller.toggle({ name: 'some-server', enabled: true })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      })
     })
   })
 
@@ -451,29 +445,36 @@ describe('mcp.controller', () => {
       expect(writeFile).toHaveBeenCalledWith(SETTINGS_JSON_PATH, content, 'utf-8')
     })
 
-    it('should reject invalid JSON content', async () => {
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    it('should throw BAD_REQUEST for invalid JSON content', async () => {
+      await expect(caller.saveConfig({ content: 'invalid json {{{' })).rejects.toThrow(TRPCError)
 
-      const result = await caller.saveConfig({ content: 'invalid json {{{' })
+      await expect(caller.saveConfig({ content: 'invalid json {{{' })).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+      })
 
-      expect(result).toBe(false)
       expect(writeFile).not.toHaveBeenCalled()
-      consoleSpy.mockRestore()
     })
 
     it('should reject empty content', async () => {
       await expect(caller.saveConfig({ content: '' })).rejects.toThrow()
     })
 
-    it('should handle write errors', async () => {
+    it('should throw on write errors', async () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       vi.mocked(writeFile).mockRejectedValue(new Error('Write failed'))
 
-      const result = await caller.saveConfig({
-        content: JSON.stringify({ valid: true }),
-      })
+      await expect(
+        caller.saveConfig({
+          content: JSON.stringify({ valid: true }),
+        })
+      ).rejects.toThrow(TRPCError)
 
-      expect(result).toBe(false)
+      await expect(
+        caller.saveConfig({
+          content: JSON.stringify({ valid: true }),
+        })
+      ).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' })
+
       consoleSpy.mockRestore()
     })
 
@@ -539,14 +540,10 @@ describe('mcp.controller', () => {
       vi.mocked(existsSync).mockReturnValue(false)
 
       // These should be acceptable server names per schema
-      await expect(
-        caller.getServer({ name: 'valid-name_123.test' })
-      ).resolves.toBeNull()
+      await expect(caller.getServer({ name: 'valid-name_123.test' })).resolves.toBeNull()
 
       // Extremely long name should be rejected
-      await expect(
-        caller.getServer({ name: 'a'.repeat(101) })
-      ).rejects.toThrow()
+      await expect(caller.getServer({ name: 'a'.repeat(101) })).rejects.toThrow()
     })
   })
 
@@ -685,11 +682,7 @@ describe('mcp.controller', () => {
       vi.mocked(existsSync).mockImplementation((path) => path === MCP_JSON_PATH)
       vi.mocked(readFile).mockResolvedValue(JSON.stringify(sampleMcpConfig))
 
-      const results = await Promise.all([
-        caller.list(),
-        caller.list(),
-        caller.list(),
-      ])
+      const results = await Promise.all([caller.list(), caller.list(), caller.list()])
 
       expect(results[0]).toEqual(results[1])
       expect(results[1]).toEqual(results[2])

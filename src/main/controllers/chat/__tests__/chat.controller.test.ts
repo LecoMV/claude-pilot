@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { TRPCError } from '@trpc/server'
 
 // Create mock event emitter for process simulation
 const createMockProcess = (autoClose: boolean = false, exitCode: number = 0) => {
@@ -336,11 +337,12 @@ describe('chat.controller', () => {
   // CANCEL PROCEDURE
   // ===========================================================================
   describe('cancel', () => {
-    it('should return false for non-existent chat', async () => {
-      const result = await caller.cancel({ messageId: 'nonexistent-id-unique' })
+    it('should throw NOT_FOUND for non-existent chat', async () => {
+      await expect(caller.cancel({ messageId: 'nonexistent-id-unique' })).rejects.toThrow(TRPCError)
 
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('Chat not found')
+      await expect(caller.cancel({ messageId: 'nonexistent-id-unique' })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      })
     })
 
     it('should kill active chat process', async () => {

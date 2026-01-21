@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { TRPCError } from '@trpc/server'
 import { profilesRouter } from '../profiles.controller'
 
 // Mock fs/promises
@@ -813,10 +814,10 @@ describe('profiles.controller', () => {
     it('should return error for non-existent profile', async () => {
       vi.mocked(access).mockRejectedValue(new Error('ENOENT'))
 
-      const result = await caller.launch({ id: 'nonexistent' })
-
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('Profile not found')
+      await expect(caller.launch({ id: 'nonexistent' })).rejects.toThrow(TRPCError)
+      await expect(caller.launch({ id: 'nonexistent' })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      })
     })
 
     it('should launch profile with custom launcher script', async () => {
@@ -872,10 +873,10 @@ describe('profiles.controller', () => {
         throw new Error('Spawn failed')
       })
 
-      const result = await caller.launch({ id: 'test' })
-
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('Spawn failed')
+      await expect(caller.launch({ id: 'test' })).rejects.toThrow(TRPCError)
+      await expect(caller.launch({ id: 'test' })).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR',
+      })
     })
   })
 

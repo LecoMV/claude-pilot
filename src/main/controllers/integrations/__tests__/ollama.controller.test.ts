@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { TRPCError } from '@trpc/server'
 import { ollamaRouter } from '../ollama.controller'
 
 // Mock fetch globally
@@ -266,12 +267,13 @@ describe('ollama.controller', () => {
       })
     })
 
-    it('should return false when pull fails', async () => {
-      vi.mocked(spawnAsync).mockRejectedValueOnce(new Error('Pull failed'))
+    it('should throw when pull fails', async () => {
+      vi.mocked(spawnAsync).mockRejectedValue(new Error('Pull failed'))
 
-      const result = await caller.pull({ model: 'nonexistent:model' })
-
-      expect(result).toBe(false)
+      await expect(caller.pull({ model: 'nonexistent:model' })).rejects.toThrow(TRPCError)
+      await expect(caller.pull({ model: 'nonexistent:model' })).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR',
+      })
     })
 
     it('should reject empty model name', async () => {
@@ -337,12 +339,13 @@ describe('ollama.controller', () => {
       })
     })
 
-    it('should return false when deletion fails', async () => {
-      vi.mocked(spawnAsync).mockRejectedValueOnce(new Error('Model not found'))
+    it('should throw when deletion fails', async () => {
+      vi.mocked(spawnAsync).mockRejectedValue(new Error('Model not found'))
 
-      const result = await caller.delete({ model: 'nonexistent:model' })
-
-      expect(result).toBe(false)
+      await expect(caller.delete({ model: 'nonexistent:model' })).rejects.toThrow(TRPCError)
+      await expect(caller.delete({ model: 'nonexistent:model' })).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR',
+      })
     })
 
     it('should reject empty model name', async () => {
@@ -377,22 +380,24 @@ describe('ollama.controller', () => {
       )
     })
 
-    it('should return false when run fails', async () => {
+    it('should throw when run fails', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
       })
 
-      const result = await caller.run({ model: 'nonexistent:model' })
-
-      expect(result).toBe(false)
+      await expect(caller.run({ model: 'nonexistent:model' })).rejects.toThrow(TRPCError)
+      await expect(caller.run({ model: 'nonexistent:model' })).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR',
+      })
     })
 
-    it('should return false on fetch error', async () => {
+    it('should throw on fetch error', async () => {
       mockFetch.mockRejectedValueOnce(new Error('Connection refused'))
 
-      const result = await caller.run({ model: 'llama2:latest' })
-
-      expect(result).toBe(false)
+      await expect(caller.run({ model: 'llama2:latest' })).rejects.toThrow(TRPCError)
+      await expect(caller.run({ model: 'llama2:latest' })).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR',
+      })
     })
 
     it('should reject empty model name', async () => {
@@ -427,22 +432,24 @@ describe('ollama.controller', () => {
       )
     })
 
-    it('should return false when stop fails', async () => {
+    it('should throw when stop fails', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
       })
 
-      const result = await caller.stop({ model: 'llama2:latest' })
-
-      expect(result).toBe(false)
+      await expect(caller.stop({ model: 'llama2:latest' })).rejects.toThrow(TRPCError)
+      await expect(caller.stop({ model: 'llama2:latest' })).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR',
+      })
     })
 
-    it('should return false on fetch error', async () => {
+    it('should throw on fetch error', async () => {
       mockFetch.mockRejectedValueOnce(new Error('Connection refused'))
 
-      const result = await caller.stop({ model: 'llama2:latest' })
-
-      expect(result).toBe(false)
+      await expect(caller.stop({ model: 'llama2:latest' })).rejects.toThrow(TRPCError)
+      await expect(caller.stop({ model: 'llama2:latest' })).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR',
+      })
     })
 
     it('should reject empty model name', async () => {
@@ -528,7 +535,10 @@ describe('ollama.controller', () => {
     it('should handle concurrent list calls', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ models: [{ name: 'llama2', size: 1000, digest: 'abc', modified_at: '2024-01-01' }] }),
+        json: () =>
+          Promise.resolve({
+            models: [{ name: 'llama2', size: 1000, digest: 'abc', modified_at: '2024-01-01' }],
+          }),
       })
 
       const results = await Promise.all([caller.list(), caller.list(), caller.list()])
