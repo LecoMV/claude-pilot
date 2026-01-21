@@ -16,9 +16,9 @@
 
 import { z } from 'zod'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
-import { existsSync, statSync, watch, FSWatcher } from 'fs'
-import { readFile } from 'fs/promises'
-import { join } from 'path'
+import { existsSync, statSync, watch, FSWatcher, unlinkSync, readdirSync, rmdirSync } from 'fs'
+import { readFile, stat } from 'fs/promises'
+import { join, dirname } from 'path'
 import { homedir } from 'os'
 import { glob } from 'glob'
 import { BrowserWindow } from 'electron'
@@ -806,7 +806,327 @@ export const sessionRouter = router({
 
       return ghosts
     }),
+
+  /**
+   * Analyze session storage usage and identify bloat
+   * Provides detailed metrics about session files and recommendations
+   */
+  analyzeStorage: publicProcedure.query(async (): Promise<SessionStorageAnalysis> => {
+    const projectsDir = join(CLAUDE_DIR, 'projects')
+
+    if (!existsSync(projectsDir)) {
+      return {
+        totalSizeBytes: 0,
+        totalSizeMB: 0,
+        sessionCount: 0,
+        projectCount: 0,
+        largestSessions: [],
+        byProject: [],
+        byAge: {
+          last24h: { count: 0, sizeBytes: 0 },
+          last7d: { count: 0, sizeBytes: 0 },
+          last30d: { count: 0, sizeBytes: 0 },
+          older: { count: 0, sizeBytes: 0 },
+        },
+        recommendations: [],
+        potentialSavingsBytes: 0,
+        potentialSavingsMB: 0,
+      }
+    }
+
+    const files = await glob('**/*.jsonl', {
+      cwd: projectsDir,
+      absolute: true,
+    })
+
+    const now = Date.now()
+    const DAY_MS = 24 * 60 * 60 * 1000
+
+    let totalSize = 0
+    const projectSizes = new Map<string, { size: number; count: number; path: string }>()
+    const sessionDetails: SessionSizeInfo[] = []
+
+    const byAge = {
+      last24h: { count: 0, sizeBytes: 0 },
+      last7d: { count: 0, sizeBytes: 0 },
+      last30d: { count: 0, sizeBytes: 0 },
+      older: { count: 0, sizeBytes: 0 },
+    }
+
+    for (const filePath of files) {
+      try {
+        const fileStat = await stat(filePath)
+        const size = fileStat.size
+        totalSize += size
+
+        // Extract project folder
+        const relativePath = filePath.replace(projectsDir + '/', '')
+        const projectFolder = relativePath.split('/')[0]
+        const projectPath = decodeProjectPath(projectFolder)
+        const projectName = projectPath.split('/').pop() || projectFolder
+
+        // Track by project
+        const existing = projectSizes.get(projectFolder)
+        if (existing) {
+          existing.size += size
+          existing.count++
+        } else {
+          projectSizes.set(projectFolder, { size, count: 1, path: projectPath })
+        }
+
+        // Track by age
+        const age = now - fileStat.mtimeMs
+        if (age < DAY_MS) {
+          byAge.last24h.count++
+          byAge.last24h.sizeBytes += size
+        } else if (age < 7 * DAY_MS) {
+          byAge.last7d.count++
+          byAge.last7d.sizeBytes += size
+        } else if (age < 30 * DAY_MS) {
+          byAge.last30d.count++
+          byAge.last30d.sizeBytes += size
+        } else {
+          byAge.older.count++
+          byAge.older.sizeBytes += size
+        }
+
+        // Track individual session details
+        const fileName = filePath.split('/').pop() || ''
+        const sessionId = fileName.replace('.jsonl', '')
+        const isSubagent = filePath.includes('/subagents/')
+
+        sessionDetails.push({
+          sessionId,
+          projectName,
+          projectPath,
+          filePath,
+          sizeBytes: size,
+          sizeMB: Math.round((size / 1024 / 1024) * 100) / 100,
+          lastModified: fileStat.mtimeMs,
+          ageInDays: Math.floor(age / DAY_MS),
+          isSubagent,
+        })
+      } catch {
+        // Skip files that can't be stat'd
+      }
+    }
+
+    // Sort sessions by size (largest first)
+    sessionDetails.sort((a, b) => b.sizeBytes - a.sizeBytes)
+
+    // Build project summary
+    const byProject = Array.from(projectSizes.entries())
+      .map(([folder, data]) => ({
+        projectName: data.path.split('/').pop() || folder,
+        projectPath: data.path,
+        sessionCount: data.count,
+        totalSizeBytes: data.size,
+        totalSizeMB: Math.round((data.size / 1024 / 1024) * 100) / 100,
+      }))
+      .sort((a, b) => b.totalSizeBytes - a.totalSizeBytes)
+
+    // Generate recommendations
+    const recommendations: string[] = []
+    let potentialSavings = 0
+
+    // Large files (>10MB)
+    const largeFiles = sessionDetails.filter((s) => s.sizeBytes > 10 * 1024 * 1024)
+    if (largeFiles.length > 0) {
+      const largeTotal = largeFiles.reduce((sum, s) => sum + s.sizeBytes, 0)
+      recommendations.push(
+        `${largeFiles.length} session(s) over 10MB (${formatBytes(largeTotal)} total)`
+      )
+      potentialSavings += largeTotal * 0.5 // Assume 50% could be saved
+    }
+
+    // Old sessions (>30 days)
+    if (byAge.older.count > 0) {
+      recommendations.push(
+        `${byAge.older.count} session(s) older than 30 days (${formatBytes(byAge.older.sizeBytes)})`
+      )
+      potentialSavings += byAge.older.sizeBytes
+    }
+
+    // Subagent sessions
+    const subagentSessions = sessionDetails.filter((s) => s.isSubagent)
+    if (subagentSessions.length > 0) {
+      const subagentTotal = subagentSessions.reduce((sum, s) => sum + s.sizeBytes, 0)
+      recommendations.push(
+        `${subagentSessions.length} subagent session(s) could be cleaned up (${formatBytes(subagentTotal)})`
+      )
+      potentialSavings += subagentTotal
+    }
+
+    // Total storage warning
+    if (totalSize > 500 * 1024 * 1024) {
+      recommendations.push(`Total session storage exceeds 500MB - consider running cleanup`)
+    }
+
+    return {
+      totalSizeBytes: totalSize,
+      totalSizeMB: Math.round((totalSize / 1024 / 1024) * 100) / 100,
+      sessionCount: files.length,
+      projectCount: projectSizes.size,
+      largestSessions: sessionDetails.slice(0, 10),
+      byProject: byProject.slice(0, 20),
+      byAge,
+      recommendations,
+      potentialSavingsBytes: potentialSavings,
+      potentialSavingsMB: Math.round((potentialSavings / 1024 / 1024) * 100) / 100,
+    }
+  }),
+
+  /**
+   * Delete a session file (cleanup)
+   * Only allows deleting sessions without active processes
+   */
+  deleteSession: auditedProcedure
+    .input(
+      z.object({
+        sessionId: z.string().min(1),
+        force: z.boolean().optional().default(false),
+      })
+    )
+    .mutation(async ({ input }): Promise<{ success: boolean; message: string }> => {
+      const projectsDir = join(CLAUDE_DIR, 'projects')
+
+      // Find the session file
+      const files = await glob(`**/${input.sessionId}.jsonl`, {
+        cwd: projectsDir,
+        absolute: true,
+      })
+
+      if (files.length === 0) {
+        return { success: false, message: 'Session not found' }
+      }
+
+      const filePath = files[0]
+
+      // Safety check: don't delete active sessions unless forced
+      if (!input.force) {
+        const activeSessions = await getActiveSessions()
+        const isActive = activeSessions.some((s) => s.id === input.sessionId)
+        if (isActive) {
+          return {
+            success: false,
+            message: 'Cannot delete active session (use force=true to override)',
+          }
+        }
+      }
+
+      try {
+        unlinkSync(filePath)
+        sessionCache.invalidate(filePath)
+
+        // Also try to clean up empty parent directories
+        const parentDir = dirname(filePath)
+        try {
+          const remaining = readdirSync(parentDir)
+          if (remaining.length === 0) {
+            rmdirSync(parentDir)
+          }
+        } catch {
+          // Ignore directory cleanup errors
+        }
+
+        return { success: true, message: `Deleted session ${input.sessionId}` }
+      } catch (error) {
+        return { success: false, message: `Failed to delete: ${(error as Error).message}` }
+      }
+    }),
+
+  /**
+   * Bulk cleanup sessions based on criteria
+   */
+  cleanupSessions: auditedProcedure
+    .input(
+      z.object({
+        olderThanDays: z.number().int().positive().optional(),
+        subagentsOnly: z.boolean().optional().default(false),
+        largerThanMB: z.number().positive().optional(),
+        dryRun: z.boolean().optional().default(true),
+      })
+    )
+    .mutation(async ({ input }): Promise<CleanupResult> => {
+      const projectsDir = join(CLAUDE_DIR, 'projects')
+
+      if (!existsSync(projectsDir)) {
+        return { deletedCount: 0, freedBytes: 0, freedMB: 0, errors: [], dryRun: input.dryRun }
+      }
+
+      const files = await glob('**/*.jsonl', {
+        cwd: projectsDir,
+        absolute: true,
+      })
+
+      const now = Date.now()
+      const DAY_MS = 24 * 60 * 60 * 1000
+      const activeSessions = await getActiveSessions()
+      const activeIds = new Set(activeSessions.map((s) => s.id))
+
+      let deletedCount = 0
+      let freedBytes = 0
+      const errors: string[] = []
+
+      for (const filePath of files) {
+        try {
+          const fileStat = await stat(filePath)
+          const fileName = filePath.split('/').pop() || ''
+          const sessionId = fileName.replace('.jsonl', '')
+          const isSubagent = filePath.includes('/subagents/')
+          const age = now - fileStat.mtimeMs
+          const ageInDays = age / DAY_MS
+          const sizeMB = fileStat.size / 1024 / 1024
+
+          // Skip active sessions
+          if (activeIds.has(sessionId)) continue
+
+          let shouldDelete = false
+
+          // Check criteria
+          if (input.olderThanDays && ageInDays >= input.olderThanDays) {
+            shouldDelete = true
+          }
+          if (input.subagentsOnly && isSubagent) {
+            shouldDelete = true
+          }
+          if (input.largerThanMB && sizeMB >= input.largerThanMB) {
+            shouldDelete = true
+          }
+
+          if (shouldDelete) {
+            if (!input.dryRun) {
+              unlinkSync(filePath)
+              sessionCache.invalidate(filePath)
+            }
+            deletedCount++
+            freedBytes += fileStat.size
+          }
+        } catch (error) {
+          errors.push(`${filePath}: ${(error as Error).message}`)
+        }
+      }
+
+      return {
+        deletedCount,
+        freedBytes,
+        freedMB: Math.round((freedBytes / 1024 / 1024) * 100) / 100,
+        errors,
+        dryRun: input.dryRun,
+      }
+    }),
 })
+
+// ============================================================================
+// Helper Functions (Non-exported)
+// ============================================================================
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
 
 // ============================================================================
 // Types
@@ -818,6 +1138,52 @@ interface GhostSessionInfo {
   daysSinceActivity: number
   sizeBytes: number
   recommendation: 'delete' | 'review'
+}
+
+interface SessionSizeInfo {
+  sessionId: string
+  projectName: string
+  projectPath: string
+  filePath: string
+  sizeBytes: number
+  sizeMB: number
+  lastModified: number
+  ageInDays: number
+  isSubagent: boolean
+}
+
+interface ProjectStorageInfo {
+  projectName: string
+  projectPath: string
+  sessionCount: number
+  totalSizeBytes: number
+  totalSizeMB: number
+}
+
+interface SessionStorageAnalysis {
+  totalSizeBytes: number
+  totalSizeMB: number
+  sessionCount: number
+  projectCount: number
+  largestSessions: SessionSizeInfo[]
+  byProject: ProjectStorageInfo[]
+  byAge: {
+    last24h: { count: number; sizeBytes: number }
+    last7d: { count: number; sizeBytes: number }
+    last30d: { count: number; sizeBytes: number }
+    older: { count: number; sizeBytes: number }
+  }
+  recommendations: string[]
+  potentialSavingsBytes: number
+  potentialSavingsMB: number
+}
+
+interface CleanupResult {
+  deletedCount: number
+  freedBytes: number
+  freedMB: number
+  errors: string[]
+  dryRun: boolean
 }
 
 export type SessionRouter = typeof sessionRouter
