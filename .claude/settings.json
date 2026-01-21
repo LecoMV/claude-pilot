@@ -1,28 +1,36 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm:*)",
-      "Bash(npx:*)",
-      "Bash(node:*)",
-      "Bash(electron:*)",
-      "Bash(git:*)",
-      "Bash(bd:*)",
-      "Bash(ls:*)",
-      "Bash(mkdir:*)",
-      "Bash(cat:*)",
-      "Bash(tail:*)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(node *)",
+      "Bash(electron *)",
+      "Bash(git *)",
+      "Bash(bd *)",
+      "Bash(vitest *)",
+      "Bash(playwright *)",
+      "Bash(tsc *)",
+      "Bash(eslint *)",
       "Read(*)",
       "Write(src/**)",
       "Write(public/**)",
       "Write(scripts/**)",
-      "Write(.context/**)",
+      "Write(tests/**)",
+      "Write(e2e/**)",
       "Edit(src/**)",
+      "Edit(tests/**)",
+      "Edit(e2e/**)",
       "Edit(*.json)",
       "Edit(*.ts)",
       "Edit(*.tsx)",
       "Edit(*.css)",
-      "Edit(*.md)"
+      "Edit(*.md)",
+      "Glob(*)",
+      "Grep(*)"
     ],
-    "deny": []
+    "deny": ["Bash(rm -rf *)", "Bash(git push --force*)", "Write(.env*)", "Edit(.env*)"]
+  },
+  "context": {
+    "include": ["CLAUDE.md", "package.json", "tsconfig.json"]
   }
 }
