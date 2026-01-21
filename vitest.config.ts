@@ -4,30 +4,31 @@ import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [react()],
+  // Use Vite's cacheDir (vitest cache.dir is deprecated)
+  cacheDir: '.vitest-cache',
   test: {
     globals: true,
 
-    // POOL CONFIGURATION - threads is fastest for high-core machines
-    pool: 'threads',
+    // POOL CONFIGURATION - forks for better memory isolation (separate V8 heaps)
+    // Each worker is a separate process with its own heap, avoiding shared memory OOM
+    pool: 'forks',
     poolOptions: {
-      threads: {
-        // Use moderate parallelism to avoid system freeze
-        // 8 threads is a good balance for stability
-        maxThreads: 8,
-        minThreads: 2,
-        // Enable for better thread coordination
-        useAtomics: true,
-        // Memory limit per thread (with 62GB RAM, can be generous)
-        // 4GB per thread = 48GB max for workers, 14GB for system
-        memoryLimit: '4096MB',
+      forks: {
+        // Use moderate parallelism (6 workers) for stability
+        // With 38GB available, 6 workers × 2GB = 12GB for workers + headroom
+        maxForks: 6,
+        minForks: 1,
+        // Memory limit per worker (2GB is sufficient for most test suites)
+        memoryLimit: '2048MB',
+        // Isolate globals for cleaner test environment
+        isolate: true,
       },
     },
 
-    // Enable file parallelism but with controlled threads
-    // (fileParallelism: false was too slow - 113 files taking >10 min)
+    // Enable file parallelism with controlled workers
     fileParallelism: true,
 
-    // Keep isolation enabled for React component tests (shared state issues without it)
+    // Test isolation (each test file gets fresh environment)
     isolate: true,
 
     // Default environment for renderer tests
@@ -122,11 +123,6 @@ export default defineConfig({
 
     // Reporters
     reporters: ['default'],
-
-    // Cache for faster subsequent runs
-    cache: {
-      dir: '.vitest-cache',
-    },
   },
   resolve: {
     alias: {

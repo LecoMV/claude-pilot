@@ -33,6 +33,9 @@ import type {
 const HOME = homedir()
 const CLAUDE_DIR = join(HOME, '.claude')
 
+// Track already-warned large files to avoid log spam
+const skippedFilesWarned = new Set<string>()
+
 // ============================================================================
 // Session Cache
 // ============================================================================
@@ -239,9 +242,13 @@ async function parseSessionFile(filePath: string): Promise<ExternalSession | nul
     // Skip files larger than 50MB to prevent memory issues
     const MAX_FILE_SIZE = 50 * 1024 * 1024
     if (stat.size > MAX_FILE_SIZE) {
-      console.warn(
-        `Skipping large session file (${Math.round(stat.size / 1024 / 1024)}MB): ${filePath}`
-      )
+      // Only warn once per file, and not during tests
+      if (!process.env.VITEST && !skippedFilesWarned.has(filePath)) {
+        skippedFilesWarned.add(filePath)
+        console.warn(
+          `Skipping large session file (${Math.round(stat.size / 1024 / 1024)}MB): ${filePath}`
+        )
+      }
       return null
     }
 
