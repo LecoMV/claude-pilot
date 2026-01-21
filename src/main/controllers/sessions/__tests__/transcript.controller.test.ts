@@ -52,27 +52,24 @@ describe('transcript.controller', () => {
       ]
       vi.mocked(transcriptService.parseAll).mockResolvedValue(mockMessages as never)
 
-      const result = await caller.parse({ filePath: '/path/to/transcript.jsonl' })
+      const result = await caller.parse({ filePath: '/tmp/path/to/transcript.jsonl' })
 
       expect(result).toEqual(mockMessages)
-      expect(transcriptService.parseAll).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl',
-        {}
-      )
+      expect(transcriptService.parseAll).toHaveBeenCalledWith('/tmp/path/to/transcript.jsonl', {})
     })
 
     it('should pass type filters to service', async () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       await caller.parse({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         options: {
           types: ['user', 'assistant'],
         },
       })
 
       expect(transcriptService.parseAll).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl',
+        '/tmp/path/to/transcript.jsonl',
         expect.objectContaining({
           types: ['user', 'assistant'],
         })
@@ -83,7 +80,7 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       await caller.parse({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         options: {
           types: [
             'file-history-snapshot',
@@ -104,7 +101,7 @@ describe('transcript.controller', () => {
     it('should reject invalid message types', async () => {
       await expect(
         caller.parse({
-          filePath: '/path/to/transcript.jsonl',
+          filePath: '/tmp/path/to/transcript.jsonl',
           options: {
             types: ['invalid_type' as never],
           },
@@ -116,12 +113,12 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       await caller.parse({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         options: { limit: 50 },
       })
 
       expect(transcriptService.parseAll).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl',
+        '/tmp/path/to/transcript.jsonl',
         expect.objectContaining({ limit: 50 })
       )
     })
@@ -129,14 +126,14 @@ describe('transcript.controller', () => {
     it('should reject non-positive limit', async () => {
       await expect(
         caller.parse({
-          filePath: '/path/to/transcript.jsonl',
+          filePath: '/tmp/path/to/transcript.jsonl',
           options: { limit: 0 },
         })
       ).rejects.toThrow()
 
       await expect(
         caller.parse({
-          filePath: '/path/to/transcript.jsonl',
+          filePath: '/tmp/path/to/transcript.jsonl',
           options: { limit: -5 },
         })
       ).rejects.toThrow()
@@ -146,12 +143,12 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       await caller.parse({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         options: { offset: 10 },
       })
 
       expect(transcriptService.parseAll).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl',
+        '/tmp/path/to/transcript.jsonl',
         expect.objectContaining({ offset: 10 })
       )
     })
@@ -159,7 +156,7 @@ describe('transcript.controller', () => {
     it('should reject negative offset', async () => {
       await expect(
         caller.parse({
-          filePath: '/path/to/transcript.jsonl',
+          filePath: '/tmp/path/to/transcript.jsonl',
           options: { offset: -1 },
         })
       ).rejects.toThrow()
@@ -169,7 +166,7 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       const result = await caller.parse({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         options: { offset: 0 },
       })
 
@@ -183,7 +180,7 @@ describe('transcript.controller', () => {
       const beforeDate = new Date('2024-12-31')
 
       await caller.parse({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         options: {
           after: afterDate,
           before: beforeDate,
@@ -191,7 +188,7 @@ describe('transcript.controller', () => {
       })
 
       expect(transcriptService.parseAll).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl',
+        '/tmp/path/to/transcript.jsonl',
         expect.objectContaining({
           after: expect.any(Date),
           before: expect.any(Date),
@@ -203,7 +200,7 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       await caller.parse({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         options: {
           after: '2024-01-01' as unknown as Date,
           before: '2024-12-31' as unknown as Date,
@@ -219,12 +216,12 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       await caller.parse({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         options: { search: 'authentication' },
       })
 
       expect(transcriptService.parseAll).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl',
+        '/tmp/path/to/transcript.jsonl',
         expect.objectContaining({ search: 'authentication' })
       )
     })
@@ -232,7 +229,7 @@ describe('transcript.controller', () => {
     it('should return empty array on service error', async () => {
       vi.mocked(transcriptService.parseAll).mockRejectedValue(new Error('File not found'))
 
-      const result = await caller.parse({ filePath: '/nonexistent/transcript.jsonl' })
+      const result = await caller.parse({ filePath: '/tmp/nonexistent/transcript.jsonl' })
 
       expect(result).toEqual([])
     })
@@ -241,7 +238,7 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       await caller.parse({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         options: {
           types: ['user', 'assistant'],
           limit: 100,
@@ -250,15 +247,12 @@ describe('transcript.controller', () => {
         },
       })
 
-      expect(transcriptService.parseAll).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl',
-        {
-          types: ['user', 'assistant'],
-          limit: 100,
-          offset: 20,
-          search: 'test',
-        }
-      )
+      expect(transcriptService.parseAll).toHaveBeenCalledWith('/tmp/path/to/transcript.jsonl', {
+        types: ['user', 'assistant'],
+        limit: 100,
+        offset: 20,
+        search: 'test',
+      })
     })
   })
 
@@ -281,16 +275,16 @@ describe('transcript.controller', () => {
       }
       vi.mocked(transcriptService.getStats).mockResolvedValue(mockStats)
 
-      const result = await caller.stats({ filePath: '/path/to/transcript.jsonl' })
+      const result = await caller.stats({ filePath: '/tmp/path/to/transcript.jsonl' })
 
       expect(result).toEqual(mockStats)
-      expect(transcriptService.getStats).toHaveBeenCalledWith('/path/to/transcript.jsonl')
+      expect(transcriptService.getStats).toHaveBeenCalledWith('/tmp/path/to/transcript.jsonl')
     })
 
     it('should return zeroed stats on service error', async () => {
       vi.mocked(transcriptService.getStats).mockRejectedValue(new Error('File not found'))
 
-      const result = await caller.stats({ filePath: '/nonexistent/transcript.jsonl' })
+      const result = await caller.stats({ filePath: '/tmp/nonexistent/transcript.jsonl' })
 
       expect(result).toEqual({
         totalMessages: 0,
@@ -313,11 +307,11 @@ describe('transcript.controller', () => {
 
     it('should reject non-positive count', async () => {
       await expect(
-        caller.last({ filePath: '/path/to/transcript.jsonl', count: 0 })
+        caller.last({ filePath: '/tmp/path/to/transcript.jsonl', count: 0 })
       ).rejects.toThrow()
 
       await expect(
-        caller.last({ filePath: '/path/to/transcript.jsonl', count: -5 })
+        caller.last({ filePath: '/tmp/path/to/transcript.jsonl', count: -5 })
       ).rejects.toThrow()
     })
 
@@ -329,13 +323,13 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.getLastMessages).mockResolvedValue(mockMessages as never)
 
       const result = await caller.last({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         count: 10,
       })
 
       expect(result).toEqual(mockMessages)
       expect(transcriptService.getLastMessages).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl',
+        '/tmp/path/to/transcript.jsonl',
         10
       )
     })
@@ -344,22 +338,23 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.getLastMessages).mockResolvedValue([])
 
       // Schema has default(10) for count, so omitting it should use 10
-      const input = { filePath: '/path/to/transcript.jsonl' } as { filePath: string; count: number }
+      const input = { filePath: '/tmp/path/to/transcript.jsonl' } as {
+        filePath: string
+        count: number
+      }
       await caller.last(input)
 
       expect(transcriptService.getLastMessages).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl',
+        '/tmp/path/to/transcript.jsonl',
         10
       )
     })
 
     it('should return empty array on service error', async () => {
-      vi.mocked(transcriptService.getLastMessages).mockRejectedValue(
-        new Error('File not found')
-      )
+      vi.mocked(transcriptService.getLastMessages).mockRejectedValue(new Error('File not found'))
 
       const result = await caller.last({
-        filePath: '/nonexistent/transcript.jsonl',
+        filePath: '/tmp/nonexistent/transcript.jsonl',
         count: 10,
       })
 
@@ -370,12 +365,12 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.getLastMessages).mockResolvedValue([])
 
       await caller.last({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         count: 1000,
       })
 
       expect(transcriptService.getLastMessages).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl',
+        '/tmp/path/to/transcript.jsonl',
         1000
       )
     })
@@ -391,39 +386,39 @@ describe('transcript.controller', () => {
 
     it('should enable watching when enable is true', async () => {
       const result = await caller.watch({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         enable: true,
       })
 
       expect(result).toBe(true)
       expect(transcriptService.watchTranscript).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl'
+        '/tmp/path/to/transcript.jsonl'
       )
       expect(transcriptService.unwatchTranscript).not.toHaveBeenCalled()
     })
 
     it('should disable watching when enable is false', async () => {
       const result = await caller.watch({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         enable: false,
       })
 
       expect(result).toBe(true)
       expect(transcriptService.unwatchTranscript).toHaveBeenCalledWith(
-        '/path/to/transcript.jsonl'
+        '/tmp/path/to/transcript.jsonl'
       )
       expect(transcriptService.watchTranscript).not.toHaveBeenCalled()
     })
 
     it('should always return true', async () => {
       const enableResult = await caller.watch({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         enable: true,
       })
       expect(enableResult).toBe(true)
 
       const disableResult = await caller.watch({
-        filePath: '/path/to/transcript.jsonl',
+        filePath: '/tmp/path/to/transcript.jsonl',
         enable: false,
       })
       expect(disableResult).toBe(true)
@@ -438,8 +433,8 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       // Absolute paths should be allowed
-      await caller.parse({ filePath: '/home/user/.claude/sessions/transcript.jsonl' })
-      await caller.parse({ filePath: '/var/log/transcript.jsonl' })
+      await caller.parse({ filePath: '/tmp/.claude/sessions/transcript.jsonl' })
+      await caller.parse({ filePath: '/var/tmp/log/transcript.jsonl' })
 
       expect(transcriptService.parseAll).toHaveBeenCalledTimes(2)
     })
@@ -455,17 +450,14 @@ describe('transcript.controller', () => {
       expect(transcriptService.parseAll).toHaveBeenCalledTimes(2)
     })
 
-    it('should pass path traversal attempts to service (service handles security)', async () => {
-      vi.mocked(transcriptService.parseAll).mockRejectedValue(new Error('File not found'))
-
-      // The controller passes paths to the service which validates them
-      // Path traversal should result in "file not found" or similar error
-      const result = await caller.parse({
-        filePath: '../../../etc/passwd',
-      })
-
-      // Error handling returns empty array
-      expect(result).toEqual([])
+    it('should reject path traversal attempts at controller level', async () => {
+      // Path traversal is now blocked at the controller level via SecureFilePathSchema
+      // The path is rejected before reaching the service
+      await expect(
+        caller.parse({
+          filePath: '../../../etc/passwd',
+        })
+      ).rejects.toThrow()
     })
 
     it('should not log sensitive transcript content', async () => {
@@ -480,14 +472,12 @@ describe('transcript.controller', () => {
       ]
       vi.mocked(transcriptService.parseAll).mockResolvedValue(sensitiveMessages as never)
 
-      await caller.parse({ filePath: '/path/to/transcript.jsonl' })
+      await caller.parse({ filePath: '/tmp/path/to/transcript.jsonl' })
 
       // Verify that sensitive content was not logged
       const allCalls = [...consoleSpy.mock.calls, ...consoleInfoSpy.mock.calls]
       const hasSensitive = allCalls.some((call) =>
-        call.some(
-          (arg) => typeof arg === 'string' && arg.includes('secret123')
-        )
+        call.some((arg) => typeof arg === 'string' && arg.includes('secret123'))
       )
 
       expect(hasSensitive).toBe(false)
@@ -505,9 +495,9 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       const results = await Promise.all([
-        caller.parse({ filePath: '/path/1.jsonl' }),
-        caller.parse({ filePath: '/path/2.jsonl' }),
-        caller.parse({ filePath: '/path/3.jsonl' }),
+        caller.parse({ filePath: '/tmp/path/1.jsonl' }),
+        caller.parse({ filePath: '/tmp/path/2.jsonl' }),
+        caller.parse({ filePath: '/tmp/path/3.jsonl' }),
       ])
 
       expect(results).toHaveLength(3)
@@ -517,7 +507,7 @@ describe('transcript.controller', () => {
     it('should handle very long file paths', async () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
-      const longPath = '/very/long/path/' + 'a'.repeat(200) + '/transcript.jsonl'
+      const longPath = '/tmp/very/long/path/' + 'a'.repeat(200) + '/transcript.jsonl'
       await caller.parse({ filePath: longPath })
 
       expect(transcriptService.parseAll).toHaveBeenCalledWith(longPath, {})
@@ -534,8 +524,8 @@ describe('transcript.controller', () => {
         parseTime: 1,
       })
 
-      const parseResult = await caller.parse({ filePath: '/empty/transcript.jsonl' })
-      const statsResult = await caller.stats({ filePath: '/empty/transcript.jsonl' })
+      const parseResult = await caller.parse({ filePath: '/tmp/empty/transcript.jsonl' })
+      const statsResult = await caller.stats({ filePath: '/tmp/empty/transcript.jsonl' })
 
       expect(parseResult).toEqual([])
       expect(statsResult.totalMessages).toBe(0)
@@ -545,18 +535,18 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue([])
 
       // Paths with spaces and special chars should be accepted
-      await caller.parse({ filePath: '/path with spaces/transcript.jsonl' })
-      await caller.parse({ filePath: '/path-with-dashes/transcript.jsonl' })
-      await caller.parse({ filePath: '/path_with_underscores/transcript.jsonl' })
+      await caller.parse({ filePath: '/tmp/path with spaces/transcript.jsonl' })
+      await caller.parse({ filePath: '/tmp/path-with-dashes/transcript.jsonl' })
+      await caller.parse({ filePath: '/tmp/path_with_underscores/transcript.jsonl' })
 
       expect(transcriptService.parseAll).toHaveBeenCalledTimes(3)
     })
 
     it('should handle watch toggle rapidly', async () => {
-      await caller.watch({ filePath: '/path/transcript.jsonl', enable: true })
-      await caller.watch({ filePath: '/path/transcript.jsonl', enable: false })
-      await caller.watch({ filePath: '/path/transcript.jsonl', enable: true })
-      await caller.watch({ filePath: '/path/transcript.jsonl', enable: false })
+      await caller.watch({ filePath: '/tmp/path/transcript.jsonl', enable: true })
+      await caller.watch({ filePath: '/tmp/path/transcript.jsonl', enable: false })
+      await caller.watch({ filePath: '/tmp/path/transcript.jsonl', enable: true })
+      await caller.watch({ filePath: '/tmp/path/transcript.jsonl', enable: false })
 
       expect(transcriptService.watchTranscript).toHaveBeenCalledTimes(2)
       expect(transcriptService.unwatchTranscript).toHaveBeenCalledTimes(2)
@@ -582,7 +572,7 @@ describe('transcript.controller', () => {
       ]
       vi.mocked(transcriptService.parseAll).mockResolvedValue(complexMessages as never)
 
-      const result = await caller.parse({ filePath: '/path/transcript.jsonl' })
+      const result = await caller.parse({ filePath: '/tmp/path/transcript.jsonl' })
 
       expect(result).toEqual(complexMessages)
     })
@@ -604,7 +594,7 @@ describe('transcript.controller', () => {
       })
 
       // Check stats
-      const stats = await caller.stats({ filePath: '/session/transcript.jsonl' })
+      const stats = await caller.stats({ filePath: '/tmp/session/transcript.jsonl' })
       expect(stats.totalMessages).toBe(100)
 
       // Then get last few messages
@@ -614,14 +604,14 @@ describe('transcript.controller', () => {
       ] as never)
 
       const lastMessages = await caller.last({
-        filePath: '/session/transcript.jsonl',
+        filePath: '/tmp/session/transcript.jsonl',
         count: 5,
       })
       expect(lastMessages).toHaveLength(2)
 
       // Start watching for new messages
       await caller.watch({
-        filePath: '/session/transcript.jsonl',
+        filePath: '/tmp/session/transcript.jsonl',
         enable: true,
       })
 
@@ -629,7 +619,7 @@ describe('transcript.controller', () => {
 
       // Stop watching
       await caller.watch({
-        filePath: '/session/transcript.jsonl',
+        filePath: '/tmp/session/transcript.jsonl',
         enable: false,
       })
 
@@ -644,7 +634,7 @@ describe('transcript.controller', () => {
       vi.mocked(transcriptService.parseAll).mockResolvedValue(userMessages as never)
 
       const result = await caller.parse({
-        filePath: '/session/transcript.jsonl',
+        filePath: '/tmp/session/transcript.jsonl',
         options: {
           types: ['user'],
           limit: 100,
@@ -652,10 +642,10 @@ describe('transcript.controller', () => {
       })
 
       expect(result).toEqual(userMessages)
-      expect(transcriptService.parseAll).toHaveBeenCalledWith(
-        '/session/transcript.jsonl',
-        { types: ['user'], limit: 100 }
-      )
+      expect(transcriptService.parseAll).toHaveBeenCalledWith('/tmp/session/transcript.jsonl', {
+        types: ['user'],
+        limit: 100,
+      })
     })
   })
 })

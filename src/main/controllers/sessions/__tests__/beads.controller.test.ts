@@ -12,23 +12,36 @@ import { beadsRouter } from '../beads.controller'
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { EventEmitter } from 'events'
+import { homedir } from 'os'
+import { join } from 'path'
+
+// Use home directory for test paths (allowed by path security)
+const TEST_PROJECT_PATH = join(homedir(), 'test-project')
 
 // Mock child_process
 vi.mock('child_process', () => ({
   spawn: vi.fn(),
 }))
 
-// Mock fs
+// Mock fs - include realpathSync for path validation
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
+  realpathSync: vi.fn((path: string) => path), // Return path as-is for mocking
 }))
 
 // Create a test caller using createCaller pattern
 const createTestCaller = () => beadsRouter.createCaller({})
 
 // Helper to create a mock process
-function createMockProcess(stdout = '', stderr = '', exitCode = 0): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter } {
-  const mockProcess = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter }
+function createMockProcess(
+  stdout = '',
+  stderr = '',
+  exitCode = 0
+): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter } {
+  const mockProcess = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter
+    stderr: EventEmitter
+  }
   mockProcess.stdout = new EventEmitter()
   mockProcess.stderr = new EventEmitter()
 
@@ -727,26 +740,35 @@ deploy-cd34 [P2] [feature] open - Ready task 2`
     it('should return true when .beads directory exists', async () => {
       vi.mocked(existsSync).mockReturnValue(true)
 
-      const result = await caller.hasBeads({ projectPath: '/home/user/project' })
+      const result = await caller.hasBeads({ projectPath: TEST_PROJECT_PATH })
 
       expect(result).toBe(true)
-      expect(existsSync).toHaveBeenCalledWith('/home/user/project/.beads')
+      expect(existsSync).toHaveBeenCalledWith(join(TEST_PROJECT_PATH, '.beads'))
     })
 
     it('should return false when .beads directory does not exist', async () => {
       vi.mocked(existsSync).mockReturnValue(false)
 
-      const result = await caller.hasBeads({ projectPath: '/home/user/project' })
+      const result = await caller.hasBeads({ projectPath: TEST_PROJECT_PATH })
 
       expect(result).toBe(false)
     })
 
-    it('should return false on filesystem error', async () => {
+    it('should return false on filesystem error in handler', async () => {
+      // Path validation calls existsSync multiple times before the handler runs
+      // We need validation to pass, then have the handler's existsSync throw
+      let callCount = 0
       vi.mocked(existsSync).mockImplementation(() => {
+        callCount++
+        // Let validation calls pass (return true for path checks)
+        // Then throw on the handler's .beads check (typically the 5th+ call)
+        if (callCount <= 4) {
+          return true
+        }
         throw new Error('Permission denied')
       })
 
-      const result = await caller.hasBeads({ projectPath: '/home/user/project' })
+      const result = await caller.hasBeads({ projectPath: TEST_PROJECT_PATH })
 
       expect(result).toBe(false)
     })
@@ -846,7 +868,10 @@ deploy-cd34 [P2] [feature] open - Ready task 2`
     })
 
     it('should handle bd process error event', async () => {
-      const mockProcess = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter }
+      const mockProcess = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter
+        stderr: EventEmitter
+      }
       mockProcess.stdout = new EventEmitter()
       mockProcess.stderr = new EventEmitter()
 

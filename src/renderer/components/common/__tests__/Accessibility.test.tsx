@@ -5,8 +5,8 @@
  * Uses axe-core for programmatic accessibility validation.
  */
 
-import { describe, it, expect } from 'vitest'
-import { render } from '@testing-library/react'
+import { describe, it, expect, afterEach } from 'vitest'
+import { render, cleanup } from '@testing-library/react'
 import { axe, toHaveNoViolations } from 'jest-axe'
 import { Button } from '../Button'
 import { Input } from '../Input'
@@ -19,6 +19,12 @@ import { Modal } from '../Modal'
 expect.extend(toHaveNoViolations)
 
 describe('Accessibility Tests', () => {
+  // Explicit cleanup after each test to prevent MutationObserver leaks
+  afterEach(async () => {
+    cleanup()
+    // Flush pending microtasks/timers to prevent MutationObserver race conditions
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
   describe('Button Component', () => {
     it('should have no accessibility violations with text', async () => {
       const { container } = render(<Button>Click me</Button>)

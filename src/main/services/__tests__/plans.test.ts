@@ -41,6 +41,15 @@ vi.mock('fs', () => ({
 
 vi.mock('child_process', () => ({
   spawn: vi.fn(() => mockChildProcess),
+  execFile: vi.fn((cmd, args, opts, cb) => {
+    // Mock execFile for command-security.ts
+    if (typeof opts === 'function') {
+      cb = opts
+      opts = undefined
+    }
+    if (cb) cb(null, '', '')
+    return mockChildProcess
+  }),
 }))
 
 vi.mock('electron', () => ({
@@ -685,10 +694,7 @@ describe('PlanService', () => {
       const plan = createTrackedPlan()
       expect(plan).toBeDefined()
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        '[Plans] Failed to save plan:',
-        expect.any(Error)
-      )
+      expect(consoleSpy).toHaveBeenCalledWith('[Plans] Failed to save plan:', expect.any(Error))
 
       consoleSpy.mockRestore()
     })

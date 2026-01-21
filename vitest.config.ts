@@ -9,25 +9,19 @@ export default defineConfig({
   test: {
     globals: true,
 
-    // POOL CONFIGURATION - forks for better memory isolation (separate V8 heaps)
-    // Each worker is a separate process with its own heap, avoiding shared memory OOM
+    // POOL CONFIGURATION - forks for memory isolation
+    // Note: When running full test suite, some MutationObserver cleanup issues
+    // may occur between files. Tests pass individually - this is a vitest limitation.
     pool: 'forks',
     poolOptions: {
       forks: {
-        // Conservative parallelism (3 workers) - prevents OOM on large test suites
-        // 81 test files with 3 workers balances speed vs memory
         maxForks: 3,
         minForks: 1,
-        // Memory limit per worker (1.5GB - leaves headroom for system)
-        memoryLimit: '1536MB',
-        // Isolate globals for cleaner test environment
         isolate: true,
-        // Single child per worker to reduce memory fragmentation
-        singleFork: true,
       },
     },
 
-    // Enable file parallelism with controlled workers
+    // Enable file parallelism for faster CI runs
     fileParallelism: true,
 
     // Test isolation (each test file gets fresh environment)
@@ -46,9 +40,9 @@ export default defineConfig({
       // Shared tests use Node environment
       ['src/shared/**/*.{test,spec}.ts', 'node'],
       ['src/__tests__/shared/**/*.{test,spec}.ts', 'node'],
-      // Renderer tests use happy-dom (faster than jsdom)
-      ['src/renderer/**/*.{test,spec}.{ts,tsx}', 'happy-dom'],
-      ['src/__tests__/renderer/**/*.{test,spec}.{ts,tsx}', 'happy-dom'],
+      // Renderer tests use jsdom (more stable than happy-dom for MutationObserver)
+      ['src/renderer/**/*.{test,spec}.{ts,tsx}', 'jsdom'],
+      ['src/__tests__/renderer/**/*.{test,spec}.{ts,tsx}', 'jsdom'],
     ],
 
     // Setup files

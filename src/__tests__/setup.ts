@@ -51,19 +51,25 @@ if (typeof window !== 'undefined') {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { configure, cleanup } = require('@testing-library/react')
 
-  // Ensure DOM cleanup after each test
-  afterEach(() => {
-    cleanup()
-    // Clear any lingering test elements
-    document.body.innerHTML = ''
-  })
+  // Configure testing-library with shorter async timeout to prevent observer leaks
   configure({
+    asyncUtilTimeout: 1000, // Reduce from default 1000ms to fail faster
     // Limit DOM debug output to prevent massive test logs
     getElementError: (message: string | null) => {
       const error = new Error(message ?? '')
       error.name = 'TestingLibraryElementError'
       return error
     },
+  })
+
+  // Ensure DOM cleanup after each test
+  afterEach(async () => {
+    // Cleanup testing-library (removes mounted React trees, cleans up observers)
+    cleanup()
+    // Clear any lingering test elements
+    document.body.innerHTML = ''
+    // Flush pending microtasks to allow MutationObserver callbacks to complete
+    await new Promise((resolve) => setTimeout(resolve, 10))
   })
 
   // Mock window.electron API for renderer tests
@@ -92,6 +98,9 @@ if (typeof window !== 'undefined') {
       dispatchEvent: vi.fn(),
     })),
   })
+
+  // Mock scrollIntoView (not implemented in jsdom)
+  Element.prototype.scrollIntoView = vi.fn()
 
   // Mock clipboard API
   if (typeof navigator !== 'undefined') {

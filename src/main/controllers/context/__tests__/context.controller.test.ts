@@ -442,9 +442,9 @@ describe('context.controller', () => {
     })
 
     it('should call predictive context service', async () => {
-      const result = await caller.patterns({ projectPath: '/home/user/project' })
+      const result = await caller.patterns({ projectPath: '/tmp/test-project' })
 
-      expect(predictiveContextService.getPatterns).toHaveBeenCalledWith('/home/user/project')
+      expect(predictiveContextService.getPatterns).toHaveBeenCalledWith('/tmp/test-project')
       expect(Array.isArray(result)).toBe(true)
     })
 
@@ -459,7 +459,7 @@ describe('context.controller', () => {
         },
       ])
 
-      const result = await caller.patterns({ projectPath: '/home/user/project' })
+      const result = await caller.patterns({ projectPath: '/tmp/test-project' })
 
       expect(result).toHaveLength(1)
       expect(result[0].path).toBe('src/index.ts')
@@ -570,18 +570,20 @@ describe('context.controller', () => {
   describe('predict', () => {
     it('should reject empty prompt', async () => {
       await expect(
-        caller.predict({ prompt: '', projectPath: '/home/user/project' })
+        caller.predict({ prompt: '', projectPath: '/tmp/test-project' })
       ).rejects.toThrow()
     })
 
     it('should reject empty project path', async () => {
-      await expect(caller.predict({ prompt: 'find config files', projectPath: '' })).rejects.toThrow()
+      await expect(
+        caller.predict({ prompt: 'find config files', projectPath: '' })
+      ).rejects.toThrow()
     })
 
     it('should return file predictions', async () => {
       const result = await caller.predict({
         prompt: 'find the main entry point',
-        projectPath: '/home/user/project',
+        projectPath: '/tmp/test-project',
       })
 
       expect(result).toHaveLength(1)
@@ -593,13 +595,10 @@ describe('context.controller', () => {
     it('should call predict service with correct params', async () => {
       await caller.predict({
         prompt: 'update config',
-        projectPath: '/projects/my-app',
+        projectPath: '/tmp/my-app',
       })
 
-      expect(predictiveContextService.predict).toHaveBeenCalledWith(
-        'update config',
-        '/projects/my-app'
-      )
+      expect(predictiveContextService.predict).toHaveBeenCalledWith('update config', '/tmp/my-app')
     })
   })
 
@@ -623,7 +622,7 @@ describe('context.controller', () => {
     })
 
     it('should handle very long project paths', async () => {
-      const longPath = '/home/user/' + 'a'.repeat(500) + '/project'
+      const longPath = '/tmp/' + 'a'.repeat(500) + '/project'
 
       const result = await caller.patterns({ projectPath: longPath })
 
@@ -632,7 +631,7 @@ describe('context.controller', () => {
     })
 
     it('should handle special characters in project path', async () => {
-      const specialPath = '/home/user/my project (1)/test'
+      const specialPath = '/tmp/my project (1)/test'
 
       const _result = await caller.patterns({ projectPath: specialPath })
 
@@ -644,10 +643,10 @@ describe('context.controller', () => {
 
       const result = await caller.predict({
         prompt: unicodePrompt,
-        projectPath: '/project',
+        projectPath: '/tmp/project',
       })
 
-      expect(predictiveContextService.predict).toHaveBeenCalledWith(unicodePrompt, '/project')
+      expect(predictiveContextService.predict).toHaveBeenCalledWith(unicodePrompt, '/tmp/project')
       expect(Array.isArray(result)).toBe(true)
     })
   })
