@@ -18,7 +18,7 @@ import { configRouter } from '../controllers/config.controller'
 import { credentialsRouter, auditRouter, watchdogRouter } from '../controllers/security'
 
 // Sprint 2: MCP controllers
-import { mcpRouter, proxyRouter } from '../controllers/mcp'
+import { mcpRouter, proxyRouter, samplingRouter, elicitationRouter } from '../controllers/mcp'
 
 // Sprint 3: Session controllers
 import { sessionRouter, transcriptRouter, beadsRouter } from '../controllers/sessions'
@@ -73,9 +73,11 @@ export const appRouter = router({
   audit: auditRouter,
   watchdog: watchdogRouter,
 
-  // Sprint 2: MCP (16 handlers)
+  // Sprint 2: MCP (16 handlers + sampling + elicitation)
   mcp: mcpRouter,
   proxy: proxyRouter,
+  sampling: samplingRouter,
+  elicitation: elicitationRouter,
 
   // Sprint 3: Sessions (18 handlers)
   session: sessionRouter,

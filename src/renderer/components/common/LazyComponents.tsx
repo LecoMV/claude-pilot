@@ -222,3 +222,143 @@ export function SessionsSkeleton() {
     </div>
   )
 }
+
+// ============================================================================
+// Lazy-loaded Page Components (Code Splitting)
+// ============================================================================
+
+/**
+ * Dashboard - Main overview page
+ */
+export const LazyDashboard = createLazyComponent(
+  () => import('../dashboard/Dashboard'),
+  <DashboardSkeleton />,
+  'Failed to load dashboard'
+)
+
+/**
+ * Projects - Project browser
+ */
+export const LazyProjects = createLazyComponent(
+  () => import('../projects/Projects'),
+  <div className="p-6 space-y-4">
+    <Skeleton variant="text" width={150} className="h-8" />
+    <SkeletonList count={6} itemHeight={60} />
+  </div>,
+  'Failed to load projects'
+)
+
+/**
+ * Session Manager - External session browser
+ */
+export const LazySessionManager = createLazyComponent(
+  () => import('../sessions/SessionManager'),
+  <SessionsSkeleton />,
+  'Failed to load sessions'
+)
+
+/**
+ * MCP Manager - MCP server configuration
+ */
+export const LazyMCPManager = createLazyComponent(
+  () => import('../mcp/MCPManager'),
+  <MCPManagerSkeleton />,
+  'Failed to load MCP manager'
+)
+
+/**
+ * Profile Manager - Claude profiles
+ */
+export const LazyProfileManager = createLazyComponent(
+  () => import('../profiles/ProfileManager'),
+  <div className="p-6 space-y-4">
+    <div className="flex items-center justify-between">
+      <Skeleton variant="text" width={150} className="h-8" />
+      <Skeleton variant="rectangular" width={120} height={36} />
+    </div>
+    <SkeletonList count={5} itemHeight={80} />
+  </div>,
+  'Failed to load profiles'
+)
+
+/**
+ * Context Dashboard - Context management
+ */
+export const LazyContextDashboard = createLazyComponent(
+  () => import('../context/ContextDashboard'),
+  <div className="p-6 space-y-4">
+    <div className="flex gap-4 border-b border-border pb-2">
+      {[1, 2, 3].map((i) => (
+        <Skeleton key={i} variant="rectangular" width={100} height={32} />
+      ))}
+    </div>
+    <SkeletonList count={4} itemHeight={100} />
+  </div>,
+  'Failed to load context dashboard'
+)
+
+/**
+ * Services Manager - System services
+ */
+export const LazyServicesManager = createLazyComponent(
+  () => import('../services/ServicesManager'),
+  <div className="p-6 space-y-4">
+    <Skeleton variant="text" width={180} className="h-8" />
+    <SkeletonList count={6} itemHeight={60} />
+  </div>,
+  'Failed to load services'
+)
+
+/**
+ * Logs Viewer - System logs
+ */
+export const LazyLogsViewer = createLazyComponent(
+  () => import('../logs/LogsViewer'),
+  <div className="p-6 space-y-4">
+    <div className="flex items-center justify-between">
+      <Skeleton variant="text" width={120} className="h-8" />
+      <div className="flex gap-2">
+        <Skeleton variant="rectangular" width={150} height={36} />
+        <Skeleton variant="rectangular" width={80} height={36} />
+      </div>
+    </div>
+    <div className="font-mono bg-surface rounded-lg p-4">
+      <SkeletonList count={15} showAvatar={false} itemHeight={20} />
+    </div>
+  </div>,
+  'Failed to load logs'
+)
+
+/**
+ * Ollama Manager - Local LLM management
+ */
+export const LazyOllamaManager = createLazyComponent(
+  () => import('../ollama/OllamaManager'),
+  <div className="p-6 space-y-4">
+    <div className="flex items-center justify-between">
+      <Skeleton variant="text" width={150} className="h-8" />
+      <Skeleton variant="rectangular" width={100} height={36} />
+    </div>
+    <div className="grid grid-cols-3 gap-4">
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="card p-4">
+          <Skeleton variant="text" width="60%" className="mb-2" />
+          <Skeleton variant="text" width="40%" />
+        </div>
+      ))}
+    </div>
+  </div>,
+  'Failed to load Ollama manager'
+)
+
+/**
+ * Settings - App preferences
+ */
+export const LazySettings = createLazyComponent(
+  () => import('../settings/Settings'),
+  <div className="p-6 space-y-4">
+    <Skeleton variant="text" width={120} className="h-8" />
+    <SkeletonList count={8} showAvatar={false} itemHeight={50} />
+  </div>,
+  'Failed to load settings'
+)

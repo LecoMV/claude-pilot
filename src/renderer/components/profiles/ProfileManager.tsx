@@ -824,3 +824,5 @@ function CustomProfilesPanel({
     </div>
   )
 }
+
+export default ProfileManager

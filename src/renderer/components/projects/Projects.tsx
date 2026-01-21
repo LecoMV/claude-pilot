@@ -214,3 +214,5 @@ function ProjectCard({
     </div>
   )
 }
+
+export default Projects

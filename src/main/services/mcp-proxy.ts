@@ -2,6 +2,10 @@
  * MCP Proxy/Federation Service
  * Federates multiple MCP servers into a unified interface
  * Feature: deploy-zebp
+ *
+ * Now includes MCP Sampling protocol support (deploy-toag):
+ * When an MCP server sends a sampling/createMessage request,
+ * it's routed to the MCPSamplingService for LLM completion.
  */
 
 import { EventEmitter } from 'events'
@@ -9,6 +13,9 @@ import { spawn, ChildProcess } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
+import { mcpSamplingService } from './inference'
+import type { MCPSamplingRequest } from './inference/types'
+import { mcpElicitationService, type ElicitationRequest } from './mcp'
 
 // MCP Protocol types
 export interface MCPTool {
@@ -255,6 +262,7 @@ class MCPProxyService extends EventEmitter {
 
   /**
    * Send initialize request to server
+   * Advertises sampling and elicitation capabilities to enable MCP protocols
    */
   private async sendInitialize(serverId: string): Promise<void> {
     await this.sendRequest(serverId, 'initialize', {
@@ -263,6 +271,10 @@ class MCPProxyService extends EventEmitter {
         tools: {},
         resources: {},
         prompts: {},
+        // MCP Sampling protocol support (deploy-toag)
+        sampling: {},
+        // MCP Elicitation protocol support (deploy-uz39)
+        elicitation: {},
       },
       clientInfo: {
         name: 'claude-pilot-proxy',
@@ -468,7 +480,196 @@ class MCPProxyService extends EventEmitter {
    * Handle incoming message from a server
    */
   private handleServerMessage(serverId: string, message: Record<string, unknown>): void {
+    // Check if this is a sampling request (MCP Sampling protocol)
+    if (message.method === 'sampling/createMessage') {
+      this.handleSamplingRequest(serverId, message)
+      return
+    }
+
+    // Check if this is an elicitation request (MCP Elicitation protocol)
+    if (message.method === 'elicitation/create') {
+      this.handleElicitationRequest(serverId, message)
+      return
+    }
+
     this.emit('server:message', serverId, message)
+  }
+
+  /**
+   * Handle MCP Sampling protocol request from a server
+   * Routes to the MCPSamplingService for LLM completion
+   */
+  private async handleSamplingRequest(
+    serverId: string,
+    message: Record<string, unknown>
+  ): Promise<void> {
+    const requestId = message.id as string | number
+    const params = message.params as MCPSamplingRequest | undefined
+
+    if (!params) {
+      this.sendSamplingError(serverId, requestId, 'Invalid sampling request: missing params')
+      return
+    }
+
+    try {
+      // Initialize sampling service if not already done
+      await mcpSamplingService.initialize()
+
+      // Handle the sampling request
+      const result = await mcpSamplingService.handleSamplingRequest(serverId, params)
+
+      if (result.error) {
+        this.sendSamplingError(serverId, requestId, result.error)
+        return
+      }
+
+      if (result.response) {
+        this.sendSamplingResponse(serverId, requestId, result.response)
+      }
+    } catch (error) {
+      this.sendSamplingError(serverId, requestId, (error as Error).message)
+    }
+  }
+
+  /**
+   * Send sampling response back to the MCP server
+   */
+  private sendSamplingResponse(
+    serverId: string,
+    requestId: string | number,
+    response: Record<string, unknown>
+  ): void {
+    const server = this.servers.get(serverId)
+    if (!server?.process?.stdin) {
+      console.error('[MCP-Proxy] Cannot send sampling response: server not connected')
+      return
+    }
+
+    const responseMsg = {
+      jsonrpc: '2.0',
+      id: requestId,
+      result: response,
+    }
+
+    server.process.stdin.write(JSON.stringify(responseMsg) + '\n')
+    this.emit('sampling:response', { serverId, requestId })
+  }
+
+  /**
+   * Send sampling error back to the MCP server
+   */
+  private sendSamplingError(
+    serverId: string,
+    requestId: string | number,
+    errorMessage: string
+  ): void {
+    const server = this.servers.get(serverId)
+    if (!server?.process?.stdin) {
+      console.error('[MCP-Proxy] Cannot send sampling error: server not connected')
+      return
+    }
+
+    const errorResponse = {
+      jsonrpc: '2.0',
+      id: requestId,
+      error: {
+        code: -32000,
+        message: errorMessage,
+      },
+    }
+
+    server.process.stdin.write(JSON.stringify(errorResponse) + '\n')
+    this.emit('sampling:error', { serverId, requestId, error: errorMessage })
+  }
+
+  /**
+   * Handle MCP Elicitation protocol request from a server
+   * Routes to the MCPElicitationService for user interaction
+   */
+  private async handleElicitationRequest(
+    serverId: string,
+    message: Record<string, unknown>
+  ): Promise<void> {
+    const requestId = message.id as string | number
+    const params = message.params as ElicitationRequest | undefined
+
+    if (!params) {
+      this.sendElicitationError(serverId, requestId, 'Invalid elicitation request: missing params')
+      return
+    }
+
+    try {
+      // Initialize elicitation service if not already done
+      await mcpElicitationService.initialize()
+
+      // Handle the elicitation request
+      const result = await mcpElicitationService.handleElicitationRequest(serverId, params)
+
+      if (result.status === 'error') {
+        this.sendElicitationError(serverId, requestId, result.error || 'Unknown error')
+        return
+      }
+
+      // Send success response
+      this.sendElicitationResponse(serverId, requestId, {
+        status: result.status,
+        data: result.data,
+        token: result.token,
+      })
+    } catch (error) {
+      this.sendElicitationError(serverId, requestId, (error as Error).message)
+    }
+  }
+
+  /**
+   * Send elicitation response back to the MCP server
+   */
+  private sendElicitationResponse(
+    serverId: string,
+    requestId: string | number,
+    response: Record<string, unknown>
+  ): void {
+    const server = this.servers.get(serverId)
+    if (!server?.process?.stdin) {
+      console.error('[MCP-Proxy] Cannot send elicitation response: server not connected')
+      return
+    }
+
+    const responseMsg = {
+      jsonrpc: '2.0',
+      id: requestId,
+      result: response,
+    }
+
+    server.process.stdin.write(JSON.stringify(responseMsg) + '\n')
+    this.emit('elicitation:response', { serverId, requestId })
+  }
+
+  /**
+   * Send elicitation error back to the MCP server
+   */
+  private sendElicitationError(
+    serverId: string,
+    requestId: string | number,
+    errorMessage: string
+  ): void {
+    const server = this.servers.get(serverId)
+    if (!server?.process?.stdin) {
+      console.error('[MCP-Proxy] Cannot send elicitation error: server not connected')
+      return
+    }
+
+    const errorResponse = {
+      jsonrpc: '2.0',
+      id: requestId,
+      error: {
+        code: -32000,
+        message: errorMessage,
+      },
+    }
+
+    server.process.stdin.write(JSON.stringify(errorResponse) + '\n')
+    this.emit('elicitation:error', { serverId, requestId, error: errorMessage })
   }
 
   /**

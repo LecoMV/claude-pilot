@@ -747,3 +747,5 @@ function StatusBadge({ status, disabled }: StatusBadgeProps) {
       )
   }
 }
+
+export default MCPManager

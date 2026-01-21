@@ -1,23 +1,23 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Sidebar } from './components/layout/Sidebar'
 import { Header } from './components/layout/Header'
-import { Dashboard } from './components/dashboard/Dashboard'
-import { Projects } from './components/projects/Projects'
-import { SessionManager } from './components/sessions/SessionManager'
-import { MCPManager } from './components/mcp/MCPManager'
-import { ProfileManager } from './components/profiles/ProfileManager'
-import { ContextDashboard } from './components/context/ContextDashboard'
-import { ServicesManager } from './components/services/ServicesManager'
-import { Settings } from './components/settings/Settings'
-import { LogsViewer } from './components/logs/LogsViewer'
-import { OllamaManager } from './components/ollama/OllamaManager'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { ErrorToast } from './components/common/ErrorNotifications'
 import { CommandPalette, useCommandPalette } from './components/common/CommandPalette'
 import { initializeErrorListener } from './stores/errors'
 import { useMediaQuery } from './hooks/useResponsive'
-// Lazy-loaded heavy components for better performance
+// All views lazy-loaded for code splitting and faster startup
 import {
+  LazyDashboard,
+  LazyProjects,
+  LazySessionManager,
+  LazyMCPManager,
+  LazyProfileManager,
+  LazyContextDashboard,
+  LazyServicesManager,
+  LazySettings,
+  LazyLogsViewer,
+  LazyOllamaManager,
   LazyAgentCanvas,
   LazyMemoryBrowser,
   LazyTerminal,
@@ -83,25 +83,25 @@ export default function App() {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':
-        return <Dashboard onNavigate={(view) => setCurrentView(view as View)} />
+        return <LazyDashboard onNavigate={(view) => setCurrentView(view as View)} />
       case 'projects':
-        return <Projects />
+        return <LazyProjects />
       case 'sessions':
-        return <SessionManager />
+        return <LazySessionManager />
       case 'mcp':
-        return <MCPManager />
+        return <LazyMCPManager />
       case 'memory':
         return <LazyMemoryBrowser />
       case 'profiles':
-        return <ProfileManager />
+        return <LazyProfileManager />
       case 'context':
-        return <ContextDashboard onNavigate={(view) => setCurrentView(view as View)} />
+        return <LazyContextDashboard onNavigate={(view) => setCurrentView(view as View)} />
       case 'services':
-        return <ServicesManager />
+        return <LazyServicesManager />
       case 'logs':
-        return <LogsViewer />
+        return <LazyLogsViewer />
       case 'ollama':
-        return <OllamaManager />
+        return <LazyOllamaManager />
       case 'agents':
         return <LazyAgentCanvas />
       case 'chat':
@@ -111,9 +111,9 @@ export default function App() {
       case 'globalSettings':
         return <LazyGlobalSettings />
       case 'preferences':
-        return <Settings />
+        return <LazySettings />
       default:
-        return <Dashboard />
+        return <LazyDashboard />
     }
   }
 

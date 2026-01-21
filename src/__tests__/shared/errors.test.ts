@@ -238,7 +238,7 @@ describe('Result Type Helpers', () => {
   describe('tryCatch', () => {
     it('should return success for resolved promise', async () => {
       const result = await tryCatch(
-        // eslint-disable-next-line require-await
+         
         async () => 'success',
         { operation: 'test' }
       )
@@ -251,7 +251,7 @@ describe('Result Type Helpers', () => {
 
     it('should return error for rejected promise', async () => {
       const result = await tryCatch(
-        // eslint-disable-next-line require-await
+         
         async () => {
           throw new Error('Failed')
         },

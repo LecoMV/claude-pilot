@@ -16,6 +16,7 @@
  */
 
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { router, publicProcedure, auditedProcedure } from '../../trpc/trpc'
 import { credentialService } from '../../services/credentials'
 
@@ -55,24 +56,32 @@ export const credentialsRouter = router({
    * Store a credential securely
    * Uses OS keychain encryption via Electron's safeStorage
    */
-  store: auditedProcedure.input(SetCredentialSchema).mutation(({ input }): boolean => {
-    return credentialService.set(input.key, input.value)
+  store: auditedProcedure.input(SetCredentialSchema).mutation(({ input }) => {
+    const success = credentialService.set(input.key, input.value)
+    if (!success) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to store credential - encryption may not be available',
+      })
+    }
+    return { success: true }
   }),
 
   /**
    * Retrieve a stored credential
    * Returns null if not found
    */
-  retrieve: publicProcedure.input(CredentialKeySchema).query(({ input }): string | null => {
-    return credentialService.retrieve(input.key)
+  retrieve: publicProcedure.input(CredentialKeySchema).query(({ input }) => {
+    const value = credentialService.retrieve(input.key)
+    return { value }
   }),
 
   /**
    * Delete a credential
    */
-  delete: auditedProcedure.input(CredentialKeySchema).mutation(({ input }): boolean => {
+  delete: auditedProcedure.input(CredentialKeySchema).mutation(({ input }) => {
     credentialService.delete(input.key)
-    return true
+    return { success: true }
   }),
 
   /**

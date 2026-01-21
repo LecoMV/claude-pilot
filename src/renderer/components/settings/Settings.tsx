@@ -1021,3 +1021,5 @@ function BudgetSettingsPanel() {
     </div>
   )
 }
+
+export default Settings

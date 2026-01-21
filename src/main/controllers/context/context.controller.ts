@@ -161,8 +161,9 @@ function triggerCompaction(): boolean {
     // Trigger Claude's context compaction via the claude CLI
     // The /compact command is used to manually compact the conversation context
     // We use --print to run non-interactively and capture output
+    // shell: false prevents command injection vulnerabilities
     const result = spawn('claude', ['--print', '-p', '/compact'], {
-      shell: true,
+      shell: false,
       stdio: 'pipe',
     })
 

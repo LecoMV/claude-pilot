@@ -610,3 +610,5 @@ function ActionButtons({ status, onStart, onStop, onRestart }: ActionButtonsProp
     </div>
   )
 }
+
+export default ServicesManager

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback, memo } from 'react'
+import { VariableSizeList as List, ListChildComponentProps } from 'react-window'
+import AutoSizer from 'react-virtualized-auto-sizer'
 import {
   Terminal,
   Search,
@@ -54,6 +56,10 @@ const levelIcons: Record<LogLevel, typeof Info> = {
   error: AlertCircle,
 }
 
+// Row height constants
+const BASE_ROW_HEIGHT = 32
+const EXPANDED_ROW_HEIGHT = 200
+
 export function LogsViewer() {
   const {
     logs,
@@ -71,12 +77,12 @@ export function LogsViewer() {
     setAutoScroll,
   } = useLogsStore()
 
-  const containerRef = useRef<HTMLDivElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<List>(null)
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
   // tRPC query for initial logs
   const recentLogsQuery = trpc.logs.recent.useQuery(
-    { limit: 200 },
+    { limit: 500 },
     { refetchInterval: false, enabled: true }
   )
   const loading = recentLogsQuery.isLoading
@@ -100,13 +106,6 @@ export function LogsViewer() {
     recentLogsQuery.refetch()
   }
 
-  // Auto-scroll to bottom
-  useEffect(() => {
-    if (autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [logs, autoScroll])
-
   // Filter logs
   const filteredLogs = logs.filter((log) => {
     if (filter !== 'all' && log.source !== filter) return false
@@ -116,6 +115,43 @@ export function LogsViewer() {
     }
     return true
   })
+
+  // Auto-scroll to bottom when new logs arrive
+  useEffect(() => {
+    if (autoScroll && listRef.current && filteredLogs.length > 0) {
+      listRef.current.scrollToItem(filteredLogs.length - 1, 'end')
+    }
+  }, [filteredLogs.length, autoScroll])
+
+  // Get row height (variable based on expansion)
+  const getItemSize = useCallback(
+    (index: number) => {
+      const log = filteredLogs[index]
+      if (log && expandedRows.has(log.id)) {
+        return EXPANDED_ROW_HEIGHT
+      }
+      return BASE_ROW_HEIGHT
+    },
+    [filteredLogs, expandedRows]
+  )
+
+  // Toggle row expansion
+  const toggleExpand = useCallback(
+    (logId: string) => {
+      setExpandedRows((prev) => {
+        const next = new Set(prev)
+        if (next.has(logId)) {
+          next.delete(logId)
+        } else {
+          next.add(logId)
+        }
+        return next
+      })
+      // Reset list to recalculate heights
+      listRef.current?.resetAfterIndex(0)
+    },
+    [setExpandedRows]
+  )
 
   const exportLogs = () => {
     const content = filteredLogs
@@ -140,8 +176,27 @@ export function LogsViewer() {
     warn: logs.filter((l) => l.level === 'warn').length,
   }
 
+  // Row renderer for virtualized list
+  const Row = useCallback(
+    ({ index, style }: ListChildComponentProps) => {
+      const log = filteredLogs[index]
+      if (!log) return null
+
+      return (
+        <div style={style}>
+          <LogLine
+            log={log}
+            expanded={expandedRows.has(log.id)}
+            onToggle={() => toggleExpand(log.id)}
+          />
+        </div>
+      )
+    },
+    [filteredLogs, expandedRows, toggleExpand]
+  )
+
   return (
-    <div className="space-y-4 animate-in">
+    <div className="space-y-4 animate-in h-full flex flex-col">
       {/* Header Stats */}
       <div className="grid grid-cols-5 gap-4">
         <StatCard
@@ -256,31 +311,50 @@ export function LogsViewer() {
         </button>
       </div>
 
-      {/* Log Output */}
-      <div
-        ref={containerRef}
-        className="card bg-background font-mono text-sm h-[calc(100vh-340px)] overflow-auto"
-      >
+      {/* Virtualized Log Output */}
+      <div className="card bg-background font-mono text-sm flex-1 min-h-0">
         {filteredLogs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-text-muted">
             <Terminal className="w-12 h-12 mb-4" />
             <p>{loading ? 'Loading logs...' : 'No logs to display'}</p>
           </div>
         ) : (
-          <div className="p-2 space-y-0.5">
-            {filteredLogs.map((log) => (
-              <LogLine key={log.id} log={log} />
-            ))}
-            <div ref={bottomRef} />
-          </div>
+          <AutoSizer>
+            {({ height, width }) => (
+              <List
+                ref={listRef}
+                height={height}
+                width={width}
+                itemCount={filteredLogs.length}
+                itemSize={getItemSize}
+                overscanCount={10}
+                className="scrollbar-thin"
+              >
+                {Row}
+              </List>
+            )}
+          </AutoSizer>
         )}
+      </div>
+
+      {/* Footer stats */}
+      <div className="text-xs text-text-muted flex items-center justify-between px-2">
+        <span>
+          Showing {filteredLogs.length.toLocaleString()} of {logs.length.toLocaleString()} logs
+        </span>
+        <span>Virtualized rendering enabled</span>
       </div>
     </div>
   )
 }
 
-function LogLine({ log }: { log: LogEntry }) {
-  const [expanded, setExpanded] = useState(false)
+interface LogLineProps {
+  log: LogEntry
+  expanded: boolean
+  onToggle: () => void
+}
+
+const LogLine = memo(function LogLine({ log, expanded, onToggle }: LogLineProps) {
   const SourceIcon = sourceIcons[log.source] || Terminal
   const LevelIcon = levelIcons[log.level]
   const timestamp = new Date(log.timestamp).toLocaleTimeString('en-US', {
@@ -294,22 +368,28 @@ function LogLine({ log }: { log: LogEntry }) {
   return (
     <div
       className={cn(
-        'flex items-start gap-2 px-2 py-1 rounded hover:bg-surface-hover cursor-pointer',
+        'flex flex-col px-2 py-1 rounded hover:bg-surface-hover cursor-pointer h-full',
         log.level === 'error' && 'bg-accent-red/5',
         log.level === 'warn' && 'bg-accent-yellow/5'
       )}
-      onClick={() => log.metadata && setExpanded(!expanded)}
+      onClick={() => log.metadata && onToggle()}
     >
-      <span className="text-text-muted text-xs shrink-0">{timestamp}</span>
-      <SourceIcon className={cn('w-3.5 h-3.5 shrink-0 mt-0.5', sourceColors[log.source])} />
-      <LevelIcon className={cn('w-3.5 h-3.5 shrink-0 mt-0.5', levelColors[log.level])} />
-      <span className={cn('text-xs uppercase w-14 shrink-0', sourceColors[log.source])}>
-        {log.source}
-      </span>
-      <span className={cn('flex-1 break-all', levelColors[log.level])}>{log.message}</span>
-      {log.metadata && <span className="text-text-muted text-xs">{expanded ? '▼' : '▶'}</span>}
+      <div className="flex items-start gap-2">
+        <span className="text-text-muted text-xs shrink-0">{timestamp}</span>
+        <SourceIcon className={cn('w-3.5 h-3.5 shrink-0 mt-0.5', sourceColors[log.source])} />
+        <LevelIcon className={cn('w-3.5 h-3.5 shrink-0 mt-0.5', levelColors[log.level])} />
+        <span className={cn('text-xs uppercase w-14 shrink-0', sourceColors[log.source])}>
+          {log.source}
+        </span>
+        <span className={cn('flex-1 break-all truncate', levelColors[log.level])}>
+          {log.message}
+        </span>
+        {log.metadata && (
+          <span className="text-text-muted text-xs shrink-0">{expanded ? '▼' : '▶'}</span>
+        )}
+      </div>
       {expanded && log.metadata && (
-        <div className="w-full mt-1 p-2 bg-surface rounded text-xs">
+        <div className="mt-1 p-2 bg-surface rounded text-xs overflow-auto flex-1">
           <pre className="whitespace-pre-wrap text-text-muted">
             {JSON.stringify(log.metadata, null, 2)}
           </pre>
@@ -317,7 +397,7 @@ function LogLine({ log }: { log: LogEntry }) {
       )}
     </div>
   )
-}
+})
 
 interface StatCardProps {
   icon: typeof Terminal
@@ -339,3 +419,5 @@ function StatCard({ icon: Icon, value, label, color }: StatCardProps) {
     </div>
   )
 }
+
+export default LogsViewer

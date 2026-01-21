@@ -790,3 +790,5 @@ function SystemLLMPanel({
     </div>
   )
 }
+
+export default OllamaManager

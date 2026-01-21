@@ -8,3 +8,5 @@
 
 export { mcpRouter, type MCPRouter } from './mcp.controller'
 export { proxyRouter, type ProxyRouter } from './proxy.controller'
+export { samplingRouter, type SamplingRouter } from './sampling.controller'
+export { elicitationRouter, type ElicitationRouter } from './elicitation.controller'

@@ -362,7 +362,7 @@ describe('context.controller', () => {
 
       expect(result).toBe(true)
       expect(mockSpawn).toHaveBeenCalledWith('claude', ['--print', '-p', '/compact'], {
-        shell: true,
+        shell: false,
         stdio: 'pipe',
       })
     })

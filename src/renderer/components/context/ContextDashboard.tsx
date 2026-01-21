@@ -940,3 +940,5 @@ function SessionDetail({ session, onClose }: SessionDetailProps) {
     </div>
   )
 }
+
+export default ContextDashboard
