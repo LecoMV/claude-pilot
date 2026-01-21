@@ -15,7 +15,7 @@ Professional session control for Claude Code - manage profiles, monitor resource
 
 ## Screenshots
 
-*Coming soon*
+_Coming soon_
 
 ## Installation
 
@@ -67,13 +67,13 @@ cp .env.example .env
 
 Available environment variables:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CLAUDE_PG_HOST` | PostgreSQL host | `localhost` |
-| `CLAUDE_PG_PORT` | PostgreSQL port | `5433` |
-| `CLAUDE_PG_USER` | PostgreSQL username | `deploy` |
+| Variable             | Description              | Default         |
+| -------------------- | ------------------------ | --------------- |
+| `CLAUDE_PG_HOST`     | PostgreSQL host          | `localhost`     |
+| `CLAUDE_PG_PORT`     | PostgreSQL port          | `5433`          |
+| `CLAUDE_PG_USER`     | PostgreSQL username      | `deploy`        |
 | `CLAUDE_PG_DATABASE` | PostgreSQL database name | `claude_memory` |
-| `CLAUDE_PG_PASSWORD` | PostgreSQL password | (empty) |
+| `CLAUDE_PG_PASSWORD` | PostgreSQL password      | (empty)         |
 
 ### Optional Services
 
@@ -111,15 +111,21 @@ npm run test:e2e      # Run Playwright E2E tests
 src/
 ├── main/                    # Electron main process
 │   ├── index.ts             # Main entry point
-│   ├── ipc/                 # IPC handlers
+│   ├── trpc/                # tRPC router and context
+│   ├── controllers/         # Domain-grouped tRPC controllers (25)
+│   │   ├── security/        # credentials, audit, watchdog
+│   │   ├── sessions/        # session, transcript, beads
+│   │   ├── mcp/             # mcp, proxy
+│   │   └── ...              # 7 more controller groups
 │   ├── services/            # Backend services
 │   └── utils/               # Main process utilities
 ├── renderer/                # React frontend
 │   ├── components/          # UI components
 │   ├── hooks/               # Custom React hooks
 │   ├── stores/              # Zustand stores
+│   ├── lib/trpc/            # tRPC client setup
 │   └── lib/                 # Utilities
-├── preload/                 # Preload scripts
+├── preload/                 # Preload scripts (contextBridge)
 └── shared/                  # Shared types/utilities
 ```
 
@@ -127,10 +133,11 @@ src/
 
 - **Framework**: Electron 34 + electron-vite
 - **Frontend**: React 19 + TypeScript + Tailwind CSS
+- **IPC**: electron-trpc (type-safe RPC with Zod validation)
 - **Terminal**: xterm.js + node-pty
 - **Visualization**: Cytoscape.js + React Flow + Recharts
-- **State Management**: Zustand
-- **Testing**: Vitest + Playwright
+- **State Management**: Zustand + TanStack Query
+- **Testing**: Vitest (80% coverage) + Playwright (E2E)
 
 ## Security
 
@@ -138,7 +145,9 @@ Claude Pilot implements multiple security layers:
 
 - **Context Isolation**: Renderer process is sandboxed with `contextIsolation: true`
 - **Node Integration Disabled**: `nodeIntegration: false` prevents renderer access to Node.js
-- **IPC Validation**: All IPC handlers validate input against schemas
+- **Sandbox Enabled**: `sandbox: true` for all renderer processes
+- **Type-Safe IPC**: All 201 handlers use tRPC with Zod validation (no raw IPC)
+- **Credential Storage**: OS-level encryption via Electron safeStorage
 - **Content Security Policy**: Strict CSP prevents XSS and data injection
 - **Input Sanitization**: Shell commands are sanitized to prevent injection
 - **Permission Handling**: Sensitive permissions (camera, microphone, geolocation) are denied by default

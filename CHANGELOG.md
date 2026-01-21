@@ -5,6 +5,31 @@ All notable changes to Claude Pilot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Ghost session detector in session controller (`detectGhosts` procedure)
+- Session bloat analyzer with storage metrics (`analyzeStorage` procedure)
+- Session cleanup operations (`deleteSession`, `cleanupSessions` procedures)
+- Credential management design document
+- CONTRIBUTING.md with development guidelines
+
+### Changed
+
+- Updated test coverage threshold from 75% to 80%
+- Improved README with tRPC architecture details
+- Disabled ESLint `no-non-null-assertion` and `require-await` warnings (intentional patterns)
+
+### Fixed
+
+- npm audit vulnerabilities: tRPC 11.0.0 to 11.8.1, electron-builder to 26.5.0
+- ESLint console.log warnings (changed to console.info where appropriate)
+
+### Removed
+
+- Legacy IPC handlers file (`src/main/ipc/handlers.ts` - 5927 lines of dead code)
+
 ## [0.2.0-alpha.1] - 2026-01-19
 
 ### Added
