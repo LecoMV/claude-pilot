@@ -45,10 +45,13 @@ class PostgresService {
       }
 
       // If already connected with same config, reuse pool
-      if (this.pool && this.config &&
-          this.config.host === dbConfig.host &&
-          this.config.port === dbConfig.port &&
-          this.config.database === dbConfig.database) {
+      if (
+        this.pool &&
+        this.config &&
+        this.config.host === dbConfig.host &&
+        this.config.port === dbConfig.port &&
+        this.config.database === dbConfig.database
+      ) {
         return true
       }
 
@@ -63,9 +66,9 @@ class PostgresService {
         user: dbConfig.user,
         database: dbConfig.database,
         password: dbConfig.password,
-        max: 10,                         // Max connections in pool
-        idleTimeoutMillis: 30000,        // Close idle connections after 30s
-        connectionTimeoutMillis: 5000,   // Fail fast on connection issues
+        max: 10, // Max connections in pool
+        idleTimeoutMillis: 30000, // Close idle connections after 30s
+        connectionTimeoutMillis: 5000, // Fail fast on connection issues
       }
 
       this.pool = new Pool(poolConfig)
@@ -78,7 +81,7 @@ class PostgresService {
 
       // Verify connection works
       await this.pool.query('SELECT 1')
-      console.log('[PostgreSQL] Connected successfully via pg driver')
+      console.info('[PostgreSQL] Connected successfully via pg driver')
       return true
     } catch (error) {
       console.error('[PostgreSQL] Connection failed:', error)
@@ -96,7 +99,7 @@ class PostgresService {
       await this.pool.end()
       this.pool = null
       this.config = null
-      console.log('[PostgreSQL] Disconnected')
+      console.info('[PostgreSQL] Disconnected')
     }
   }
 
@@ -136,10 +139,7 @@ class PostgresService {
    * Execute a query and return a single value
    * Useful for COUNT, SUM, etc.
    */
-  async queryScalar<T = unknown>(
-    sql: string,
-    params: unknown[] = []
-  ): Promise<T | null> {
+  async queryScalar<T = unknown>(sql: string, params: unknown[] = []): Promise<T | null> {
     const rows = await this.query(sql, params)
     if (rows.length === 0) return null
     const firstRow = rows[0] as Record<string, unknown>

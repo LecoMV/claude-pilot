@@ -117,7 +117,7 @@ function showErrorDialog(error: AppError): void {
 
   const win = BrowserWindow.getFocusedWindow()
 
-  dialog.showMessageBox(win ?? undefined as unknown as BrowserWindow, {
+  dialog.showMessageBox(win ?? (undefined as unknown as BrowserWindow), {
     type: 'error',
     title: 'Critical Error',
     message: error.message,
@@ -147,7 +147,10 @@ function notifyRenderer(error: AppError): void {
 /**
  * Main error handling function
  */
-export function handleError(error: unknown, context?: { component?: string; operation?: string }): AppError {
+export function handleError(
+  error: unknown,
+  context?: { component?: string; operation?: string }
+): AppError {
   // Convert to AppError if needed
   let appError: AppError
 
@@ -258,11 +261,7 @@ export function handleDatabaseError(
 /**
  * Handle process/subprocess errors specifically
  */
-export function handleProcessError(
-  command: string,
-  error: unknown,
-  exitCode?: number
-): AppError {
+export function handleProcessError(command: string, error: unknown, exitCode?: number): AppError {
   const procError = new ProcessError(getErrorMessage(error), {
     command,
     exitCode,
@@ -275,7 +274,10 @@ export function handleProcessError(
 /**
  * Log a warning (non-critical issue)
  */
-export function logWarning(message: string, context?: { component?: string; operation?: string; metadata?: Record<string, unknown> }): void {
+export function logWarning(
+  message: string,
+  context?: { component?: string; operation?: string; metadata?: Record<string, unknown> }
+): void {
   const warning = new AppError(message, {
     severity: 'warning',
     context: {
@@ -300,7 +302,10 @@ export function logWarning(message: string, context?: { component?: string; oper
 /**
  * Log info (for tracking operations)
  */
-export function logInfo(message: string, context?: { component?: string; operation?: string; metadata?: Record<string, unknown> }): void {
+export function logInfo(
+  message: string,
+  context?: { component?: string; operation?: string; metadata?: Record<string, unknown> }
+): void {
   const info = new AppError(message, {
     severity: 'info',
     context: {
@@ -335,7 +340,7 @@ export function setupGlobalErrorHandlers(): void {
     handleError(reason, { operation: 'unhandledRejection' })
   })
 
-  console.log('[ErrorHandler] Global error handlers configured')
+  console.info('[ErrorHandler] Global error handlers configured')
 }
 
 /**

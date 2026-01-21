@@ -191,7 +191,7 @@ describe('PostgresService', () => {
     })
 
     it('should log connection success', async () => {
-      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+      const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
       mockPool.query.mockResolvedValue({ rows: [{ '?column?': 1 }] })
 
       await service.connect()
@@ -242,7 +242,7 @@ describe('PostgresService', () => {
     })
 
     it('should log disconnect message', async () => {
-      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+      const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
       mockPool.query.mockResolvedValue({ rows: [{ '?column?': 1 }] })
       await service.connect()
 
@@ -289,9 +289,7 @@ describe('PostgresService', () => {
   // ===========================================================================
   describe('query', () => {
     it('should throw error when not connected', async () => {
-      await expect(service.query('SELECT 1')).rejects.toThrow(
-        'Not connected to PostgreSQL'
-      )
+      await expect(service.query('SELECT 1')).rejects.toThrow('Not connected to PostgreSQL')
     })
 
     it('should execute parameterized query', async () => {
@@ -312,10 +310,9 @@ describe('PostgresService', () => {
 
       expect(result).toHaveLength(2)
       expect(result[0]).toEqual({ id: 1, name: 'Alice' })
-      expect(mockPool.query).toHaveBeenCalledWith(
-        'SELECT id, name FROM users WHERE active = $1',
-        [true]
-      )
+      expect(mockPool.query).toHaveBeenCalledWith('SELECT id, name FROM users WHERE active = $1', [
+        true,
+      ])
     })
 
     it('should return typed results', async () => {
@@ -417,9 +414,7 @@ describe('PostgresService', () => {
   // ===========================================================================
   describe('queryRaw', () => {
     it('should throw error when not connected', async () => {
-      await expect(service.queryRaw('SELECT 1')).rejects.toThrow(
-        'Not connected to PostgreSQL'
-      )
+      await expect(service.queryRaw('SELECT 1')).rejects.toThrow('Not connected to PostgreSQL')
     })
 
     it('should execute raw query and return extended results', async () => {
@@ -548,10 +543,9 @@ describe('PostgresService', () => {
       await service.query('SELECT * FROM users WHERE name = $1', [maliciousInput])
 
       // Verify the malicious input is passed as a parameter, not concatenated
-      expect(mockPool.query).toHaveBeenCalledWith(
-        'SELECT * FROM users WHERE name = $1',
-        [maliciousInput]
-      )
+      expect(mockPool.query).toHaveBeenCalledWith('SELECT * FROM users WHERE name = $1', [
+        maliciousInput,
+      ])
     })
 
     it('should block DROP even with leading whitespace', async () => {
@@ -626,10 +620,7 @@ describe('PostgresService', () => {
 
       await service.query('INSERT INTO users (name) VALUES ($1)', [null])
 
-      expect(mockPool.query).toHaveBeenCalledWith(
-        'INSERT INTO users (name) VALUES ($1)',
-        [null]
-      )
+      expect(mockPool.query).toHaveBeenCalledWith('INSERT INTO users (name) VALUES ($1)', [null])
     })
 
     it('should handle concurrent queries', async () => {
@@ -666,7 +657,7 @@ describe('PostgresService', () => {
       mockPool.query.mockResolvedValueOnce({ rows: [] })
 
       await service.query('INSERT INTO notes (content) VALUES ($1)', [
-        "Line 1\nLine 2\tTabbed\r\nWindows line",
+        'Line 1\nLine 2\tTabbed\r\nWindows line',
       ])
 
       expect(mockPool.query).toHaveBeenCalled()

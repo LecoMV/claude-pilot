@@ -41,7 +41,7 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
-      '@typescript-eslint/no-non-null-assertion': 'warn',
+      '@typescript-eslint/no-non-null-assertion': 'off', // Intentional in perf-critical code
       '@typescript-eslint/prefer-nullish-coalescing': 'off',
       '@typescript-eslint/strict-boolean-expressions': 'off',
 
@@ -73,7 +73,7 @@ export default tseslint.config(
       'no-implied-eval': 'error',
       'no-new-func': 'error',
       'no-return-await': 'error',
-      'require-await': 'warn',
+      'require-await': 'off', // Async stubs and promise-returning methods
 
       // Security
       'no-script-url': 'error',
