@@ -3,7 +3,7 @@
  * Git-like branching visualization and management for conversations
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import ReactFlow, {
   Node,
   Edge,
@@ -27,13 +27,8 @@ import {
   Play,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type {
-  ConversationBranch,
-  BranchTree,
-  BranchDiff,
-  BranchStats,
-  ExternalSession,
-} from '@shared/types'
+import { trpc } from '@/lib/trpc/react'
+import type { ConversationBranch, BranchDiff, BranchStats, ExternalSession } from '@shared/types'
 
 interface BranchPanelProps {
   session?: ExternalSession
@@ -103,12 +98,6 @@ const nodeTypes = {
 }
 
 export function BranchPanel({ session }: BranchPanelProps) {
-  const [branches, setBranches] = useState<ConversationBranch[]>([])
-  const [_tree, setTree] = useState<BranchTree | null>(null)
-  const [stats, setStats] = useState<BranchStats | null>(null)
-  const [activeBranchId, setActiveBranchId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showDiffModal, setShowDiffModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
@@ -119,141 +108,143 @@ export function BranchPanel({ session }: BranchPanelProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
 
-  // Load branches for session
-  const loadBranches = useCallback(async () => {
-    if (!session) return
+  // tRPC queries
+  const branchesQuery = trpc.branches.list.useQuery(
+    { sessionId: session?.id ?? '' },
+    { enabled: !!session?.id }
+  )
+  const statsQuery = trpc.branches.stats.useQuery(
+    { sessionId: session?.id },
+    { enabled: !!session?.id }
+  )
+  const activeBranchQuery = trpc.branches.getActiveBranch.useQuery(
+    { sessionId: session?.id ?? '' },
+    { enabled: !!session?.id }
+  )
 
-    setLoading(true)
-    setError(null)
+  // tRPC mutations
+  const switchMutation = trpc.branches.switch.useMutation()
+  const deleteMutation = trpc.branches.delete.useMutation()
+  const abandonMutation = trpc.branches.abandon.useMutation()
+  const createMutation = trpc.branches.create.useMutation()
+  const mergeMutation = trpc.branches.merge.useMutation()
 
-    try {
-      const [branchList, branchTree, branchStats, active] = await Promise.all([
-        window.claude.branches.list(session.id),
-        window.claude.branches.getTree(session.id),
-        window.claude.branches.getStats(session.id),
-        window.claude.branches.getActiveBranch(session.id),
-      ])
+  // tRPC utils for imperative queries
+  const trpcUtils = trpc.useUtils()
 
-      setBranches(branchList)
-      setTree(branchTree)
-      setStats(branchStats)
-      setActiveBranchId(active)
+  // Derived state - use useMemo to avoid reference changes
+  const branches = useMemo(() => branchesQuery.data ?? [], [branchesQuery.data])
+  const stats: BranchStats | null = statsQuery.data ?? null
+  const activeBranchId = activeBranchQuery.data ?? null
+  const loading = branchesQuery.isLoading
+  const error = branchesQuery.error?.message ?? null
 
-      // Build flow graph
-      buildGraph(branchList, active)
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session])
+  // Refetch helper
+  const refetchAll = useCallback(() => {
+    branchesQuery.refetch()
+    statsQuery.refetch()
+    activeBranchQuery.refetch()
+  }, [branchesQuery, statsQuery, activeBranchQuery])
 
-  // Build React Flow graph from branches
-  const buildGraph = useCallback((branchList: ConversationBranch[], activeId: string | null) => {
-    if (branchList.length === 0) {
-      setNodes([])
-      setEdges([])
-      return
-    }
+  // Build React Flow graph from branches - wrapped in useCallback
+  const buildGraph = useCallback(
+    (branchList: ConversationBranch[], activeId: string | null) => {
+      if (branchList.length === 0) {
+        setNodes([])
+        setEdges([])
+        return
+      }
 
-    const newNodes: Node[] = []
-    const newEdges: Edge[] = []
+      const newNodes: Node[] = []
+      const newEdges: Edge[] = []
 
-    // Calculate positions using tree layout
-    const branchMap = new Map(branchList.map((b) => [b.id, b]))
-    const processed = new Set<string>()
-    let yOffset = 0
+      // Calculate positions using tree layout
+      const branchMap = new Map(branchList.map((b) => [b.id, b]))
+      const processed = new Set<string>()
+      let yOffset = 0
 
-    function processNode(branchId: string, x: number, level: number) {
-      if (processed.has(branchId)) return
-      processed.add(branchId)
+      function processNode(branchId: string, x: number, level: number) {
+        if (processed.has(branchId)) return
+        processed.add(branchId)
 
-      const branch = branchMap.get(branchId)
-      if (!branch) return
+        const branch = branchMap.get(branchId)
+        if (!branch) return
 
-      const y = yOffset * 120
-      yOffset++
+        const y = yOffset * 120
+        yOffset++
 
-      newNodes.push({
-        id: branch.id,
-        type: 'branch',
-        position: { x: level * 200, y },
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
-        data: {
-          label: branch.name,
-          status: branch.status,
-          messageCount: branch.messages.length,
-          isActive: branch.id === activeId,
-          isMain: branch.parentBranchId === null,
-          onSwitch: () => handleSwitch(branch.id),
-          onRename: () => handleRename(branch),
-          onDelete: () => handleDelete(branch.id),
-          onAbandon: () => handleAbandon(branch.id),
-        },
-      })
-
-      // Add edge from parent
-      if (branch.parentBranchId) {
-        newEdges.push({
-          id: `${branch.parentBranchId}-${branch.id}`,
-          source: branch.parentBranchId,
-          target: branch.id,
-          type: 'smoothstep',
-          animated: branch.status === 'active',
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: branch.status === 'merged' ? '#89b4fa' : '#6c7086',
-          },
-          style: {
-            stroke: branch.status === 'merged' ? '#89b4fa' : '#3d3d5c',
-            strokeWidth: 2,
+        newNodes.push({
+          id: branch.id,
+          type: 'branch',
+          position: { x: level * 200, y },
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+          data: {
+            label: branch.name,
+            status: branch.status,
+            messageCount: branch.messages.length,
+            isActive: branch.id === activeId,
+            isMain: branch.parentBranchId === null,
+            onSwitch: () => handleSwitch(branch.id),
+            onRename: () => handleRename(branch),
+            onDelete: () => handleDelete(branch.id),
+            onAbandon: () => handleAbandon(branch.id),
           },
         })
+
+        // Add edge from parent
+        if (branch.parentBranchId) {
+          newEdges.push({
+            id: `${branch.parentBranchId}-${branch.id}`,
+            source: branch.parentBranchId,
+            target: branch.id,
+            type: 'smoothstep',
+            animated: branch.status === 'active',
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: branch.status === 'merged' ? '#89b4fa' : '#6c7086',
+            },
+            style: {
+              stroke: branch.status === 'merged' ? '#89b4fa' : '#3d3d5c',
+              strokeWidth: 2,
+            },
+          })
+        }
+
+        // Process children
+        const children = branchList.filter((b) => b.parentBranchId === branchId)
+        for (const child of children) {
+          processNode(child.id, x + 200, level + 1)
+        }
       }
 
-      // Process children
-      const children = branchList.filter((b) => b.parentBranchId === branchId)
-      for (const child of children) {
-        processNode(child.id, x + 200, level + 1)
+      // Start with main branch
+      const mainBranch = branchList.find((b) => b.parentBranchId === null)
+      if (mainBranch) {
+        processNode(mainBranch.id, 0, 0)
       }
-    }
 
-    // Start with main branch
-    const mainBranch = branchList.find((b) => b.parentBranchId === null)
-    if (mainBranch) {
-      processNode(mainBranch.id, 0, 0)
-    }
-
-    setNodes(newNodes)
-    setEdges(newEdges)
+      setNodes(newNodes)
+      setEdges(newEdges)
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    []
+  )
 
-  // Load on mount and session change
+  // Build graph when branches or active branch changes
   useEffect(() => {
-    loadBranches()
-  }, [loadBranches])
+    if (branches.length > 0) {
+      buildGraph(branches, activeBranchId)
+    }
+  }, [branches, activeBranchId, buildGraph])
 
-  // Listen for branch updates
-  useEffect(() => {
-    const unsubscribe = window.electron.on('branches:updated', (sessionId: string) => {
-      if (sessionId === session?.id) {
-        loadBranches()
-      }
-    })
-    return () => unsubscribe()
-  }, [session?.id, loadBranches])
-
-  // Handlers
+  // Handlers using tRPC mutations
   const handleSwitch = async (branchId: string) => {
     try {
-      await window.claude.branches.switch(branchId)
-      setActiveBranchId(branchId)
-      loadBranches()
+      await switchMutation.mutateAsync({ branchId })
+      refetchAll()
     } catch (err) {
-      setError((err as Error).message)
+      console.error('Failed to switch branch:', err)
     }
   }
 
@@ -267,19 +258,19 @@ export function BranchPanel({ session }: BranchPanelProps) {
     if (!confirm('Delete this branch? This cannot be undone.')) return
 
     try {
-      await window.claude.branches.delete(branchId)
-      loadBranches()
+      await deleteMutation.mutateAsync({ branchId })
+      refetchAll()
     } catch (err) {
-      setError((err as Error).message)
+      console.error('Failed to delete branch:', err)
     }
   }
 
   const handleAbandon = async (branchId: string) => {
     try {
-      await window.claude.branches.abandon(branchId)
-      loadBranches()
+      await abandonMutation.mutateAsync({ branchId })
+      refetchAll()
     } catch (err) {
-      setError((err as Error).message)
+      console.error('Failed to abandon branch:', err)
     }
   }
 
@@ -294,26 +285,27 @@ export function BranchPanel({ session }: BranchPanelProps) {
     const branchPointId = lastMessage?.id || activeBranch.branchPointMessageId
 
     try {
-      await window.claude.branches.create({
+      await createMutation.mutateAsync({
         sessionId: session.id,
         branchPointMessageId: branchPointId,
         name,
         description,
       })
       setShowCreateModal(false)
-      loadBranches()
+      refetchAll()
     } catch (err) {
-      setError((err as Error).message)
+      console.error('Failed to create branch:', err)
     }
   }
 
   const handleDiff = async (branchA: string, branchB: string) => {
+    // For diff, we'll query imperatively since it's a one-off action
     try {
-      const diff = await window.claude.branches.diff(branchA, branchB)
+      const diff = await trpcUtils.branches.diff.fetch({ branchA, branchB })
       setDiffResult(diff)
       setShowDiffModal(true)
     } catch (err) {
-      setError((err as Error).message)
+      console.error('Failed to diff branches:', err)
     }
   }
 
@@ -323,15 +315,15 @@ export function BranchPanel({ session }: BranchPanelProps) {
     strategy: 'replace' | 'append' | 'cherry-pick'
   ) => {
     try {
-      await window.claude.branches.merge({
+      await mergeMutation.mutateAsync({
         sourceBranchId,
         targetBranchId,
         strategy,
       })
       setShowMergeModal(false)
-      loadBranches()
+      refetchAll()
     } catch (err) {
-      setError((err as Error).message)
+      console.error('Failed to merge branches:', err)
     }
   }
 

@@ -48,6 +48,18 @@ const MergeSchema = z.object({
   messageIds: z.array(z.string()).optional(),
 })
 
+const CreateSchema = z.object({
+  sessionId: z.string().min(1, 'Session ID cannot be empty'),
+  branchPointMessageId: z.string().min(1, 'Branch point message ID cannot be empty'),
+  name: z.string().min(1, 'Name cannot be empty').max(100, 'Name too long'),
+  description: z.string().optional(),
+})
+
+const DiffSchema = z.object({
+  branchA: z.string().min(1, 'Branch A ID cannot be empty'),
+  branchB: z.string().min(1, 'Branch B ID cannot be empty'),
+})
+
 const StatsFilterSchema = z
   .object({
     sessionId: z.string().optional(),
@@ -83,6 +95,13 @@ export const branchesRouter = router({
   }),
 
   /**
+   * Create a new branch from a specific message point
+   */
+  create: auditedProcedure.input(CreateSchema).mutation(({ input }) => {
+    return branchService.create(input)
+  }),
+
+  /**
    * Delete a branch (cannot delete main branch)
    */
   delete: auditedProcedure.input(BranchIdSchema).mutation(({ input }): Promise<boolean> => {
@@ -108,6 +127,13 @@ export const branchesRouter = router({
    */
   merge: auditedProcedure.input(MergeSchema).mutation(({ input }): Promise<boolean> => {
     return branchService.merge(input)
+  }),
+
+  /**
+   * Get diff between two branches
+   */
+  diff: publicProcedure.input(DiffSchema).query(({ input }) => {
+    return branchService.diff(input.branchA, input.branchB)
   }),
 
   /**
