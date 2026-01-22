@@ -74,6 +74,19 @@ export {
   ErrorEmptyState,
 } from './EmptyState'
 
+// Toast notifications
+export {
+  ToastProvider,
+  useToast,
+  toast,
+  setGlobalToast,
+  type Toast,
+  type ToastVariant,
+  type ToastPosition,
+  type ToastOptions,
+  type ToastAction,
+} from './Toast'
+
 // Lazy-loaded components (heavy dependencies)
 export {
   createLazyComponent,

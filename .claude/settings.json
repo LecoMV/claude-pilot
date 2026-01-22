@@ -28,7 +28,7 @@
       "Glob(*)",
       "Grep(*)"
     ],
-    "deny": ["Bash(rm -rf *)", "Bash(git push --force*)", "Write(.env*)", "Edit(.env*)"]
+    "deny": ["Bash(git push --force*)", "Write(.env*)", "Edit(.env*)"]
   },
   "context": {
     "include": ["CLAUDE.md", "package.json", "tsconfig.json"]

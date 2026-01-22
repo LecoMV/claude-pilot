@@ -3,6 +3,7 @@ import { Sidebar } from './components/layout/Sidebar'
 import { Header } from './components/layout/Header'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { ErrorToast } from './components/common/ErrorNotifications'
+import { ToastProvider, useToast, setGlobalToast } from './components/common/Toast'
 import { CommandPalette, useCommandPalette } from './components/common/CommandPalette'
 import { ShortcutsHelp, useShortcutsHelp } from './components/common/ShortcutsHelp'
 import { initializeErrorListener } from './stores/errors'
@@ -42,6 +43,15 @@ type View =
   | 'terminal'
   | 'globalSettings'
   | 'preferences'
+
+// Initialize global toast reference for use outside React components
+function GlobalToastInitializer() {
+  const toast = useToast()
+  useEffect(() => {
+    setGlobalToast(toast)
+  }, [toast])
+  return null
+}
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard')
@@ -121,52 +131,55 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="flex h-screen overflow-hidden">
-        {/* Skip link for keyboard navigation - hidden until focused */}
-        <a
-          href="#main-content"
-          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-accent-purple focus:text-white focus:rounded-lg focus:outline-none"
-        >
-          Skip to main content
-        </a>
-
-        {/* Sidebar navigation */}
-        <Sidebar
-          currentView={currentView}
-          onViewChange={setCurrentView}
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={handleToggleSidebar}
-        />
-
-        {/* Main content area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Header title={getViewTitle(currentView)} onToggleSidebar={handleToggleSidebar} />
-
-          <main
-            id="main-content"
-            role="main"
-            aria-label={`${getViewTitle(currentView)} content`}
-            className="flex-1 overflow-auto p-6 bg-background"
+      <ToastProvider position="bottom-right">
+        <GlobalToastInitializer />
+        <div className="flex h-screen overflow-hidden">
+          {/* Skip link for keyboard navigation - hidden until focused */}
+          <a
+            href="#main-content"
+            className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-accent-purple focus:text-white focus:rounded-lg focus:outline-none"
           >
-            <ErrorBoundary key={currentView}>{renderView()}</ErrorBoundary>
-          </main>
+            Skip to main content
+          </a>
+
+          {/* Sidebar navigation */}
+          <Sidebar
+            currentView={currentView}
+            onViewChange={setCurrentView}
+            collapsed={sidebarCollapsed}
+            onToggleCollapse={handleToggleSidebar}
+          />
+
+          {/* Main content area */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <Header title={getViewTitle(currentView)} onToggleSidebar={handleToggleSidebar} />
+
+            <main
+              id="main-content"
+              role="main"
+              aria-label={`${getViewTitle(currentView)} content`}
+              className="flex-1 overflow-auto p-6 bg-background"
+            >
+              <ErrorBoundary key={currentView}>{renderView()}</ErrorBoundary>
+            </main>
+          </div>
+
+          {/* Error notifications - live region for screen readers */}
+          <div role="status" aria-live="polite" aria-atomic="true">
+            <ErrorToast />
+          </div>
+
+          {/* Command Palette (Ctrl+K) */}
+          <CommandPalette
+            isOpen={commandPalette.isOpen}
+            onClose={commandPalette.close}
+            onNavigate={handleNavigate}
+          />
+
+          {/* Keyboard Shortcuts Help (?) */}
+          <ShortcutsHelp isOpen={shortcutsHelp.isOpen} onClose={shortcutsHelp.close} />
         </div>
-
-        {/* Error notifications - live region for screen readers */}
-        <div role="status" aria-live="polite" aria-atomic="true">
-          <ErrorToast />
-        </div>
-
-        {/* Command Palette (Ctrl+K) */}
-        <CommandPalette
-          isOpen={commandPalette.isOpen}
-          onClose={commandPalette.close}
-          onNavigate={handleNavigate}
-        />
-
-        {/* Keyboard Shortcuts Help (?) */}
-        <ShortcutsHelp isOpen={shortcutsHelp.isOpen} onClose={shortcutsHelp.close} />
-      </div>
+      </ToastProvider>
     </ErrorBoundary>
   )
 }
