@@ -82,8 +82,16 @@ export function ChatInterface() {
         if (data.type === 'chunk' && data.messageId && data.content) {
           updateMessage(data.messageId, data.content)
         } else if (data.type === 'done') {
+          // Update with final content and mark as complete
+          if (data.messageId && data.content) {
+            updateMessage(data.messageId, data.content)
+          }
           setIsStreaming(false)
         } else if (data.type === 'error') {
+          // Update message with error content if available
+          if (data.messageId) {
+            updateMessage(data.messageId, data.content || `Error: ${data.error || 'Unknown error'}`)
+          }
           setIsStreaming(false)
           console.error('Chat error:', data.error)
         }
