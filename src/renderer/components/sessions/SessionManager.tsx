@@ -1,4 +1,4 @@
-import { useEffect, useMemo, memo, useState } from 'react'
+import { useEffect, useMemo, memo, useState, useCallback } from 'react'
 import { Virtuoso } from 'react-virtuoso'
 import {
   Activity,
@@ -22,7 +22,15 @@ import {
   Plug,
   Cpu,
   Shrink,
+  Bot,
+  ChevronDown,
+  ChevronRight,
+  Code,
+  Check,
+  Copy,
+  Wrench,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { useSessionsStore, selectFilteredSessions } from '../../stores/sessions'
 import type { ExternalSession, SessionMessage } from '../../../shared/types'
 import { BranchPanel } from '../branches/BranchPanel'
@@ -470,11 +478,62 @@ function SessionDetail({
 }: SessionDetailProps) {
   const [activeTab, setActiveTab] = useState<SessionTab>('messages')
   const [showCompaction, setShowCompaction] = useState(false)
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set())
+  const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const tabs = [
     { id: 'messages' as const, label: 'Messages', icon: MessageSquare },
     { id: 'branches' as const, label: 'Branches', icon: GitBranch },
   ]
+
+  // Group consecutive tool calls for terminal view
+  const groupedMessages = useMemo(() => {
+    const groups: Array<SessionMessage | { type: 'tool-group'; tools: SessionMessage[] }> = []
+    let currentToolGroup: SessionMessage[] = []
+
+    for (const msg of messages) {
+      if (msg.type === 'tool-result') {
+        currentToolGroup.push(msg)
+      } else {
+        if (currentToolGroup.length > 0) {
+          groups.push({ type: 'tool-group', tools: currentToolGroup })
+          currentToolGroup = []
+        }
+        groups.push(msg)
+      }
+    }
+    if (currentToolGroup.length > 0) {
+      groups.push({ type: 'tool-group', tools: currentToolGroup })
+    }
+    return groups
+  }, [messages])
+
+  const toggleToolExpanded = useCallback((id: string) => {
+    setExpandedTools((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }, [])
+
+  const copyToClipboard = useCallback((text: string, id: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
+  }, [])
+
+  const formatTime = useCallback((ts: number) => {
+    return new Date(ts).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
+  }, [])
 
   return (
     <>
@@ -681,21 +740,48 @@ function SessionDetail({
       {/* Tab Content */}
       <div className="flex-1 overflow-auto">
         {activeTab === 'messages' && (
-          <div className="h-full flex flex-col">
-            <div className="p-4 pb-0">
-              <h3 className="text-sm font-medium text-text-muted mb-3">Recent Messages</h3>
+          <div className="h-full flex flex-col bg-background">
+            <div className="p-4 pb-0 border-b border-border bg-surface">
+              <div className="flex items-center gap-2">
+                <Terminal className="w-4 h-4 text-accent-purple" />
+                <h3 className="text-sm font-medium text-text-primary font-mono">
+                  Session Transcript
+                </h3>
+                <span className="text-xs text-text-muted ml-auto font-mono">
+                  {messages.length} messages
+                </span>
+              </div>
             </div>
             {messages.length === 0 ? (
-              <p className="text-text-muted text-center py-8">No messages to display</p>
+              <p className="text-text-muted text-center py-8 font-mono">No messages to display</p>
             ) : (
-              <div className="flex-1 px-4 pb-4">
+              <div className="flex-1 overflow-auto font-mono text-sm">
                 <Virtuoso
-                  data={messages}
-                  itemContent={(index, msg) => (
-                    <div className="pb-3">
-                      <MessageCard key={msg.uuid} message={msg} formatDate={formatDate} />
-                    </div>
-                  )}
+                  data={groupedMessages}
+                  itemContent={(_index, item) => {
+                    if ('tools' in item) {
+                      return (
+                        <ToolCallGroup
+                          key={`tool-group-${item.tools[0]?.uuid}`}
+                          tools={item.tools}
+                          expandedTools={expandedTools}
+                          toggleToolExpanded={toggleToolExpanded}
+                          copiedId={copiedId}
+                          copyToClipboard={copyToClipboard}
+                        />
+                      )
+                    }
+                    return (
+                      <TerminalMessage
+                        key={item.uuid}
+                        message={item}
+                        isUser={item.type === 'user'}
+                        formatTime={formatTime}
+                        copiedId={copiedId}
+                        copyToClipboard={copyToClipboard}
+                      />
+                    )
+                  }}
                   overscan={50}
                 />
               </div>
@@ -783,8 +869,8 @@ function getDisplayContent(message: SessionMessage): string {
   return '(unknown content format)'
 }
 
-// Message Card Component (memoized for performance)
-const MessageCard = memo(function MessageCard({
+// Message Card Component (memoized for performance) - kept for fallback
+const _MessageCard = memo(function _MessageCard({
   message,
   formatDate,
 }: {
@@ -830,6 +916,235 @@ const MessageCard = memo(function MessageCard({
         <div className="mt-2 text-xs text-text-muted flex items-center gap-2">
           <Zap className="w-3 h-3" />
           {message.usage.input_tokens} in / {message.usage.output_tokens} out
+        </div>
+      )}
+    </div>
+  )
+})
+
+// Terminal-style message component
+interface TerminalMessageProps {
+  message: SessionMessage
+  isUser: boolean
+  formatTime: (timestamp: number) => string
+  copiedId: string | null
+  copyToClipboard: (text: string, id: string) => void
+}
+
+const TerminalMessage = memo(function TerminalMessage({
+  message,
+  isUser,
+  formatTime,
+  copiedId,
+  copyToClipboard,
+}: TerminalMessageProps) {
+  const [expanded, setExpanded] = useState(true)
+  const content = getDisplayContent(message)
+  const needsTruncation = content.length > 2000
+
+  // Parse code blocks
+  const renderContent = (text: string) => {
+    const parts = text.split(/(```[\s\S]*?```)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith('```')) {
+        const match = part.match(/```(\w+)?\n?([\s\S]*?)```/)
+        if (match) {
+          const [, lang, code] = match
+          return (
+            <div
+              key={i}
+              className="my-2 rounded-lg overflow-hidden bg-surface border border-border"
+            >
+              <div className="flex items-center justify-between px-3 py-1.5 bg-surface-hover border-b border-border">
+                <div className="flex items-center gap-2 text-xs text-text-muted">
+                  <Code className="w-3 h-3" />
+                  {lang || 'code'}
+                </div>
+                <button
+                  onClick={() => navigator.clipboard.writeText(code.trim())}
+                  className="text-xs text-text-muted hover:text-text-primary"
+                >
+                  <Copy className="w-3 h-3" />
+                </button>
+              </div>
+              <pre className="p-3 text-xs overflow-x-auto">
+                <code className="text-accent-green">{code.trim()}</code>
+              </pre>
+            </div>
+          )
+        }
+      }
+      return (
+        <span key={i} className="whitespace-pre-wrap">
+          {part}
+        </span>
+      )
+    })
+  }
+
+  return (
+    <div className={cn('py-2 px-4 border-b border-border/30', isUser && 'bg-surface/30')}>
+      {/* Header line */}
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-text-muted text-xs">[{formatTime(message.timestamp)}]</span>
+        {isUser ? (
+          <>
+            <User className="w-3.5 h-3.5 text-accent-blue" />
+            <span className="text-accent-blue font-semibold text-xs">USER</span>
+          </>
+        ) : (
+          <>
+            <Bot className="w-3.5 h-3.5 text-accent-purple" />
+            <span className="text-accent-purple font-semibold text-xs">ASSISTANT</span>
+          </>
+        )}
+        {message.usage && (
+          <span className="text-text-muted text-xs ml-auto">
+            {(message.usage.input_tokens || 0) + (message.usage.output_tokens || 0)} tokens
+          </span>
+        )}
+        <button
+          onClick={() => copyToClipboard(content, message.uuid)}
+          className="p-1 text-text-muted hover:text-text-primary rounded"
+        >
+          {copiedId === message.uuid ? (
+            <Check className="w-3 h-3 text-accent-green" />
+          ) : (
+            <Copy className="w-3 h-3" />
+          )}
+        </button>
+      </div>
+
+      {/* Content */}
+      <div
+        className={cn(
+          'pl-4 text-text-primary text-sm',
+          !expanded && needsTruncation && 'max-h-48 overflow-hidden'
+        )}
+      >
+        {isUser ? (
+          <span className="text-text-primary">
+            {'> '}
+            {content}
+          </span>
+        ) : (
+          renderContent(expanded || !needsTruncation ? content : content.slice(0, 2000) + '...')
+        )}
+      </div>
+
+      {needsTruncation && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="pl-4 mt-1 text-xs text-accent-purple hover:underline"
+        >
+          {expanded ? '▲ Collapse' : `▼ Expand (${content.length.toLocaleString()} chars)`}
+        </button>
+      )}
+    </div>
+  )
+})
+
+// Tool call group component
+interface ToolCallGroupProps {
+  tools: SessionMessage[]
+  expandedTools: Set<string>
+  toggleToolExpanded: (id: string) => void
+  copiedId: string | null
+  copyToClipboard: (text: string, id: string) => void
+}
+
+const ToolCallGroup = memo(function ToolCallGroup({
+  tools,
+  expandedTools,
+  toggleToolExpanded,
+  copiedId,
+  copyToClipboard,
+}: ToolCallGroupProps) {
+  const [groupExpanded, setGroupExpanded] = useState(false)
+
+  // Categorize tools
+  const reads = tools.filter((t) => t.toolName?.toLowerCase().includes('read'))
+  const edits = tools.filter(
+    (t) => t.toolName?.toLowerCase().includes('edit') || t.toolName?.toLowerCase().includes('write')
+  )
+  const others = tools.filter(
+    (t) =>
+      !t.toolName?.toLowerCase().includes('read') &&
+      !t.toolName?.toLowerCase().includes('edit') &&
+      !t.toolName?.toLowerCase().includes('write')
+  )
+
+  const summary = [
+    reads.length > 0 && `${reads.length} read${reads.length > 1 ? 's' : ''}`,
+    edits.length > 0 && `${edits.length} edit${edits.length > 1 ? 's' : ''}`,
+    others.length > 0 && `${others.length} other`,
+  ]
+    .filter(Boolean)
+    .join(', ')
+
+  return (
+    <div className="py-1 px-4 border-l-2 border-accent-green/30 ml-4 my-2">
+      <button
+        onClick={() => setGroupExpanded(!groupExpanded)}
+        className="flex items-center gap-2 text-xs text-text-muted hover:text-text-primary w-full text-left"
+      >
+        {groupExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        <Wrench className="w-3 h-3 text-accent-green" />
+        <span className="text-accent-green font-medium">{tools.length} tool calls</span>
+        <span className="text-text-muted">({summary})</span>
+      </button>
+
+      {groupExpanded && (
+        <div className="mt-2 space-y-2 pl-4">
+          {tools.map((tool) => {
+            const isExpanded = expandedTools.has(tool.uuid)
+            return (
+              <div key={tool.uuid} className="text-xs">
+                <button
+                  onClick={() => toggleToolExpanded(tool.uuid)}
+                  className="flex items-center gap-2 text-text-muted hover:text-text-primary"
+                >
+                  {isExpanded ? (
+                    <ChevronDown className="w-3 h-3" />
+                  ) : (
+                    <ChevronRight className="w-3 h-3" />
+                  )}
+                  <span className="font-mono text-accent-yellow">{tool.toolName}</span>
+                </button>
+                {isExpanded && (
+                  <div className="mt-1 p-2 bg-surface rounded border border-border overflow-x-auto">
+                    {tool.toolInput && (
+                      <div className="mb-2">
+                        <span className="text-text-muted">Input:</span>
+                        <pre className="text-text-primary text-xs">
+                          {JSON.stringify(tool.toolInput, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-text-muted">Output:</span>
+                        <pre className="text-text-primary whitespace-pre-wrap max-h-48 overflow-auto text-xs">
+                          {tool.toolOutput?.slice(0, 2000)}
+                          {(tool.toolOutput?.length || 0) > 2000 && '...'}
+                        </pre>
+                      </div>
+                      <button
+                        onClick={() => copyToClipboard(tool.toolOutput || '', tool.uuid)}
+                        className="p-1 text-text-muted hover:text-text-primary ml-2 flex-shrink-0"
+                      >
+                        {copiedId === tool.uuid ? (
+                          <Check className="w-3 h-3 text-accent-green" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
