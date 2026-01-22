@@ -42,10 +42,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       <div className="flex flex-col items-center justify-center h-64 gap-4">
         <XCircle className="w-12 h-12 text-accent-red" />
         <p className="text-text-muted">{error}</p>
-        <button
-          onClick={refresh}
-          className="btn btn-primary"
-        >
+        <button onClick={refresh} className="btn btn-primary">
           Retry
         </button>
       </div>
@@ -58,9 +55,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-text-primary">System Status</h2>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-text-muted">
-            Updated {formatTimeAgo(lastUpdate)}
-          </span>
+          <span className="text-xs text-text-muted">Updated {formatTimeAgo(lastUpdate)}</span>
           <button
             onClick={refresh}
             className={cn(
@@ -89,30 +84,35 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             title="Claude Code"
             status={status?.claude.online ? 'online' : 'offline'}
             detail={status?.claude.version || 'Not installed'}
+            onClick={() => onNavigate?.('sessions')}
           />
           <StatusCard
             icon={Server}
             title="MCP Servers"
             status={status?.mcp.totalActive ? 'online' : 'offline'}
             detail={`${status?.mcp.totalActive || 0} active, ${status?.mcp.totalDisabled || 0} disabled`}
+            onClick={() => onNavigate?.('mcp')}
           />
           <StatusCard
             icon={Bot}
             title="Ollama"
             status={status?.ollama?.online ? 'online' : 'offline'}
             detail={status?.ollama?.online ? `${status.ollama.modelCount} models` : 'Not running'}
+            onClick={() => onNavigate?.('ollama')}
           />
           <StatusCard
             icon={Database}
             title="PostgreSQL"
             status={status?.memory.postgresql.online ? 'online' : 'offline'}
             detail="Learnings database"
+            onClick={() => onNavigate?.('memory')}
           />
           <StatusCard
             icon={Layers}
             title="Memgraph"
             status={status?.memory.memgraph.online ? 'online' : 'offline'}
             detail="Knowledge graph"
+            onClick={() => onNavigate?.('memory')}
           />
         </div>
       </section>
@@ -191,11 +191,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       <section>
         <h2 className="text-lg font-semibold text-text-primary mb-4">Quick Actions</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <QuickAction
-            icon={Server}
-            label="MCP Servers"
-            onClick={() => onNavigate?.('mcp')}
-          />
+          <QuickAction icon={Server} label="MCP Servers" onClick={() => onNavigate?.('mcp')} />
           <QuickAction
             icon={Database}
             label="Memory Browser"
@@ -206,11 +202,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             label="Knowledge Graph"
             onClick={() => onNavigate?.('memory')}
           />
-          <QuickAction
-            icon={Clock}
-            label="Sessions"
-            onClick={() => onNavigate?.('sessions')}
-          />
+          <QuickAction icon={Clock} label="Sessions" onClick={() => onNavigate?.('sessions')} />
         </div>
       </section>
     </div>
@@ -222,11 +214,21 @@ interface StatusCardProps {
   title: string
   status: 'online' | 'offline' | 'warning'
   detail: string
+  onClick?: () => void
 }
 
-function StatusCard({ icon: Icon, title, status, detail }: StatusCardProps) {
+function StatusCard({ icon: Icon, title, status, detail, onClick }: StatusCardProps) {
   return (
-    <div className="card p-4 hover:border-border-hover transition-colors">
+    <div
+      className={cn(
+        'card p-4 hover:border-border-hover transition-colors',
+        onClick && 'cursor-pointer hover:bg-surface-hover'
+      )}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
+    >
       <div className="flex items-start justify-between">
         <div className="p-2 rounded-lg bg-surface-hover">
           <Icon className="w-5 h-5 text-text-secondary" />
@@ -438,23 +440,18 @@ function GPUCard({ gpu }: GPUCardProps) {
         </p>
         <div className="flex items-center gap-2 mt-1">
           <AlertTriangle className="w-3 h-3 text-accent-yellow" />
-          <p className="text-xs text-accent-yellow">
-            {gpu.error || 'Limited info available'}
-          </p>
+          <p className="text-xs text-accent-yellow">{gpu.error || 'Limited info available'}</p>
         </div>
         {gpu.driverVersion && (
-          <p className="text-xs text-text-muted mt-1">
-            Driver: {gpu.driverVersion}
-          </p>
+          <p className="text-xs text-text-muted mt-1">Driver: {gpu.driverVersion}</p>
         )}
       </div>
     )
   }
 
   // Full GPU info available
-  const memUsagePercent = gpu.memoryUsed && gpu.memoryTotal
-    ? (gpu.memoryUsed / gpu.memoryTotal) * 100
-    : 0
+  const memUsagePercent =
+    gpu.memoryUsed && gpu.memoryTotal ? (gpu.memoryUsed / gpu.memoryTotal) * 100 : 0
 
   return (
     <div className="card p-4">

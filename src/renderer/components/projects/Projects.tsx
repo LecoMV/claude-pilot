@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   Folder,
   FileText,
@@ -7,18 +7,31 @@ import {
   Search,
   Plus,
   FolderOpen,
-  Terminal,
   RefreshCw,
+  Play,
+  RotateCcw,
+  User,
+  List,
+  ChevronDown,
+  LayoutGrid,
+  LayoutList,
 } from 'lucide-react'
 import { trpc } from '@/lib/trpc/react'
-import type { ClaudeProject } from '@shared/types'
+import { cn } from '@/lib/utils'
+import type { ClaudeProject, ClaudeCodeProfile } from '@shared/types'
 
-export function Projects() {
+interface ProjectsProps {
+  onNavigate?: (view: string, params?: Record<string, string>) => void
+}
+
+export function Projects({ onNavigate }: ProjectsProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedProject, setSelectedProject] = useState<ClaudeProject | null>(null)
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
 
-  // tRPC query
+  // tRPC queries
   const projectsQuery = trpc.claude.projects.useQuery(undefined, { refetchInterval: 30000 })
+  const profilesQuery = trpc.profiles.list.useQuery()
 
   // tRPC mutations
   const openPathMutation = trpc.system.openPath.useMutation()
@@ -39,12 +52,16 @@ export function Projects() {
     )
   }
 
-  const openInTerminal = (path: string) => {
+  const launchClaude = (path: string, _options?: { continue?: boolean; profile?: string }) => {
+    // TODO: Build and execute claude command with options
+    // For now, open terminal at path - in the future we'd execute the command
     openAtMutation.mutate(
       { path },
-      { onError: (error) => console.error('Failed to open terminal:', error) }
+      { onError: (error) => console.error('Failed to launch Claude:', error) }
     )
   }
+
+  const profiles = profilesQuery.data ?? []
 
   const addProjectFolder = () => {
     openDirectoryMutation.mutate(undefined, {
@@ -85,6 +102,38 @@ export function Projects() {
           />
         </div>
         <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={cn(
+                'p-2 transition-colors',
+                viewMode === 'grid'
+                  ? 'bg-accent-purple/10 text-accent-purple'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface-hover'
+              )}
+              title="Grid view"
+              aria-label="Grid view"
+              aria-pressed={viewMode === 'grid'}
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={cn(
+                'p-2 transition-colors',
+                viewMode === 'list'
+                  ? 'bg-accent-purple/10 text-accent-purple'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface-hover'
+              )}
+              title="List view"
+              aria-label="List view"
+              aria-pressed={viewMode === 'list'}
+            >
+              <LayoutList className="w-4 h-4" />
+            </button>
+          </div>
+
           <button
             onClick={loadProjects}
             className="btn btn-secondary"
@@ -100,18 +149,27 @@ export function Projects() {
         </div>
       </div>
 
-      {/* Projects grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Projects grid/list */}
+      <div
+        className={cn(
+          viewMode === 'grid'
+            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'
+            : 'flex flex-col gap-2'
+        )}
+      >
         {filteredProjects.map((project) => (
           <ProjectCard
             key={project.path}
             project={project}
+            viewMode={viewMode}
+            profiles={profiles}
             isSelected={selectedProject?.path === project.path}
             onSelect={() =>
               setSelectedProject(selectedProject?.path === project.path ? null : project)
             }
             onOpenFolder={() => openInFileManager(project.path)}
-            onOpenTerminal={() => openInTerminal(project.path)}
+            onLaunch={(options) => launchClaude(project.path, options)}
+            onViewSessions={() => onNavigate?.('sessions', { project: project.path })}
           />
         ))}
       </div>
@@ -135,26 +193,117 @@ export function Projects() {
 
 interface ProjectCardProps {
   project: ClaudeProject
+  viewMode: 'grid' | 'list'
+  profiles: ClaudeCodeProfile[]
   isSelected: boolean
   onSelect: () => void
   onOpenFolder: () => void
-  onOpenTerminal: () => void
+  onLaunch: (options?: { continue?: boolean; profile?: string }) => void
+  onViewSessions: () => void
 }
 
 function ProjectCard({
   project,
+  viewMode,
+  profiles,
   isSelected,
   onSelect,
   onOpenFolder,
-  onOpenTerminal,
+  onLaunch,
+  onViewSessions,
 }: ProjectCardProps) {
+  const [showLaunchMenu, setShowLaunchMenu] = useState(false)
+  const [showProfileMenu, setShowProfileMenu] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowLaunchMenu(false)
+        setShowProfileMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  if (viewMode === 'list') {
+    return (
+      <div
+        className={cn(
+          'card p-3 flex items-center gap-4 transition-colors cursor-pointer',
+          isSelected
+            ? 'border-accent-purple ring-1 ring-accent-purple/30'
+            : 'hover:border-accent-purple/50'
+        )}
+        onClick={onSelect}
+      >
+        <div className="p-2 rounded-lg bg-accent-purple/10">
+          <Folder className="w-4 h-4 text-accent-purple" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-medium text-text-primary truncate">{project.name}</h3>
+          <p className="text-xs text-text-muted truncate">{project.path}</p>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          {project.hasCLAUDEMD && (
+            <span className="px-2 py-0.5 rounded bg-accent-green/10 text-accent-green">
+              CLAUDE.md
+            </span>
+          )}
+          {project.hasBeads && (
+            <span className="px-2 py-0.5 rounded bg-accent-blue/10 text-accent-blue">Beads</span>
+          )}
+          <span className="text-text-muted">{project.sessionCount} sessions</span>
+        </div>
+        <div className="flex items-center gap-1" ref={menuRef}>
+          <div className="relative">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowLaunchMenu(!showLaunchMenu)
+              }}
+              className="btn btn-sm btn-primary flex items-center gap-1"
+            >
+              <Play className="w-3 h-3" />
+              Launch
+              <ChevronDown className="w-3 h-3" />
+            </button>
+            {showLaunchMenu && (
+              <LaunchMenu
+                profiles={profiles}
+                showProfileMenu={showProfileMenu}
+                setShowProfileMenu={setShowProfileMenu}
+                onLaunch={onLaunch}
+                onViewSessions={onViewSessions}
+                onClose={() => setShowLaunchMenu(false)}
+              />
+            )}
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenFolder()
+            }}
+            className="p-1.5 rounded-lg text-text-muted hover:text-accent-green hover:bg-surface-hover transition-colors"
+            title="Open in File Manager"
+          >
+            <FolderOpen className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div
-      className={`card transition-colors cursor-pointer ${
+      className={cn(
+        'card transition-colors cursor-pointer',
         isSelected
           ? 'border-accent-purple ring-1 ring-accent-purple/30'
           : 'hover:border-accent-purple/50'
-      }`}
+      )}
       onClick={onSelect}
     >
       <div className="p-4">
@@ -162,17 +311,30 @@ function ProjectCard({
           <div className="p-2 rounded-lg bg-accent-purple/10">
             <Folder className="w-5 h-5 text-accent-purple" />
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onOpenTerminal()
-              }}
-              className="p-1.5 rounded-lg text-text-muted hover:text-accent-blue hover:bg-surface-hover transition-colors"
-              title="Open in Terminal"
-            >
-              <Terminal className="w-4 h-4" />
-            </button>
+          <div className="flex items-center gap-1" ref={menuRef}>
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowLaunchMenu(!showLaunchMenu)
+                }}
+                className="p-1.5 rounded-lg text-text-muted hover:text-accent-purple hover:bg-surface-hover transition-colors flex items-center gap-0.5"
+                title="Launch Claude"
+              >
+                <Play className="w-4 h-4" />
+                <ChevronDown className="w-3 h-3" />
+              </button>
+              {showLaunchMenu && (
+                <LaunchMenu
+                  profiles={profiles}
+                  showProfileMenu={showProfileMenu}
+                  setShowProfileMenu={setShowProfileMenu}
+                  onLaunch={onLaunch}
+                  onViewSessions={onViewSessions}
+                  onClose={() => setShowLaunchMenu(false)}
+                />
+              )}
+            </div>
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -216,6 +378,102 @@ function ProjectCard({
           </span>
         </div>
       </div>
+    </div>
+  )
+}
+
+interface LaunchMenuProps {
+  profiles: ClaudeCodeProfile[]
+  showProfileMenu: boolean
+  setShowProfileMenu: (show: boolean) => void
+  onLaunch: (options?: { continue?: boolean; profile?: string }) => void
+  onViewSessions: () => void
+  onClose: () => void
+}
+
+function LaunchMenu({
+  profiles,
+  showProfileMenu,
+  setShowProfileMenu,
+  onLaunch,
+  onViewSessions,
+  onClose,
+}: LaunchMenuProps) {
+  return (
+    <div className="absolute right-0 top-full mt-1 w-48 bg-surface border border-border rounded-lg shadow-lg z-50 py-1">
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          onLaunch()
+          onClose()
+        }}
+        className="w-full px-3 py-2 text-left text-sm text-text-primary hover:bg-surface-hover flex items-center gap-2"
+      >
+        <Play className="w-4 h-4 text-accent-green" />
+        New Session
+      </button>
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          onLaunch({ continue: true })
+          onClose()
+        }}
+        className="w-full px-3 py-2 text-left text-sm text-text-primary hover:bg-surface-hover flex items-center gap-2"
+      >
+        <RotateCcw className="w-4 h-4 text-accent-blue" />
+        Continue Last
+      </button>
+      <div className="relative">
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setShowProfileMenu(!showProfileMenu)
+          }}
+          className="w-full px-3 py-2 text-left text-sm text-text-primary hover:bg-surface-hover flex items-center justify-between"
+        >
+          <span className="flex items-center gap-2">
+            <User className="w-4 h-4 text-accent-purple" />
+            Choose Profile
+          </span>
+          <ChevronDown
+            className={cn('w-3 h-3 transition-transform', showProfileMenu && 'rotate-180')}
+          />
+        </button>
+        {showProfileMenu && profiles.length > 0 && (
+          <div className="absolute left-full top-0 ml-1 w-40 bg-surface border border-border rounded-lg shadow-lg py-1">
+            {profiles.map((profile) => (
+              <button
+                key={profile.id}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onLaunch({ profile: profile.id })
+                  onClose()
+                }}
+                className="w-full px-3 py-2 text-left text-sm text-text-primary hover:bg-surface-hover truncate"
+              >
+                {profile.name}
+              </button>
+            ))}
+          </div>
+        )}
+        {showProfileMenu && profiles.length === 0 && (
+          <div className="absolute left-full top-0 ml-1 w-40 bg-surface border border-border rounded-lg shadow-lg p-3">
+            <p className="text-xs text-text-muted">No profiles configured</p>
+          </div>
+        )}
+      </div>
+      <div className="border-t border-border my-1" />
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          onViewSessions()
+          onClose()
+        }}
+        className="w-full px-3 py-2 text-left text-sm text-text-primary hover:bg-surface-hover flex items-center gap-2"
+      >
+        <List className="w-4 h-4 text-text-muted" />
+        View Sessions
+      </button>
     </div>
   )
 }

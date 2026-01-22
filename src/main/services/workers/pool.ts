@@ -116,7 +116,7 @@ class WorkerPoolService {
 
     // Interactive pool: High priority, limited threads
     this.interactivePool = new Piscina({
-      filename: join(workerDir, 'interactive.js'),
+      filename: join(workerDir, 'interactive.cjs'),
       maxThreads: this.config.interactiveThreads,
       minThreads: 1,
       idleTimeout: this.config.idleTimeout,
@@ -130,7 +130,7 @@ class WorkerPoolService {
 
     // Background pool: Low priority, many threads
     this.backgroundPool = new Piscina({
-      filename: join(workerDir, 'batch.js'),
+      filename: join(workerDir, 'batch.cjs'),
       maxThreads: this.config.backgroundThreads,
       minThreads: 0, // Allow full cleanup when idle
       idleTimeout: this.config.idleTimeout,
