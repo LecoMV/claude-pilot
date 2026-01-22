@@ -1,22 +1,23 @@
 /**
  * Session Transcript Viewer
- * Full conversation replay with tool call visualization
+ * Hybrid terminal-style conversation viewer with syntax highlighting
  */
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import {
   MessageSquare,
   Bot,
   User,
   Wrench,
   ChevronDown,
-  ChevronUp,
+  ChevronRight,
   Copy,
   Check,
   Download,
   Search,
   Loader2,
-  FileText,
+  Terminal,
+  Code,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/react'
@@ -25,30 +26,6 @@ import type { SessionMessage, ExternalSession } from '@shared/types'
 interface TranscriptViewerProps {
   session: ExternalSession
   _onClose?: () => void // Prefixed with _ as unused but part of interface for future use
-}
-
-const MESSAGE_TYPE_CONFIG = {
-  user: {
-    icon: User,
-    label: 'User',
-    bgColor: 'bg-accent-blue/10',
-    borderColor: 'border-accent-blue/30',
-    iconColor: 'text-accent-blue',
-  },
-  assistant: {
-    icon: Bot,
-    label: 'Assistant',
-    bgColor: 'bg-accent-purple/10',
-    borderColor: 'border-accent-purple/30',
-    iconColor: 'text-accent-purple',
-  },
-  'tool-result': {
-    icon: Wrench,
-    label: 'Tool Result',
-    bgColor: 'bg-accent-green/10',
-    borderColor: 'border-accent-green/30',
-    iconColor: 'text-accent-green',
-  },
 }
 
 export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
@@ -61,19 +38,8 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set())
   const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [showToolResults, setShowToolResults] = useState(true)
-  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set())
+  const [showToolCalls, setShowToolCalls] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  const toggleMessageExpanded = (id: string) => {
-    const newExpanded = new Set(expandedMessages)
-    if (newExpanded.has(id)) {
-      newExpanded.delete(id)
-    } else {
-      newExpanded.add(id)
-    }
-    setExpandedMessages(newExpanded)
-  }
 
   // Load messages
   useEffect(() => {
@@ -92,28 +58,57 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
     loadMessages()
   }, [session.id, utils])
 
+  // Group consecutive tool calls
+  const groupedMessages = useMemo(() => {
+    const groups: Array<SessionMessage | { type: 'tool-group'; tools: SessionMessage[] }> = []
+    let currentToolGroup: SessionMessage[] = []
+
+    for (const msg of messages) {
+      if (msg.type === 'tool-result') {
+        currentToolGroup.push(msg)
+      } else {
+        // Flush any pending tool group
+        if (currentToolGroup.length > 0) {
+          groups.push({ type: 'tool-group', tools: currentToolGroup })
+          currentToolGroup = []
+        }
+        groups.push(msg)
+      }
+    }
+    // Flush remaining tool group
+    if (currentToolGroup.length > 0) {
+      groups.push({ type: 'tool-group', tools: currentToolGroup })
+    }
+    return groups
+  }, [messages])
+
   // Filter messages
-  const filteredMessages = useMemo(() => {
-    let filtered = messages
+  const filteredGroups = useMemo(() => {
+    if (!searchQuery && showToolCalls) return groupedMessages
 
-    // Filter by type
-    if (!showToolResults) {
-      filtered = filtered.filter((m) => m.type !== 'tool-result')
-    }
+    return groupedMessages.filter((group) => {
+      // Skip tool groups if hidden
+      if ('tools' in group) {
+        if (!showToolCalls) return false
+        if (searchQuery) {
+          const query = searchQuery.toLowerCase()
+          return group.tools.some(
+            (t) =>
+              t.toolName?.toLowerCase().includes(query) ||
+              t.toolOutput?.toLowerCase().includes(query)
+          )
+        }
+        return true
+      }
 
-    // Filter by search
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      filtered = filtered.filter(
-        (m) =>
-          m.content?.toLowerCase().includes(query) ||
-          m.toolName?.toLowerCase().includes(query) ||
-          m.toolOutput?.toLowerCase().includes(query)
-      )
-    }
-
-    return filtered
-  }, [messages, showToolResults, searchQuery])
+      // Regular message
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase()
+        return group.content?.toLowerCase().includes(query)
+      }
+      return true
+    })
+  }, [groupedMessages, showToolCalls, searchQuery])
 
   // Calculate token totals
   const tokenStats = useMemo(() => {
@@ -132,15 +127,17 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
     return { input, output, cached }
   }, [messages])
 
-  const toggleToolExpanded = (id: string) => {
-    const newExpanded = new Set(expandedTools)
-    if (newExpanded.has(id)) {
-      newExpanded.delete(id)
-    } else {
-      newExpanded.add(id)
-    }
-    setExpandedTools(newExpanded)
-  }
+  const toggleToolExpanded = useCallback((id: string) => {
+    setExpandedTools((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }, [])
 
   const copyToClipboard = async (text: string, id: string) => {
     await navigator.clipboard.writeText(text)
@@ -174,7 +171,12 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
   }
 
   const formatTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString()
+    return new Date(timestamp).toLocaleTimeString('en-US', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
   }
 
   if (loading) {
@@ -190,12 +192,12 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
       {/* Header */}
       <div className="flex-shrink-0 p-4 border-b border-border">
         <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-              <FileText className="w-5 h-5" />
-              Session Transcript
-            </h2>
-            <p className="text-sm text-text-muted">{session.projectName}</p>
+          <div className="flex items-center gap-3">
+            <Terminal className="w-5 h-5 text-accent-purple" />
+            <div>
+              <h2 className="text-lg font-semibold text-text-primary">Session Transcript</h2>
+              <p className="text-sm text-text-muted font-mono">{session.projectName}</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -210,15 +212,13 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
         </div>
 
         {/* Stats */}
-        <div className="flex items-center gap-4 text-sm">
-          <span className="text-text-muted">{filteredMessages.length} messages</span>
-          <span className="text-text-muted">Input: {tokenStats.input.toLocaleString()} tokens</span>
-          <span className="text-text-muted">
-            Output: {tokenStats.output.toLocaleString()} tokens
-          </span>
+        <div className="flex items-center gap-4 text-xs font-mono">
+          <span className="text-text-muted">{messages.length} messages</span>
+          <span className="text-text-muted">↑ {tokenStats.input.toLocaleString()}</span>
+          <span className="text-text-muted">↓ {tokenStats.output.toLocaleString()}</span>
           {tokenStats.cached > 0 && (
             <span className="text-accent-green">
-              Cached: {tokenStats.cached.toLocaleString()} tokens
+              ⚡ {tokenStats.cached.toLocaleString()} cached
             </span>
           )}
         </div>
@@ -231,17 +231,17 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search messages..."
-              className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg
-                         text-text-primary placeholder:text-text-muted text-sm
+              placeholder="Search..."
+              className="w-full pl-10 pr-4 py-2 bg-background border border-border rounded-lg
+                         text-text-primary placeholder:text-text-muted text-sm font-mono
                          focus:outline-none focus:border-accent-purple"
             />
           </div>
           <button
-            onClick={() => setShowToolResults(!showToolResults)}
+            onClick={() => setShowToolCalls(!showToolCalls)}
             className={cn(
-              'flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors',
-              showToolResults
+              'flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors font-mono',
+              showToolCalls
                 ? 'bg-accent-green/10 text-accent-green'
                 : 'bg-surface-hover text-text-muted'
             )}
@@ -252,155 +252,289 @@ export function TranscriptViewer({ session, _onClose }: TranscriptViewerProps) {
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      {/* Terminal-style Messages */}
+      <div className="flex-1 overflow-y-auto bg-background font-mono text-sm">
         {error && (
-          <div className="p-4 bg-accent-red/10 border border-accent-red/20 rounded-lg">
-            <p className="text-accent-red text-sm">{error}</p>
+          <div className="p-4 bg-accent-red/10 border-b border-accent-red/20">
+            <p className="text-accent-red">{error}</p>
           </div>
         )}
 
-        {filteredMessages.map((message, _index) => {
-          const config = MESSAGE_TYPE_CONFIG[message.type as keyof typeof MESSAGE_TYPE_CONFIG]
-          if (!config) return null
+        <div className="p-4 space-y-1">
+          {filteredGroups.map((group, index) => {
+            // Tool group
+            if ('tools' in group) {
+              return (
+                <ToolCallGroup
+                  key={`tool-group-${index}`}
+                  tools={group.tools}
+                  expandedTools={expandedTools}
+                  toggleToolExpanded={toggleToolExpanded}
+                  copiedId={copiedId}
+                  copyToClipboard={copyToClipboard}
+                />
+              )
+            }
 
-          const Icon = config.icon
-          const isToolResult = message.type === 'tool-result'
-          const isToolExpanded = expandedTools.has(message.uuid)
-          const isMessageExpanded = expandedMessages.has(message.uuid)
-          const contentLength = (message.content?.length || 0) + (message.toolOutput?.length || 0)
-          const needsTruncation = contentLength > 500
+            // Regular message
+            const isUser = group.type === 'user'
 
-          return (
-            <div
-              key={message.uuid}
-              className={cn('rounded-lg border', config.bgColor, config.borderColor)}
-            >
-              {/* Message Header */}
-              <div className="flex items-center justify-between px-4 py-2 border-b border-inherit">
-                <div className="flex items-center gap-2">
-                  <Icon className={cn('w-4 h-4', config.iconColor)} />
-                  <span className={cn('text-sm font-medium', config.iconColor)}>
-                    {config.label}
-                  </span>
-                  {isToolResult && message.toolName && (
-                    <span className="text-xs text-text-muted font-mono">{message.toolName}</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-text-muted">{formatTime(message.timestamp)}</span>
-                  {message.usage && (
-                    <span className="text-xs text-text-muted">
-                      {message.usage.input_tokens + message.usage.output_tokens} tokens
-                    </span>
-                  )}
-                  <button
-                    onClick={() =>
-                      copyToClipboard(message.content || message.toolOutput || '', message.uuid)
-                    }
-                    className="p-1 text-text-muted hover:text-text-primary rounded"
-                  >
-                    {copiedId === message.uuid ? (
-                      <Check className="w-3 h-3 text-accent-green" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
-                    )}
-                  </button>
-                </div>
-              </div>
+            return (
+              <TerminalMessage
+                key={group.uuid}
+                message={group}
+                isUser={isUser}
+                formatTime={formatTime}
+                copiedId={copiedId}
+                copyToClipboard={copyToClipboard}
+              />
+            )
+          })}
 
-              {/* Message Content */}
-              <div className="px-4 py-3">
-                {isToolResult ? (
-                  <div>
-                    {message.toolInput && (
-                      <div className="mb-2">
-                        <button
-                          onClick={() => toggleToolExpanded(message.uuid)}
-                          className="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary"
-                        >
-                          {isToolExpanded ? (
-                            <ChevronUp className="w-3 h-3" />
-                          ) : (
-                            <ChevronDown className="w-3 h-3" />
-                          )}
-                          Input
-                        </button>
-                        {isToolExpanded && (
-                          <pre className="mt-1 p-2 bg-background rounded text-xs overflow-x-auto">
-                            {JSON.stringify(message.toolInput, null, 2)}
-                          </pre>
-                        )}
-                      </div>
-                    )}
-                    <div className="text-sm text-text-primary">
-                      <pre
-                        className={cn(
-                          'whitespace-pre-wrap font-mono text-xs overflow-x-auto',
-                          !isMessageExpanded && needsTruncation && 'max-h-48'
-                        )}
-                      >
-                        {isMessageExpanded || !needsTruncation
-                          ? message.toolOutput
-                          : message.toolOutput?.slice(0, 1000) +
-                            ((message.toolOutput?.length || 0) > 1000 ? '...' : '')}
-                      </pre>
-                      {needsTruncation && (
-                        <button
-                          onClick={() => toggleMessageExpanded(message.uuid)}
-                          className="mt-2 text-xs text-accent-purple hover:underline"
-                        >
-                          {isMessageExpanded
-                            ? '▲ Show less'
-                            : `▼ Show full output (${(message.toolOutput?.length || 0).toLocaleString()} chars)`}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="prose prose-invert prose-sm max-w-none">
-                    <p
-                      className={cn(
-                        'text-sm text-text-primary whitespace-pre-wrap',
-                        !isMessageExpanded && needsTruncation && 'max-h-96 overflow-hidden'
-                      )}
-                    >
-                      {isMessageExpanded || !needsTruncation
-                        ? message.content
-                        : message.content?.slice(0, 2000) +
-                          ((message.content?.length || 0) > 2000 ? '...' : '')}
-                    </p>
-                    {needsTruncation && (
-                      <button
-                        onClick={() => toggleMessageExpanded(message.uuid)}
-                        className="mt-2 text-xs text-accent-purple hover:underline"
-                      >
-                        {isMessageExpanded
-                          ? '▲ Show less'
-                          : `▼ Show full message (${(message.content?.length || 0).toLocaleString()} chars)`}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+          {filteredGroups.length === 0 && !error && (
+            <div className="text-center py-12">
+              <MessageSquare className="w-12 h-12 text-text-muted mx-auto mb-4" />
+              <p className="text-text-muted">
+                {searchQuery ? 'No messages match your search' : 'No messages in this session'}
+              </p>
             </div>
-          )
-        })}
+          )}
 
-        {filteredMessages.length === 0 && !error && (
-          <div className="text-center py-12">
-            <MessageSquare className="w-12 h-12 text-text-muted mx-auto mb-4" />
-            <p className="text-text-muted">
-              {searchQuery ? 'No messages match your search' : 'No messages in this session'}
-            </p>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} />
+        </div>
       </div>
     </div>
   )
 }
+
+// Terminal-style message component
+interface TerminalMessageProps {
+  message: SessionMessage
+  isUser: boolean
+  formatTime: (timestamp: number) => string
+  copiedId: string | null
+  copyToClipboard: (text: string, id: string) => void
+}
+
+const TerminalMessage = memo(function TerminalMessage({
+  message,
+  isUser,
+  formatTime,
+  copiedId,
+  copyToClipboard,
+}: TerminalMessageProps) {
+  const [expanded, setExpanded] = useState(true)
+  const content = message.content || ''
+  const needsTruncation = content.length > 2000
+
+  // Parse code blocks
+  const renderContent = (text: string) => {
+    const parts = text.split(/(```[\s\S]*?```)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith('```')) {
+        const match = part.match(/```(\w+)?\n?([\s\S]*?)```/)
+        if (match) {
+          const [, lang, code] = match
+          return (
+            <div
+              key={i}
+              className="my-2 rounded-lg overflow-hidden bg-surface border border-border"
+            >
+              <div className="flex items-center justify-between px-3 py-1.5 bg-surface-hover border-b border-border">
+                <div className="flex items-center gap-2 text-xs text-text-muted">
+                  <Code className="w-3 h-3" />
+                  {lang || 'code'}
+                </div>
+                <button
+                  onClick={() => navigator.clipboard.writeText(code.trim())}
+                  className="text-xs text-text-muted hover:text-text-primary"
+                >
+                  <Copy className="w-3 h-3" />
+                </button>
+              </div>
+              <pre className="p-3 text-xs overflow-x-auto">
+                <code className="text-accent-green">{code.trim()}</code>
+              </pre>
+            </div>
+          )
+        }
+      }
+      return (
+        <span key={i} className="whitespace-pre-wrap">
+          {part}
+        </span>
+      )
+    })
+  }
+
+  return (
+    <div className={cn('py-2 border-b border-border/30', isUser && 'bg-surface/30')}>
+      {/* Header line */}
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-text-muted text-xs">[{formatTime(message.timestamp)}]</span>
+        {isUser ? (
+          <>
+            <User className="w-3.5 h-3.5 text-accent-blue" />
+            <span className="text-accent-blue font-semibold">USER</span>
+          </>
+        ) : (
+          <>
+            <Bot className="w-3.5 h-3.5 text-accent-purple" />
+            <span className="text-accent-purple font-semibold">ASSISTANT</span>
+          </>
+        )}
+        {message.usage && (
+          <span className="text-text-muted text-xs ml-auto">
+            {(message.usage.input_tokens || 0) + (message.usage.output_tokens || 0)} tokens
+          </span>
+        )}
+        <button
+          onClick={() => copyToClipboard(content, message.uuid)}
+          className="p-1 text-text-muted hover:text-text-primary rounded"
+        >
+          {copiedId === message.uuid ? (
+            <Check className="w-3 h-3 text-accent-green" />
+          ) : (
+            <Copy className="w-3 h-3" />
+          )}
+        </button>
+      </div>
+
+      {/* Content */}
+      <div
+        className={cn(
+          'pl-4 text-text-primary',
+          !expanded && needsTruncation && 'max-h-48 overflow-hidden'
+        )}
+      >
+        {isUser ? (
+          <span className="text-text-primary">
+            {'> '}
+            {content}
+          </span>
+        ) : (
+          renderContent(expanded || !needsTruncation ? content : content.slice(0, 2000) + '...')
+        )}
+      </div>
+
+      {needsTruncation && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="pl-4 mt-1 text-xs text-accent-purple hover:underline"
+        >
+          {expanded ? '▲ Collapse' : `▼ Expand (${content.length.toLocaleString()} chars)`}
+        </button>
+      )}
+    </div>
+  )
+})
+
+// Tool call group component
+interface ToolCallGroupProps {
+  tools: SessionMessage[]
+  expandedTools: Set<string>
+  toggleToolExpanded: (id: string) => void
+  copiedId: string | null
+  copyToClipboard: (text: string, id: string) => void
+}
+
+const ToolCallGroup = memo(function ToolCallGroup({
+  tools,
+  expandedTools,
+  toggleToolExpanded,
+  copiedId,
+  copyToClipboard,
+}: ToolCallGroupProps) {
+  const [groupExpanded, setGroupExpanded] = useState(false)
+
+  // Categorize tools
+  const reads = tools.filter((t) => t.toolName?.toLowerCase().includes('read'))
+  const edits = tools.filter(
+    (t) => t.toolName?.toLowerCase().includes('edit') || t.toolName?.toLowerCase().includes('write')
+  )
+  const others = tools.filter(
+    (t) =>
+      !t.toolName?.toLowerCase().includes('read') &&
+      !t.toolName?.toLowerCase().includes('edit') &&
+      !t.toolName?.toLowerCase().includes('write')
+  )
+
+  const summary = [
+    reads.length > 0 && `${reads.length} read${reads.length > 1 ? 's' : ''}`,
+    edits.length > 0 && `${edits.length} edit${edits.length > 1 ? 's' : ''}`,
+    others.length > 0 && `${others.length} other`,
+  ]
+    .filter(Boolean)
+    .join(', ')
+
+  return (
+    <div className="py-1 border-l-2 border-accent-green/30 pl-3 my-2">
+      <button
+        onClick={() => setGroupExpanded(!groupExpanded)}
+        className="flex items-center gap-2 text-xs text-text-muted hover:text-text-primary w-full text-left"
+      >
+        {groupExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        <Wrench className="w-3 h-3 text-accent-green" />
+        <span className="text-accent-green font-medium">{tools.length} tool calls</span>
+        <span className="text-text-muted">({summary})</span>
+      </button>
+
+      {groupExpanded && (
+        <div className="mt-2 space-y-2 pl-4">
+          {tools.map((tool) => {
+            const isExpanded = expandedTools.has(tool.uuid)
+            return (
+              <div key={tool.uuid} className="text-xs">
+                <button
+                  onClick={() => toggleToolExpanded(tool.uuid)}
+                  className="flex items-center gap-2 text-text-muted hover:text-text-primary"
+                >
+                  {isExpanded ? (
+                    <ChevronDown className="w-3 h-3" />
+                  ) : (
+                    <ChevronRight className="w-3 h-3" />
+                  )}
+                  <span className="font-mono text-accent-yellow">{tool.toolName}</span>
+                </button>
+                {isExpanded && (
+                  <div className="mt-1 p-2 bg-surface rounded border border-border overflow-x-auto">
+                    {tool.toolInput && (
+                      <div className="mb-2">
+                        <span className="text-text-muted">Input:</span>
+                        <pre className="text-text-primary">
+                          {JSON.stringify(tool.toolInput, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-text-muted">Output:</span>
+                        <pre className="text-text-primary whitespace-pre-wrap max-h-48 overflow-auto">
+                          {tool.toolOutput?.slice(0, 2000)}
+                          {(tool.toolOutput?.length || 0) > 2000 && '...'}
+                        </pre>
+                      </div>
+                      <button
+                        onClick={() => copyToClipboard(tool.toolOutput || '', tool.uuid)}
+                        className="p-1 text-text-muted hover:text-text-primary ml-2 flex-shrink-0"
+                      >
+                        {copiedId === tool.uuid ? (
+                          <Check className="w-3 h-3 text-accent-green" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+})
 
 // Standalone viewer wrapper
 export function TranscriptViewerPage() {
