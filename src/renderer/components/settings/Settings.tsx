@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/react'
 import { useSettingsStore, type AppSettings } from '@/stores/settings'
 import { useBudgetStore } from '@/stores/budget'
+import { useToast } from '@/components/common/Toast'
 import type { BudgetSettings as BudgetSettingsType } from '@shared/types'
 
 type SettingsSection =
@@ -37,6 +38,7 @@ type SettingsSection =
 export function Settings() {
   const { settings, loading, saving, loaded, loadSettings, saveSettings, setSettings } =
     useSettingsStore()
+  const toast = useToast()
   const [activeSection, setActiveSection] = useState<SettingsSection>('appearance')
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings)
   const [hasChanges, setHasChanges] = useState(false)
@@ -70,7 +72,10 @@ export function Settings() {
     const success = await saveSettings()
     if (success) {
       setSaveSuccess(true)
+      toast.success('Settings saved successfully')
       setTimeout(() => setSaveSuccess(false), 2000)
+    } else {
+      toast.error('Failed to save settings')
     }
   }
 

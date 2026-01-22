@@ -33,6 +33,7 @@ import { trpc } from '@/lib/trpc/react'
 import { useMCPStore } from '@/stores/mcp'
 import type { MCPServer } from '@shared/types'
 import { CodeEditor } from '@/components/common/CodeEditor'
+import { useToast } from '@/components/common/Toast'
 
 export function MCPManager() {
   const {
@@ -45,6 +46,7 @@ export function MCPManager() {
     getDisabledCount,
   } = useMCPStore()
 
+  const toast = useToast()
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'servers' | 'config'>('servers')
   const [configContent, setConfigContent] = useState('')
@@ -61,18 +63,30 @@ export function MCPManager() {
 
   // tRPC mutations
   const toggleMutation = trpc.mcp.toggle.useMutation({
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       listQuery.refetch()
+      toast.success(`Server ${variables.enabled ? 'enabled' : 'disabled'}`)
+    },
+    onError: (error) => {
+      toast.error(`Failed to toggle server: ${error.message}`)
     },
   })
   const reloadMutation = trpc.mcp.reload.useMutation({
     onSuccess: () => {
       listQuery.refetch()
+      toast.success('MCP configuration reloaded')
+    },
+    onError: (error) => {
+      toast.error(`Failed to reload: ${error.message}`)
     },
   })
   const saveConfigMutation = trpc.mcp.saveConfig.useMutation({
     onSuccess: () => {
       listQuery.refetch()
+      toast.success('Configuration saved')
+    },
+    onError: (error) => {
+      toast.error(`Failed to save config: ${error.message}`)
     },
   })
   const openPathMutation = trpc.system.openPath.useMutation()
