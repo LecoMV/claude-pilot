@@ -101,11 +101,7 @@ export class EmbeddingManager extends EventEmitter {
       pgvectorUrl: config.pgvectorUrl,
       qdrantUrl: config.qdrantUrl,
     })
-    this.sessionWorker = createSessionEmbeddingWorker(
-      this.pipeline,
-      this.chunker,
-      config.autoEmbed
-    )
+    this.sessionWorker = createSessionEmbeddingWorker(this.pipeline, this.chunker, config.autoEmbed)
 
     // Wire up events
     this.setupEventHandlers()
@@ -168,6 +164,9 @@ export class EmbeddingManager extends EventEmitter {
 
     // Stop auto-embedding first
     await this.stopAutoEmbedding()
+
+    // Sync session positions to pipeline before shutdown (for checkpointing)
+    this.syncSessionPositionsToPipeline()
 
     // Shutdown components
     await Promise.all([
@@ -338,6 +337,10 @@ export class EmbeddingManager extends EventEmitter {
   getStatus(): EmbeddingManagerStatus {
     const ollamaStatus = this.ollamaService.getStatus()
     const vectorHealth = this.vectorStore.getHealth()
+
+    // Keep pipeline's connection status in sync with vector store
+    this.pipeline.updateConnectionStatus(vectorHealth.pgvector, vectorHealth.qdrant)
+
     const pipelineStatus = this.pipeline.getStatus()
     const workerStatus = this.sessionWorker.getStatus()
 
@@ -486,6 +489,24 @@ export class EmbeddingManager extends EventEmitter {
   }
 
   // ============================================================================
+  // INTERNAL HELPERS
+  // ============================================================================
+
+  /**
+   * Sync session positions from worker to pipeline for checkpointing
+   */
+  private syncSessionPositionsToPipeline(): void {
+    const positions = this.sessionWorker.getPositions()
+    const positionsMap: Record<string, number> = {}
+
+    for (const pos of positions) {
+      positionsMap[pos.sessionId] = pos.byteOffset
+    }
+
+    this.pipeline.updateSessionPositions(positionsMap)
+  }
+
+  // ============================================================================
   // EVENT HANDLING
   // ============================================================================
 
@@ -521,18 +542,14 @@ export class EmbeddingManager extends EventEmitter {
 }
 
 // Export factory function
-export function createEmbeddingManager(
-  config?: EmbeddingManagerConfig
-): EmbeddingManager {
+export function createEmbeddingManager(config?: EmbeddingManagerConfig): EmbeddingManager {
   return new EmbeddingManager(config)
 }
 
 // Export singleton instance for app-wide use
 let embeddingManagerInstance: EmbeddingManager | null = null
 
-export function getEmbeddingManager(
-  config?: EmbeddingManagerConfig
-): EmbeddingManager {
+export function getEmbeddingManager(config?: EmbeddingManagerConfig): EmbeddingManager {
   if (!embeddingManagerInstance) {
     embeddingManagerInstance = createEmbeddingManager(config)
   }

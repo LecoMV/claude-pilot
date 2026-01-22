@@ -62,6 +62,13 @@ export class EmbeddingPipeline extends EventEmitter {
   private alertCooldowns: Map<AlertType, number> = new Map()
   private readonly ALERT_COOLDOWN_MS = 300000 // 5 minutes
 
+  // External connection status (updated by EmbeddingManager)
+  private pgvectorConnected = false
+  private qdrantConnected = false
+
+  // Session positions (updated by EmbeddingManager from SessionEmbeddingWorker)
+  private sessionPositions: Record<string, number> = {}
+
   constructor(
     ollamaService: OllamaEmbeddingService,
     cache: EmbeddingCache,
@@ -83,12 +90,7 @@ export class EmbeddingPipeline extends EventEmitter {
     })
 
     // Checkpoint path
-    this.checkpointPath = join(
-      homedir(),
-      '.config',
-      'claude-pilot',
-      'embedding-checkpoint.json'
-    )
+    this.checkpointPath = join(homedir(), '.config', 'claude-pilot', 'embedding-checkpoint.json')
 
     // Monitor queue for backpressure
     this.queue.on('add', () => this.checkBackpressure())
@@ -232,7 +234,12 @@ export class EmbeddingPipeline extends EventEmitter {
 
       // Cache the result
       const config = this.ollamaService.getConfig()
-      this.cache.set(task.text, config.model, result.embedding, this.ollamaService.getModelDigest() || undefined)
+      this.cache.set(
+        task.text,
+        config.model,
+        result.embedding,
+        this.ollamaService.getModelDigest() || undefined
+      )
 
       // Record success
       const latency = Date.now() - startTime
@@ -378,11 +385,29 @@ export class EmbeddingPipeline extends EventEmitter {
       queueDepth: this.queue.size,
       pendingOperations: this.queue.pending,
       ollama: ollamaStatus,
-      pgvectorConnected: true, // TODO: Actual check
-      qdrantConnected: true, // TODO: Actual check
+      pgvectorConnected: this.pgvectorConnected,
+      qdrantConnected: this.qdrantConnected,
       lastCheckpoint: this.lastCheckpoint,
       circuitBreakerOpen: this.circuitBreakerOpen,
     }
+  }
+
+  /**
+   * Update connection status from external source (e.g., EmbeddingManager)
+   * This allows the pipeline to report accurate connection status without
+   * taking a dependency on VectorStore directly.
+   */
+  updateConnectionStatus(pgvector: boolean, qdrant: boolean): void {
+    this.pgvectorConnected = pgvector
+    this.qdrantConnected = qdrant
+  }
+
+  /**
+   * Update session positions from external source (e.g., SessionEmbeddingWorker)
+   * Used for checkpointing to record session file processing progress.
+   */
+  updateSessionPositions(positions: Record<string, number>): void {
+    this.sessionPositions = positions
   }
 
   /**
@@ -436,7 +461,7 @@ export class EmbeddingPipeline extends EventEmitter {
       const checkpoint: Checkpoint = {
         version: 1,
         timestamp: Date.now(),
-        sessionPositions: {}, // TODO: Get from SessionEmbeddingWorker
+        sessionPositions: this.sessionPositions,
         queueState: [], // Don't persist queue state for simplicity
         lastProcessedId: Array.from(this.processedIds).pop() || '',
         metrics: this.getMetrics(),
@@ -542,7 +567,11 @@ export class EmbeddingPipeline extends EventEmitter {
     // Check error rate
     const metrics = this.getMetrics()
     if (metrics.errorRate > 0.05) {
-      this.sendAlert('HIGH_ERROR_RATE', `Error rate: ${(metrics.errorRate * 100).toFixed(1)}%`, 'error')
+      this.sendAlert(
+        'HIGH_ERROR_RATE',
+        `Error rate: ${(metrics.errorRate * 100).toFixed(1)}%`,
+        'error'
+      )
     }
   }
 

@@ -37,6 +37,13 @@ vi.mock('fs', () => ({
   mkdirSync: vi.fn(),
   readdirSync: vi.fn(() => []),
   unlinkSync: vi.fn(),
+  realpathSync: vi.fn((p: string) => p), // Required for path-security.ts validation
+}))
+
+// Mock fs/promises for async path validation
+vi.mock('fs/promises', () => ({
+  realpath: vi.fn((p: string) => Promise.resolve(p)),
+  access: vi.fn(() => Promise.resolve()),
 }))
 
 vi.mock('child_process', () => ({
@@ -64,6 +71,10 @@ import { writeFileSync, unlinkSync } from 'fs'
 import { spawn } from 'child_process'
 import type { PlanCreateParams } from '../../../shared/types'
 
+// Helper to flush pending promises (for async executeShellStep)
+// vi.runAllTimersAsync() advances fake timers and flushes microtasks
+const flushPromises = () => vi.runAllTimersAsync()
+
 // We need to import planService fresh for each test
 // Since it's a singleton, we'll work with the exported instance
 import { planService } from '../plans'
@@ -76,10 +87,11 @@ const createMockWindow = () => ({
 })
 
 // Helper to create plan params
+// Use /tmp path which is always allowed by path-security.ts
 const createPlanParams = (overrides: Partial<PlanCreateParams> = {}): PlanCreateParams => ({
   title: 'Test Plan',
   description: 'Test Description',
-  projectPath: '/home/testuser/project',
+  projectPath: '/tmp/testproject',
   steps: [
     { name: 'Step 1', description: 'First step', type: 'shell', command: 'echo hello' },
     { name: 'Step 2', description: 'Second step', type: 'shell', command: 'echo world' },
@@ -145,12 +157,13 @@ describe('PlanService', () => {
     })
 
     it('should filter plans by project path', () => {
-      const plan = createTrackedPlan({ projectPath: '/specific/path' })
+      // Use /tmp paths which are always allowed by path-security.ts
+      const plan = createTrackedPlan({ projectPath: '/tmp/specific-project' })
 
-      const filtered = planService.list('/specific/path')
+      const filtered = planService.list('/tmp/specific-project')
       expect(filtered.some((p) => p.id === plan.id)).toBe(true)
 
-      const otherFiltered = planService.list('/other/path')
+      const otherFiltered = planService.list('/tmp/other-project')
       expect(otherFiltered.some((p) => p.id === plan.id)).toBe(false)
     })
 
@@ -366,16 +379,17 @@ describe('PlanService', () => {
       expect(updated?.status).toBe('completed')
     })
 
-    it('should spawn shell process for shell steps', () => {
+    it('should spawn shell process for shell steps', async () => {
       const plan = createTrackedPlan()
 
       planService.execute(plan.id)
+      await flushPromises() // Wait for async executeShellStep
 
       expect(spawn).toHaveBeenCalledWith(
-        'bash',
-        ['-c', 'echo hello'],
+        'echo',
+        ['hello'],
         expect.objectContaining({
-          cwd: '/home/testuser/project',
+          cwd: '/tmp/testproject',
         })
       )
     })
@@ -463,9 +477,10 @@ describe('PlanService', () => {
       expect(updated?.status).toBe('paused')
     })
 
-    it('should kill running process', () => {
+    it('should kill running process', async () => {
       const plan = createTrackedPlan()
       planService.execute(plan.id)
+      await flushPromises() // Wait for async executeShellStep
 
       planService.pause(plan.id)
 
@@ -543,9 +558,10 @@ describe('PlanService', () => {
       expect(updated?.status).toBe('failed')
     })
 
-    it('should kill running processes', () => {
+    it('should kill running processes', async () => {
       const plan = createTrackedPlan()
       planService.execute(plan.id)
+      await flushPromises() // Wait for async executeShellStep
 
       planService.cancel(plan.id)
 
@@ -620,9 +636,10 @@ describe('PlanService', () => {
   // SHELL EXECUTION TESTS
   // ===========================================================================
   describe('shell execution', () => {
-    it('should capture stdout', () => {
+    it('should capture stdout', async () => {
       const plan = createTrackedPlan()
       planService.execute(plan.id)
+      await flushPromises() // Wait for async executeShellStep
 
       mockChildProcess.stdout.emit('data', Buffer.from('output line 1\n'))
       mockChildProcess.stdout.emit('data', Buffer.from('output line 2\n'))
@@ -632,9 +649,10 @@ describe('PlanService', () => {
       expect(updated?.steps[0].output).toContain('output line 2')
     })
 
-    it('should handle process errors', () => {
+    it('should handle process errors', async () => {
       const plan = createTrackedPlan()
       planService.execute(plan.id)
+      await flushPromises() // Wait for async executeShellStep
 
       const errorHandler = (mockChildProcess as any)._errorHandler
       if (errorHandler) {
@@ -645,9 +663,10 @@ describe('PlanService', () => {
       expect(updated?.status).toBe('failed')
     })
 
-    it('should handle non-zero exit code', () => {
+    it('should handle non-zero exit code', async () => {
       const plan = createTrackedPlan()
       planService.execute(plan.id)
+      await flushPromises() // Wait for async executeShellStep
 
       mockChildProcess.stderr.emit('data', Buffer.from('error output'))
 
@@ -661,11 +680,12 @@ describe('PlanService', () => {
       expect(updated?.status).toBe('failed')
     })
 
-    it('should complete step on exit code 0', () => {
+    it('should complete step on exit code 0', async () => {
       const plan = createTrackedPlan({
         steps: [{ name: 'Step 1', description: 'First', type: 'shell', command: 'echo hello' }],
       })
       planService.execute(plan.id)
+      await flushPromises() // Wait for async executeShellStep
 
       mockChildProcess.stdout.emit('data', Buffer.from('hello\n'))
 

@@ -189,9 +189,7 @@ class InferenceRouter extends EventEmitter {
     }
 
     // Check custom routing rules
-    for (const rule of this.config.routingRules.sort(
-      (a, b) => b.priority - a.priority
-    )) {
+    for (const rule of this.config.routingRules.sort((a, b) => b.priority - a.priority)) {
       if (this.matchesRule(request, rule)) {
         return {
           provider: rule.provider,
@@ -228,9 +226,7 @@ class InferenceRouter extends EventEmitter {
       return {
         provider: 'claude',
         model: request.model || 'claude-sonnet-4-20250514',
-        reason: this.ollamaAvailable
-          ? 'request_too_large_for_local'
-          : 'local_unavailable',
+        reason: this.ollamaAvailable ? 'request_too_large_for_local' : 'local_unavailable',
       }
     }
 
@@ -298,9 +294,7 @@ class InferenceRouter extends EventEmitter {
     switch (provider) {
       case 'ollama':
         return (
-          this.ollamaModels.find((m) =>
-            this.config.localModels.includes(m.split(':')[0])
-          ) ||
+          this.ollamaModels.find((m) => this.config.localModels.includes(m.split(':')[0])) ||
           this.ollamaModels[0] ||
           'llama3.2'
         )
@@ -316,7 +310,7 @@ class InferenceRouter extends EventEmitter {
    */
   async infer(request: InferenceRequest): Promise<InferenceResponse> {
     this.stats.totalRequests++
-    _startTime = Date.now()
+    const _startTime = Date.now() // Track overall inference time (for future metrics)
 
     // Select provider
     const selection = this.selectProvider(request)
@@ -364,11 +358,8 @@ class InferenceRouter extends EventEmitter {
   /**
    * Make inference request to Ollama
    */
-  private async inferOllama(
-    request: InferenceRequest,
-    model: string
-  ): Promise<InferenceResponse> {
-    _startTime = Date.now()
+  private async inferOllama(request: InferenceRequest, model: string): Promise<InferenceResponse> {
+    const startTime = Date.now()
 
     // Convert messages to Ollama format
     const messages = request.messages.map((m) => ({
@@ -436,15 +427,12 @@ class InferenceRouter extends EventEmitter {
   /**
    * Make inference request to Claude API
    */
-  private async inferClaude(
-    request: InferenceRequest,
-    model: string
-  ): Promise<InferenceResponse> {
+  private async inferClaude(request: InferenceRequest, model: string): Promise<InferenceResponse> {
     if (!this.config.claudeApiKey) {
       throw new Error('Claude API key not configured')
     }
 
-    _startTime = Date.now()
+    const startTime = Date.now()
 
     // Convert messages to Claude format
     const messages = request.messages.map((m) => ({
@@ -459,7 +447,11 @@ class InferenceRouter extends EventEmitter {
                     type: 'image' as const,
                     source: {
                       type: 'base64' as const,
-                      media_type: c.mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+                      media_type: c.mimeType as
+                        | 'image/jpeg'
+                        | 'image/png'
+                        | 'image/gif'
+                        | 'image/webp',
                       data: c.data,
                     },
                   }
@@ -528,11 +520,9 @@ class InferenceRouter extends EventEmitter {
    */
   private updateLatency(provider: 'ollama' | 'claude', latencyMs: number): void {
     if (provider === 'ollama') {
-      this.stats.avgOllamaLatency =
-        (this.stats.avgOllamaLatency + latencyMs) / 2
+      this.stats.avgOllamaLatency = (this.stats.avgOllamaLatency + latencyMs) / 2
     } else {
-      this.stats.avgClaudeLatency =
-        (this.stats.avgClaudeLatency + latencyMs) / 2
+      this.stats.avgClaudeLatency = (this.stats.avgClaudeLatency + latencyMs) / 2
     }
   }
 
