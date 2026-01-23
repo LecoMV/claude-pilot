@@ -61,15 +61,16 @@ class InferenceRouter extends EventEmitter {
   async initialize(config?: Partial<RouterConfig>): Promise<void> {
     this.config = { ...DEFAULT_CONFIG, ...config }
 
-    // Try to load Claude API key from pass
+    // Try to load Claude API key from pass (async to avoid blocking main process)
     if (!this.config.claudeApiKey) {
       try {
-        const { execSync } = await import('child_process')
-        const apiKey = execSync('pass show claude/anthropic/api-key', {
-          encoding: 'utf-8',
+        const { spawnAsync } = await import('../../utils/spawn-async')
+        const result = await spawnAsync('pass', ['show', 'claude/anthropic/api-key'], {
           timeout: 5000,
-        }).trim()
-        if (apiKey) {
+          allowNonZeroExit: true,
+        })
+        const apiKey = result.stdout.trim()
+        if (apiKey && result.exitCode === 0) {
           this.config.claudeApiKey = apiKey
         }
       } catch {
